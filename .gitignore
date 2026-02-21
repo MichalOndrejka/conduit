@@ -1,0 +1,40 @@
+# Build output
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# NuGet
+*.nupkg
+*.snupkg
+project.lock.json
+packages/
+nuget.config.local
+
+# Test results
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+
+# Runtime / secrets
+conduit-sources.json
+appsettings.Development.json
+appsettings.Local.json
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# JetBrains Rider
+.idea/
+*.sln.iml
