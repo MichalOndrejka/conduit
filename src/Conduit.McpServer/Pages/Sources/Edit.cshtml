@@ -1,0 +1,122 @@
+@page "{id}"
+@model Conduit.McpServer.Pages.Sources.EditModel
+@using Conduit.Rag.Models
+@{
+    ViewData["Title"] = "Edit Source";
+}
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a asp-page="/Index">Sources</a></li>
+        <li class="breadcrumb-item active">Edit — @Model.Source.Name</li>
+    </ol>
+</nav>
+
+<h2 class="h4 mb-4">Edit: @Model.TypeLabel</h2>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <form method="post">
+            <input type="hidden" asp-for="Source.Type" />
+            <input type="hidden" asp-for="Source.Id" />
+
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger" role="alert"></div>
+
+            <div class="mb-3">
+                <label asp-for="Source.Name" class="form-label fw-medium">Name <span class="text-danger">*</span></label>
+                <input asp-for="Source.Name" class="form-control" />
+                <span asp-validation-for="Source.Name" class="text-danger small"></span>
+            </div>
+
+            <div class="mb-4">
+                <div class="form-check">
+                    <input asp-for="Source.Enabled" class="form-check-input" type="checkbox" />
+                    <label asp-for="Source.Enabled" class="form-check-label">Enabled</label>
+                </div>
+            </div>
+
+            <hr />
+
+            @if (Model.Source.Type == SourceTypes.ManualDocument)
+            {
+                <div class="mb-3">
+                    <label class="form-label fw-medium">Title</label>
+                    <input name="ConfigTitle" value="@Model.GetConfig(ConfigKeys.Title)" class="form-control" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-medium">Content <span class="text-danger">*</span></label>
+                    <textarea name="ConfigContent" rows="12" class="form-control font-monospace">@Model.GetConfig(ConfigKeys.Content)</textarea>
+                </div>
+            }
+
+            @if (Model.Source.Type != SourceTypes.ManualDocument)
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-medium">Organization <span class="text-danger">*</span></label>
+                        <input name="ConfigOrganization" value="@Model.GetConfig(ConfigKeys.Organization)" class="form-control" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-medium">Project <span class="text-danger">*</span></label>
+                        <input name="ConfigProject" value="@Model.GetConfig(ConfigKeys.Project)" class="form-control" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-medium">Personal Access Token <span class="text-danger">*</span></label>
+                        <input name="ConfigPat" type="password" value="@Model.GetConfig(ConfigKeys.Pat)" class="form-control" />
+                    </div>
+                </div>
+            }
+
+            @if (Model.Source.Type == SourceTypes.AdoWorkItemQuery
+              || Model.Source.Type == SourceTypes.AdoRequirements
+              || Model.Source.Type == SourceTypes.AdoTestCase)
+            {
+                <div class="mb-3">
+                    <label class="form-label fw-medium">WIQL Query <span class="text-danger">*</span></label>
+                    <textarea name="ConfigQuery" rows="4" class="form-control font-monospace">@Model.GetConfig(ConfigKeys.Query)</textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-medium">Fields <small class="text-muted">(comma-separated)</small></label>
+                    <input name="ConfigFields" value="@Model.GetConfig(ConfigKeys.Fields)" class="form-control font-monospace" />
+                </div>
+            }
+
+            @if (Model.Source.Type == SourceTypes.AdoCodeRepo)
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-medium">Repository <span class="text-danger">*</span></label>
+                        <input name="ConfigRepository" value="@Model.GetConfig(ConfigKeys.Repository)" class="form-control" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-medium">Branch</label>
+                        <input name="ConfigBranch" value="@Model.GetConfig(ConfigKeys.Branch, "main")" class="form-control" />
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-medium">Glob Patterns <small class="text-muted">(comma-separated)</small></label>
+                    <input name="ConfigGlobPatterns" value="@Model.GetConfig(ConfigKeys.GlobPatterns)" class="form-control font-monospace" />
+                </div>
+            }
+
+            @if (Model.Source.Type == SourceTypes.AdoPipelineBuild)
+            {
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label fw-medium">Pipeline ID <span class="text-danger">*</span></label>
+                        <input name="ConfigPipelineId" value="@Model.GetConfig(ConfigKeys.PipelineId)" class="form-control" type="number" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label fw-medium">Number of Recent Builds</label>
+                        <input name="ConfigLastNBuilds" value="@Model.GetConfig(ConfigKeys.LastNBuilds, "5")" class="form-control" type="number" />
+                    </div>
+                </div>
+            }
+
+            <div class="d-flex gap-2 mt-4">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <a asp-page="/Index" class="btn btn-outline-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>

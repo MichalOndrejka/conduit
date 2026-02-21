@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="../tests/Conduit.McpServer.Tests/Conduit.McpServer.Tests.csproj" />
+  <Project Path="../tests/Conduit.Rag.Tests/Conduit.Rag.Tests.csproj" />
+  <Project Path="Conduit.McpServer/Conduit.McpServer.csproj" />
+  <Project Path="Conduit.Rag/Conduit.Rag.csproj" />
+</Solution>

@@ -1,0 +1,128 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Sources";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Sources</h1>
+        <p class="text-muted mb-0">Configure the data sources that Conduit indexes for RAG search.</p>
+    </div>
+    <a asp-page="/Sources/Create" class="btn btn-primary">+ Add Source</a>
+</div>
+
+@if (!Model.Sources.Any())
+{
+    <div class="card border-0 bg-light text-center py-5">
+        <div class="card-body">
+            <p class="text-muted mb-3">No sources configured yet.</p>
+            <a asp-page="/Sources/Create" class="btn btn-primary">Add your first source</a>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card shadow-sm">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Name</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Sync</th>
+                    <th>Last Synced</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var source in Model.Sources)
+                {
+                    <tr>
+                        <td class="fw-medium">@source.Name</td>
+                        <td><code class="text-secondary">@source.Type</code></td>
+                        <td>
+                            @if (source.Enabled)
+                            {
+                                <span class="badge bg-success">Enabled</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Disabled</span>
+                            }
+                        </td>
+                        <td data-sync-status-cell="@source.Id">
+                            @Html.Raw(SyncBadgeHtml(source.SyncStatus, source.SyncError))
+                        </td>
+                        <td data-sync-time-cell="@source.Id" class="text-muted">
+                            @(source.LastSyncedAt.HasValue
+                                ? source.LastSyncedAt.Value.ToString("yyyy-MM-dd HH:mm")
+                                : "Never")
+                        </td>
+                        <td class="text-end">
+                            <a asp-page="/Sources/Edit" asp-route-id="@source.Id"
+                               class="btn btn-sm btn-outline-secondary me-1">Edit</a>
+                            <a asp-page="/Sources/Delete" asp-route-id="@source.Id"
+                               class="btn btn-sm btn-outline-danger">Delete</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@functions {
+    static string SyncBadgeHtml(string status, string? error) => status switch
+    {
+        "syncing"   => "<span class=\"badge bg-warning text-dark\"><span class=\"spinner-border spinner-border-sm me-1\" role=\"status\"></span>Syncing&hellip;</span>",
+        "completed" => "<span class=\"badge bg-success\">Synced</span>",
+        "failed"    => $"<span class=\"badge bg-danger\" title=\"{System.Web.HttpUtility.HtmlAttributeEncode(error ?? string.Empty)}\">Failed</span>" +
+                       $"<br><small class=\"text-danger\" style=\"font-size:.7rem\">{System.Web.HttpUtility.HtmlEncode(Truncate(error, 60))}</small>",
+        _           => "<span class=\"badge bg-secondary\">Idle</span>"
+    };
+
+    static string Truncate(string? s, int max) =>
+        s is null ? string.Empty : s.Length <= max ? s : s[..max] + "…";
+}
+
+@section Scripts {
+<script>
+    function syncBadge(status, error) {
+        if (status === 'syncing')
+            return '<span class="badge bg-warning text-dark"><span class="spinner-border spinner-border-sm me-1" role="status"></span>Syncing&hellip;</span>';
+        if (status === 'completed')
+            return '<span class="badge bg-success">Synced</span>';
+        if (status === 'failed') {
+            const attr  = (error ?? '').replace(/"/g, '&quot;');
+            const short = (error ?? '').substring(0, 60) + ((error ?? '').length > 60 ? '…' : '');
+            return `<span class="badge bg-danger" title="${attr}">Failed</span><br><small class="text-danger" style="font-size:.7rem">${short}</small>`;
+        }
+        return '<span class="badge bg-secondary">Idle</span>';
+    }
+
+    function pollStatus() {
+        fetch('?handler=Status')
+            .then(r => r.json())
+            .then(data => {
+                let stillSyncing = false;
+                data.forEach(s => {
+                    const badge = document.querySelector(`[data-sync-status-cell="${s.id}"]`);
+                    if (badge) badge.innerHTML = syncBadge(s.syncStatus, s.syncError);
+
+                    const time = document.querySelector(`[data-sync-time-cell="${s.id}"]`);
+                    if (time) time.textContent = s.lastSyncedAt ?? 'Never';
+
+                    if (s.syncStatus === 'syncing') stillSyncing = true;
+                });
+                if (stillSyncing) setTimeout(pollStatus, 2000);
+            })
+            .catch(() => { /* swallow network errors */ });
+    }
+
+    // Start polling if any source is already in syncing state on page load
+    if (@Json.Serialize(Model.Sources.Any(s => s.SyncStatus == "syncing"))) {
+        setTimeout(pollStatus, 2000);
+    }
+</script>
+}

@@ -1,0 +1,13 @@
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.csproj.AssemblyReference.cache
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.AssemblyInfoInputs.cache
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.AssemblyInfo.cs
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.csproj.CoreCompileInputs.cache
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.sourcelink.json
+C:\Users\micha\repos\conduit\src\Conduit.Rag\bin\Debug\net10.0\Conduit.Rag.deps.json
+C:\Users\micha\repos\conduit\src\Conduit.Rag\bin\Debug\net10.0\Conduit.Rag.dll
+C:\Users\micha\repos\conduit\src\Conduit.Rag\bin\Debug\net10.0\Conduit.Rag.pdb
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.dll
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\refint\Conduit.Rag.dll
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\Conduit.Rag.pdb
+C:\Users\micha\repos\conduit\src\Conduit.Rag\obj\Debug\net10.0\ref\Conduit.Rag.dll

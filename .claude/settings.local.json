@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(done)",
+      "WebFetch(domain:github.com)",
+      "Bash(git -C \"C:\\\\Users\\\\micha\\\\repos\\\\conduit\" log --oneline -5)",
+      "WebSearch",
+      "WebFetch(domain:www.nuget.org)",
+      "Bash(dotnet new:*)",
+      "Bash(dotnet sln add:*)",
+      "Bash(dotnet sln:*)",
+      "Bash(where:*)",
+      "Bash(echo:*)",
+      "Bash(tr:*)",
+      "Bash(dotnet:*)"
+    ]
+  }
+}
