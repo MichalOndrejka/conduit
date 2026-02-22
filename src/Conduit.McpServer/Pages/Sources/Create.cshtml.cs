@@ -31,7 +31,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
     }
 
     public async Task<IActionResult> OnPostAsync(
-        string? configTitle, string? configContent,
+        string? configContent,
         string? configOrganization, string? configProject, string? configPat,
         string? configQuery, string? configFields,
         string? configRepository, string? configBranch, string? configGlobPatterns,
@@ -43,7 +43,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
         if (string.IsNullOrWhiteSpace(Source.Name))
             ModelState.AddModelError("Source.Name", "Name is required.");
 
-        BuildConfig(configTitle, configContent, configOrganization, configProject, configPat,
+        BuildConfig(configContent, configOrganization, configProject, configPat,
                     configQuery, configFields, configRepository, configBranch, configGlobPatterns,
                     configPipelineId, configLastNBuilds);
 
@@ -60,7 +60,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
         Source.Config.GetValueOrDefault(key, defaultValue);
 
     private void BuildConfig(
-        string? title, string? content,
+        string? content,
         string? org, string? project, string? pat,
         string? query, string? fields,
         string? repository, string? branch, string? globPatterns,
@@ -72,7 +72,6 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
                 Source.Config[key] = value.Trim();
         }
 
-        Set(ConfigKeys.Title,        title);
         Set(ConfigKeys.Content,      content);
         Set(ConfigKeys.Organization, org);
         Set(ConfigKeys.Project,      project);

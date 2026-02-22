@@ -28,21 +28,10 @@
                 <span asp-validation-for="Source.Name" class="text-danger small"></span>
             </div>
 
-            <div class="mb-4">
-                <div class="form-check">
-                    <input asp-for="Source.Enabled" class="form-check-input" type="checkbox" />
-                    <label asp-for="Source.Enabled" class="form-check-label">Enabled</label>
-                </div>
-            </div>
-
             <hr />
 
             @if (Model.Source.Type == SourceTypes.ManualDocument)
             {
-                <div class="mb-3">
-                    <label class="form-label fw-medium">Title</label>
-                    <input name="ConfigTitle" value="@Model.GetConfig(ConfigKeys.Title)" class="form-control" />
-                </div>
                 <div class="mb-3">
                     <label class="form-label fw-medium">Content <span class="text-danger">*</span></label>
                     <textarea name="ConfigContent" rows="12" class="form-control font-monospace">@Model.GetConfig(ConfigKeys.Content)</textarea>

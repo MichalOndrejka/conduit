@@ -1,10 +1,11 @@
 using Conduit.Rag.Ado;
 using Conduit.Rag.Models;
+using Conduit.Rag.Parsing;
 
 namespace Conduit.Rag.Sources;
 
 /// <summary>Fetches source files from an ADO Git repository matching configured glob patterns.</summary>
-public sealed class AdoCodeRepoSource(SourceDefinition definition, IAdoClient ado) : ISource
+public sealed class AdoCodeRepoSource(SourceDefinition definition, IAdoClient ado, CodeParserRegistry parserRegistry) : ISource
 {
     public string Type           => SourceTypes.AdoCodeRepo;
     public string CollectionName => CollectionNames.AdoCode;
@@ -32,22 +33,65 @@ public sealed class AdoCodeRepoSource(SourceDefinition definition, IAdoClient ad
                 var content = await ado.GetFileContentAsync(org, project, pat, repo, branch, path, ct);
                 if (string.IsNullOrWhiteSpace(content)) continue;
 
-                documents.Add(new SourceDocument(
-                    Id:         $"code-{repo}-{branch}-{path}",
-                    Text:       content,
-                    Tags: new Dictionary<string, string>
+                var ext = Path.GetExtension(path).ToLowerInvariant();
+                // For extension-less files (e.g. Dockerfile), fall back to the filename as the key.
+                var parserKey = string.IsNullOrEmpty(ext)
+                    ? Path.GetFileName(path).ToLowerInvariant()
+                    : ext;
+                var parser = parserRegistry.Resolve(parserKey);
+                var units  = parser?.Parse(content, path) ?? [];
+
+                if (units.Count > 0)
+                {
+                    // Emit one document per parsed code unit
+                    foreach (var unit in units)
                     {
-                        ["source_name"]   = definition.Name,
-                        ["repository"]    = repo,
-                        ["file_ext"]      = Path.GetExtension(path).TrimStart('.').ToLowerInvariant()
-                    },
-                    Properties: new Dictionary<string, string>
-                    {
-                        ["path"]       = path,
-                        ["branch"]     = branch,
-                        ["repository"] = repo
+                        var idSlug = unit.ToIdSlug();
+                        documents.Add(new SourceDocument(
+                            Id:   $"code-{repo}-{branch}-{path}-{idSlug}",
+                            Text: unit.EnrichedText,
+                            Tags: new Dictionary<string, string>
+                            {
+                                ["source_name"] = definition.Name,
+                                ["repository"]  = repo,
+                                ["file_ext"]    = ext.TrimStart('.'),
+                                ["code_kind"]   = unit.Kind.ToString().ToLowerInvariant(),
+                                ["is_public"]   = unit.IsPublic ? "true" : "false",
+                            },
+                            Properties: new Dictionary<string, string>
+                            {
+                                ["path"]           = path,
+                                ["branch"]         = branch,
+                                ["repository"]     = repo,
+                                ["unit_name"]      = unit.Name,
+                                ["unit_kind"]      = unit.Kind.ToString(),
+                                ["unit_namespace"] = unit.Namespace      ?? "",
+                                ["unit_container"] = unit.ContainerName  ?? "",
+                                ["unit_signature"] = unit.Signature      ?? "",
+                            }
+                        ));
                     }
-                ));
+                }
+                else
+                {
+                    // Fallback: whole file as a single document
+                    documents.Add(new SourceDocument(
+                        Id:   $"code-{repo}-{branch}-{path}",
+                        Text: content,
+                        Tags: new Dictionary<string, string>
+                        {
+                            ["source_name"] = definition.Name,
+                            ["repository"]  = repo,
+                            ["file_ext"]    = ext.TrimStart('.'),
+                        },
+                        Properties: new Dictionary<string, string>
+                        {
+                            ["path"]       = path,
+                            ["branch"]     = branch,
+                            ["repository"] = repo,
+                        }
+                    ));
+                }
             }
             catch (Exception ex)
             {

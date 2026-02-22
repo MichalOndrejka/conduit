@@ -1,5 +1,7 @@
 using Conduit.Rag.Ado;
 using Conduit.Rag.Models;
+using Conduit.Rag.Parsing;
+using Conduit.Rag.Parsing.Languages;
 using Conduit.Rag.Services;
 using Conduit.Rag.Sources;
 using Microsoft.Extensions.AI;
@@ -52,6 +54,13 @@ builder.Services.AddSingleton<ISourceConfigStore>(_ => new JsonSourceConfigStore
 builder.Services.AddSingleton<ISyncService, SyncService>();
 builder.Services.AddHttpClient<AdoClient>();
 builder.Services.AddSingleton<IAdoClient>(sp => sp.GetRequiredService<AdoClient>());
+builder.Services.AddSingleton<ICodeParser, CSharpParser>();
+builder.Services.AddSingleton<ICodeParser, TypeScriptParser>();
+builder.Services.AddSingleton<ICodeParser, GoParser>();
+builder.Services.AddSingleton<ICodeParser, PowerShellParser>();
+builder.Services.AddSingleton<ICodeParser, MarkdownParser>();
+builder.Services.AddSingleton<ICodeParser, GenericSectionParser>();
+builder.Services.AddSingleton<CodeParserRegistry>();
 builder.Services.AddSingleton<SourceFactory>();
 
 builder.Services.AddHostedService(sp =>

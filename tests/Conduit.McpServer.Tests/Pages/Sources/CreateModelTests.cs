@@ -61,7 +61,6 @@ public class CreateModelTests
         };
 
         var result = await model.OnPostAsync(
-            configTitle:         "Title",
             configContent:       "Some content",
             configOrganization:  null, configProject:      null, configPat:         null,
             configQuery:         null, configFields:       null,
@@ -85,7 +84,7 @@ public class CreateModelTests
         };
 
         var result = await model.OnPostAsync(
-            configTitle: null, configContent: "content",
+            configContent: "content",
             configOrganization: null, configProject: null, configPat: null,
             configQuery: null, configFields: null,
             configRepository: null, configBranch: null, configGlobPatterns: null,

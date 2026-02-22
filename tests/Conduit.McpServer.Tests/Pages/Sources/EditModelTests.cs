@@ -63,7 +63,7 @@ public class EditModelTests
         model.Source = new SourceDefinition { Id = "x", Name = "Updated", Type = SourceTypes.ManualDocument };
 
         var result = await model.OnPostAsync(
-            configTitle: "T", configContent: "C",
+            configContent: "C",
             configOrganization: null, configProject: null, configPat: null,
             configQuery: null, configFields: null,
             configRepository: null, configBranch: null, configGlobPatterns: null,

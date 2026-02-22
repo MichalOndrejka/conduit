@@ -1,5 +1,6 @@
 using Conduit.Rag.Ado;
 using Conduit.Rag.Models;
+using Conduit.Rag.Parsing;
 using Conduit.Rag.Sources;
 using Moq;
 using NUnit.Framework;
@@ -12,7 +13,9 @@ public class SourceFactoryTests
     private SourceFactory _factory = null!;
 
     [SetUp]
-    public void SetUp() => _factory = new SourceFactory(new Mock<IAdoClient>().Object);
+    public void SetUp() => _factory = new SourceFactory(
+        new Mock<IAdoClient>().Object,
+        new CodeParserRegistry([]));
 
     // ─── Correct type per source type string ─────────────────────
 
