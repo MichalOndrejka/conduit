@@ -69,7 +69,7 @@ public class EditModelTests
             configPat:          null, configToken:        null,
             configApiKeyHeader: null, configApiKeyValue:  null,
             configUsername:     null, configPassword:     null, configDomain:       null,
-            configQuery:        null,
+            configQuery:        null, configFields:       null,
             configRepository:   null, configBranch:       null, configGlobPatterns: null,
             configPipelineId:   null, configLastNBuilds:  null,
             configWikiName:     null, configPathFilter:   null,
