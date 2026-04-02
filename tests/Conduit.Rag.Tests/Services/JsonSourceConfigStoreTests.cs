@@ -117,9 +117,8 @@ public class JsonSourceConfigStoreTests
 
     private static SourceDefinition MakeSource(string id, string name) => new()
     {
-        Id      = id,
-        Name    = name,
-        Type    = SourceTypes.ManualDocument,
-        Enabled = true
+        Id   = id,
+        Name = name,
+        Type = SourceTypes.ManualDocument
     };
 }

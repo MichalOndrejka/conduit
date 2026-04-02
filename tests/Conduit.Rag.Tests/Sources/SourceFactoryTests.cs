@@ -4,6 +4,7 @@ using Conduit.Rag.Parsing;
 using Conduit.Rag.Sources;
 using Moq;
 using NUnit.Framework;
+using System.Net.Http;
 
 namespace Conduit.Rag.Tests.Sources;
 
@@ -15,7 +16,8 @@ public class SourceFactoryTests
     [SetUp]
     public void SetUp() => _factory = new SourceFactory(
         new Mock<IAdoClient>().Object,
-        new CodeParserRegistry([]));
+        new CodeParserRegistry([]),
+        new Mock<IHttpClientFactory>().Object);
 
     // ─── Correct type per source type string ─────────────────────
 
@@ -72,6 +74,24 @@ public class SourceFactoryTests
 
         Assert.That(source, Is.InstanceOf<AdoTestCaseSource>());
         Assert.That(source.CollectionName, Is.EqualTo(CollectionNames.AdoTestCases));
+    }
+
+    [Test]
+    public void Create_AdoWiki_ReturnsAdoWikiSource()
+    {
+        var source = _factory.Create(MakeDef(SourceTypes.AdoWiki));
+
+        Assert.That(source, Is.InstanceOf<AdoWikiSource>());
+        Assert.That(source.CollectionName, Is.EqualTo(CollectionNames.AdoWiki));
+    }
+
+    [Test]
+    public void Create_HttpPage_ReturnsHttpPageSource()
+    {
+        var source = _factory.Create(MakeDef(SourceTypes.HttpPage));
+
+        Assert.That(source, Is.InstanceOf<HttpPageSource>());
+        Assert.That(source.CollectionName, Is.EqualTo(CollectionNames.HttpPages));
     }
 
     [Test]

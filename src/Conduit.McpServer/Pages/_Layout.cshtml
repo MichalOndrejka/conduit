@@ -1,3 +1,4 @@
+@inject Conduit.Rag.Services.QdrantHealthStatus QdrantHealth
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -11,11 +12,28 @@
     <nav class="navbar navbar-dark bg-dark">
         <div class="container">
             <a class="navbar-brand fw-bold" href="/">⚡ Conduit</a>
-            <span class="navbar-text text-secondary small">RAG for Code &amp; ADO</span>
+            <div class="d-flex gap-3 align-items-center">
+                <a class="navbar-text text-secondary small" asp-page="/Settings">Settings</a>
+            </div>
         </div>
     </nav>
 
     <main class="container mt-4 mb-5">
+        @if (!QdrantHealth.IsReady)
+        {
+            var qdrantError = QdrantHealth.Error;
+            <div class="alert alert-danger d-flex align-items-start gap-2 mb-4" role="alert">
+                <span class="fw-bold">Qdrant unavailable.</span>
+                <span>
+                    The vector database could not be reached. Indexing and search will not work until it is running.
+                    @if (!string.IsNullOrEmpty(qdrantError))
+                    {
+                        <br /><code class="small">@qdrantError</code>
+                    }
+                    <a asp-page="/Settings" class="alert-link ms-2">Check connection settings</a>
+                </span>
+            </div>
+        }
         @RenderBody()
     </main>
 

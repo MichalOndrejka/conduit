@@ -61,11 +61,17 @@ public class CreateModelTests
         };
 
         var result = await model.OnPostAsync(
-            configContent:       "Some content",
-            configOrganization:  null, configProject:      null, configPat:         null,
-            configQuery:         null, configFields:       null,
-            configRepository:    null, configBranch:       null, configGlobPatterns: null,
-            configPipelineId:    null, configLastNBuilds:  null);
+            configContent:      "Some content",
+            configFile:         null,
+            configBaseUrl:      null, configAuthType:     null,
+            configPat:          null, configToken:        null,
+            configApiKeyHeader: null, configApiKeyValue:  null,
+            configUsername:     null, configPassword:     null, configDomain:       null,
+            configQuery:        null, configFields:       null,
+            configRepository:   null, configBranch:       null, configGlobPatterns: null,
+            configPipelineId:   null, configLastNBuilds:  null,
+            configWikiName:     null, configPathFilter:   null,
+            configUrl:          null, configTitle:        null, configContentType:  null);
 
         Assert.That(result, Is.InstanceOf<RedirectToPageResult>());
         _store.Verify(s => s.SaveAsync(It.IsAny<SourceDefinition>(), It.IsAny<CancellationToken>()),
@@ -84,11 +90,17 @@ public class CreateModelTests
         };
 
         var result = await model.OnPostAsync(
-            configContent: "content",
-            configOrganization: null, configProject: null, configPat: null,
-            configQuery: null, configFields: null,
-            configRepository: null, configBranch: null, configGlobPatterns: null,
-            configPipelineId: null, configLastNBuilds: null);
+            configContent:      "content",
+            configFile:         null,
+            configBaseUrl:      null, configAuthType:     null,
+            configPat:          null, configToken:        null,
+            configApiKeyHeader: null, configApiKeyValue:  null,
+            configUsername:     null, configPassword:     null, configDomain:       null,
+            configQuery:        null, configFields:       null,
+            configRepository:   null, configBranch:       null, configGlobPatterns: null,
+            configPipelineId:   null, configLastNBuilds:  null,
+            configWikiName:     null, configPathFilter:   null,
+            configUrl:          null, configTitle:        null, configContentType:  null);
 
         Assert.That(result, Is.InstanceOf<PageResult>());
         _store.Verify(s => s.SaveAsync(It.IsAny<SourceDefinition>(), It.IsAny<CancellationToken>()),
@@ -98,10 +110,10 @@ public class CreateModelTests
     // ─── Source type list ────────────────────────────────────────
 
     [Test]
-    public void SourceTypes_ContainsAllSixTypes()
+    public void SourceTypes_ContainsAllEightTypes()
     {
         var model = new CreateModel(_store.Object, _sync.Object);
 
-        Assert.That(model.SourceTypes, Has.Count.EqualTo(6));
+        Assert.That(model.SourceTypes, Has.Count.EqualTo(8));
     }
 }

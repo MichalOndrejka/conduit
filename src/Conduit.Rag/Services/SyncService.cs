@@ -38,7 +38,7 @@ public sealed class SyncService(
     public async Task SyncAllAsync(CancellationToken ct = default)
     {
         var sources = await configStore.GetAllAsync(ct);
-        foreach (var source in sources.Where(s => s.Enabled))
+        foreach (var source in sources)
             await SyncAsync(source.Id, ct);
     }
 }

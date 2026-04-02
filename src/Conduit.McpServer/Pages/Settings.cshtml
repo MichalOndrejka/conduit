@@ -1,0 +1,166 @@
+@page
+@model Conduit.McpServer.Pages.SettingsModel
+@{
+    ViewData["Title"] = "Settings";
+    var providers = new[] {
+        ("openai",           "OpenAI"),
+        ("ollama",           "Ollama (local)"),
+        ("openai-compatible","OpenAI-compatible API")
+    };
+}
+
+<h2 class="h4 mb-4">Settings</h2>
+
+@if (!ViewData.ModelState.IsValid)
+{
+    <div class="alert alert-danger" role="alert">
+        @foreach (var err in ViewData.ModelState.Values.SelectMany(v => v.Errors))
+        {
+            <div>@err.ErrorMessage</div>
+        }
+    </div>
+}
+
+@if (Model.StatusMessage == "saved")
+{
+    <div class="alert alert-success alert-dismissible" role="alert">
+        @if (Model.WasDropped)
+        {
+            <span>
+                Settings saved. All vector collections have been dropped and recreated.
+                <strong>All sources need to be re-indexed.</strong>
+                Restart the application to apply the new embedding provider.
+            </span>
+        }
+        else
+        {
+            <span>Settings saved. Restart the application for changes to take effect.</span>
+        }
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+<form method="post">
+    <!-- Qdrant -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center fw-medium">
+            <span>Qdrant</span>
+            @if (Model.QdrantReady)
+            {
+                <span class="badge bg-success">Connected</span>
+            }
+            else
+            {
+                <span class="badge bg-danger" title="@Model.QdrantError">Unavailable</span>
+            }
+        </div>
+        <div class="card-body">
+            @if (!Model.QdrantReady)
+            {
+                <div class="alert alert-danger py-2 small mb-3">
+                    Cannot reach Qdrant at <strong>@Model.QdrantHost:@Model.QdrantGrpcPort</strong>.
+                    Start Qdrant (e.g. <code>docker run -d -p 6333:6333 -p 6334:6334 qdrant/qdrant</code>),
+                    update the address below if needed, then restart the application.
+                    @if (!string.IsNullOrEmpty(Model.QdrantError))
+                    {
+                        <br /><code>@Model.QdrantError</code>
+                    }
+                </div>
+            }
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label class="form-label fw-medium">Host</label>
+                    <input name="QdrantHost" value="@Model.QdrantHost" class="form-control" placeholder="localhost" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-medium">gRPC Port</label>
+                    <input name="QdrantGrpcPort" value="@Model.QdrantGrpcPort" class="form-control" type="number" />
+                    <div class="form-text">Default: <code>6334</code></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Embedding -->
+    <div class="card shadow-sm mb-4">
+        <div class="card-header fw-medium">Embedding Model</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label fw-medium">Provider</label>
+                <select name="Provider" id="embeddingProvider" class="form-select" onchange="updateEmbeddingFields()">
+                    @foreach (var (value, label) in providers)
+                    {
+                        @Html.Raw($"<option value=\"{value}\"{(Model.Provider == value ? " selected" : "")}>{label}</option>")
+                    }
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-medium">Model</label>
+                <input name="Model" id="embeddingModel" value="@Model.Model" class="form-control font-monospace" oninput="checkEmbeddingChange()" />
+                <div class="form-text">
+                    Examples: <code>text-embedding-3-small</code> (OpenAI), <code>nomic-embed-text</code> (Ollama), <code>text-embedding-ada-002</code> (Azure OpenAI)
+                </div>
+            </div>
+
+            <div id="field-apikey" class="mb-3">
+                <label class="form-label fw-medium">API Key Environment Variable</label>
+                <input name="ApiKeyEnvVar" value="@Model.ApiKeyEnvVar" class="form-control font-monospace" placeholder="OPENAI_API_KEY" />
+                <div class="form-text">Name of the environment variable that holds the API key. Not required for Ollama.</div>
+            </div>
+
+            <div id="field-baseurl" class="mb-3">
+                <label class="form-label fw-medium">Base URL</label>
+                <input name="BaseUrl" id="embeddingBaseUrl" value="@Model.BaseUrl" class="form-control" placeholder="http://localhost:11434" oninput="checkEmbeddingChange()" />
+                <div class="form-text">
+                    Ollama default: <code>http://localhost:11434</code>. For OpenAI-compatible APIs (LM Studio, Azure OpenAI, vLLM) set the base URL here.
+                    Leave blank for the standard OpenAI API.
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label fw-medium">Dimensions</label>
+                <input name="Dimensions" id="embeddingDimensions" value="@Model.Dimensions" class="form-control" type="number" min="1" oninput="checkEmbeddingChange()" />
+                <div class="form-text">
+                    Must match the output dimension of the chosen model.
+                    Common values: <code>1536</code> (text-embedding-3-small), <code>768</code> (nomic-embed-text).
+                </div>
+            </div>
+
+            <div id="embedding-change-warning" class="alert alert-warning py-2 small mb-0" style="display:none">
+                <strong>Saving will immediately drop all vector collections and mark all sources as needing re-index.</strong>
+                Vectors from different models are not compatible, even if the number of dimensions is the same.
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save</button>
+</form>
+
+<p class="text-muted small mt-3">Config file: <code>@Model.ConfigFilePath</code></p>
+
+<script>
+    var savedModel    = @Json.Serialize(Model.Model);
+    var savedDim      = @Model.Dimensions;
+    var savedProvider = @Json.Serialize(Model.Provider);
+    var savedBaseUrl  = @Json.Serialize(Model.BaseUrl);
+
+    function updateEmbeddingFields() {
+        var p = document.getElementById('embeddingProvider').value;
+        document.getElementById('field-apikey').style.display  = (p === 'ollama') ? 'none' : '';
+        document.getElementById('field-baseurl').style.display = (p === 'openai') ? 'none' : '';
+        checkEmbeddingChange();
+    }
+
+    function checkEmbeddingChange() {
+        var modelChanged    = document.getElementById('embeddingModel').value !== savedModel;
+        var dimChanged      = parseInt(document.getElementById('embeddingDimensions').value, 10) !== savedDim;
+        var providerChanged = document.getElementById('embeddingProvider').value !== savedProvider;
+        var baseUrlEl       = document.getElementById('embeddingBaseUrl');
+        var baseUrlChanged  = baseUrlEl ? baseUrlEl.value !== savedBaseUrl : false;
+        document.getElementById('embedding-change-warning').style.display =
+            (modelChanged || dimChanged || providerChanged || baseUrlChanged) ? '' : 'none';
+    }
+
+    updateEmbeddingFields();
+</script>

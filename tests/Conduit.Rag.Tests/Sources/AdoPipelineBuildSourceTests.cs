@@ -19,7 +19,7 @@ public class AdoPipelineBuildSourceTests
 
         // Default: no timeline records
         _ado.Setup(a => a.GetBuildTimelineAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<JsonElement>());
     }
@@ -30,7 +30,7 @@ public class AdoPipelineBuildSourceTests
     public async Task FetchDocumentsAsync_ReturnsOneDocumentPerBuild()
     {
         _ado.Setup(a => a.GetBuildsAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeBuilds(3));
 
@@ -43,7 +43,7 @@ public class AdoPipelineBuildSourceTests
     public async Task FetchDocumentsAsync_DocumentIdContainsBuildId()
     {
         _ado.Setup(a => a.GetBuildsAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeBuilds(1, startId: 100));
 
@@ -56,7 +56,7 @@ public class AdoPipelineBuildSourceTests
     public async Task FetchDocumentsAsync_TagsContainPipelineIdAndResult()
     {
         _ado.Setup(a => a.GetBuildsAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeBuilds(1));
 

@@ -8,4 +8,5 @@ public interface ISourceConfigStore
     Task<SourceDefinition?> GetByIdAsync(string id, CancellationToken ct = default);
     Task SaveAsync(SourceDefinition source, CancellationToken ct = default);
     Task DeleteAsync(string id, CancellationToken ct = default);
+    Task ResetAllSyncStatusAsync(string status, CancellationToken ct = default);
 }

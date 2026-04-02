@@ -21,7 +21,7 @@ public class AdoWorkItemQuerySourceTests
     public async Task FetchDocumentsAsync_ReturnsOneDocumentPerWorkItem()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeWorkItems(3));
@@ -36,7 +36,7 @@ public class AdoWorkItemQuerySourceTests
     public async Task FetchDocumentsAsync_DocumentIdContainsWorkItemId()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeWorkItems(1, startId: 42));
@@ -51,7 +51,7 @@ public class AdoWorkItemQuerySourceTests
     public async Task FetchDocumentsAsync_TagsContainSourceNameAndWorkItemType()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeWorkItems(1));
@@ -67,7 +67,7 @@ public class AdoWorkItemQuerySourceTests
     public async Task FetchDocumentsAsync_EmptyQueryResult_ReturnsEmptyList()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<JsonElement>());

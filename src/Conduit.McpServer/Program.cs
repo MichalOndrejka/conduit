@@ -5,21 +5,25 @@ using Conduit.Rag.Parsing.Languages;
 using Conduit.Rag.Services;
 using Conduit.Rag.Sources;
 using Microsoft.Extensions.AI;
+using OllamaSharp;
 using OpenAI;
 using Qdrant.Client;
+using System.ClientModel;
 
 var builder = WebApplication.CreateBuilder(args);
 var config  = builder.Configuration;
 
 // ── Configuration ────────────────────────────────────────────────────────────
 
-var qdrantHost    = config["QDRANT_HOST"]     ?? config["Qdrant:Host"]     ?? "localhost";
+var qdrantHost     = config["QDRANT_HOST"]     ?? config["Qdrant:Host"]     ?? "localhost";
 var qdrantGrpcPort = int.Parse(config["QDRANT_GRPC_PORT"] ?? config["Qdrant:GrpcPort"] ?? "6334");
-var embeddingDim  = int.Parse(config["Qdrant:EmbeddingDim"] ?? "1536");
 
-var openAiApiKey      = config["OPENAI_API_KEY"] ?? config["OpenAI:ApiKey"]
-    ?? throw new InvalidOperationException("OpenAI API key is required. Set 'OpenAI:ApiKey' in appsettings.json or the OPENAI_API_KEY environment variable.");
-var embeddingModel = config["OpenAI:EmbeddingModel"] ?? "text-embedding-3-small";
+var embeddingProvider = config["Embedding:Provider"] ?? "openai";
+var embeddingModel    = config["Embedding:Model"]    ?? "text-embedding-3-small";
+var embeddingApiKeyEnvVar = config["Embedding:ApiKeyEnvVar"] ?? "OPENAI_API_KEY";
+var embeddingApiKey       = Environment.GetEnvironmentVariable(embeddingApiKeyEnvVar) ?? "";
+var embeddingBaseUrl  = config["Embedding:BaseUrl"]  ?? "";
+var embeddingDim      = int.Parse(config["Embedding:Dimensions"] ?? "1536");
 
 var chunkingOptions = new ChunkingOptions
 {
@@ -32,14 +36,29 @@ var sourcesFilePath = config["SourcesFilePath"] ?? "conduit-sources.json";
 if (!Path.IsPathRooted(sourcesFilePath))
     sourcesFilePath = Path.Combine(builder.Environment.ContentRootPath, sourcesFilePath);
 
+var fingerprintPath = Path.Combine(builder.Environment.ContentRootPath, "conduit-embedding.json");
+
 // ── Core Infrastructure ───────────────────────────────────────────────────────
 
 builder.Services.AddSingleton(_ => new QdrantClient(qdrantHost, qdrantGrpcPort));
+builder.Services.AddSingleton<QdrantHealthStatus>();
+
+var ollamaUri         = Uri.TryCreate(string.IsNullOrEmpty(embeddingBaseUrl) ? "http://localhost:11434" : embeddingBaseUrl, UriKind.Absolute, out var u1) ? u1 : new Uri("http://localhost:11434");
+var compatibleBaseUri = Uri.TryCreate(embeddingBaseUrl, UriKind.Absolute, out var u2) ? u2 : new Uri("http://localhost:11434");
 
 builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(_ =>
-    new OpenAIClient(openAiApiKey)
-        .GetEmbeddingClient(embeddingModel)
-        .AsIEmbeddingGenerator());
+    embeddingProvider switch
+    {
+        "ollama" => (IEmbeddingGenerator<string, Embedding<float>>)new OllamaApiClient(ollamaUri, embeddingModel),
+        "openai-compatible" => new OpenAIClient(
+                new ApiKeyCredential(string.IsNullOrEmpty(embeddingApiKey) ? "placeholder" : embeddingApiKey),
+                new OpenAIClientOptions { Endpoint = compatibleBaseUri })
+            .GetEmbeddingClient(embeddingModel)
+            .AsIEmbeddingGenerator(),
+        _ => new OpenAIClient(new ApiKeyCredential(string.IsNullOrEmpty(embeddingApiKey) ? "placeholder" : embeddingApiKey))
+                .GetEmbeddingClient(embeddingModel)
+                .AsIEmbeddingGenerator()
+    });
 
 // ── Conduit.Rag Services ─────────────────────────────────────────────────────
 
@@ -52,7 +71,7 @@ builder.Services.AddSingleton<IDocumentIndexer, DocumentIndexer>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddSingleton<ISourceConfigStore>(_ => new JsonSourceConfigStore(sourcesFilePath));
 builder.Services.AddSingleton<ISyncService, SyncService>();
-builder.Services.AddHttpClient<AdoClient>();
+builder.Services.AddHttpClient<AdoClient>(); // registers IHttpClientFactory + typed client
 builder.Services.AddSingleton<IAdoClient>(sp => sp.GetRequiredService<AdoClient>());
 builder.Services.AddSingleton<ICodeParser, CSharpParser>();
 builder.Services.AddSingleton<ICodeParser, TypeScriptParser>();
@@ -66,7 +85,10 @@ builder.Services.AddSingleton<SourceFactory>();
 builder.Services.AddHostedService(sp =>
     new QdrantBootstrapper(
         sp.GetRequiredService<QdrantClient>(),
-        embeddingDim));
+        embeddingDim,
+        embeddingModel,
+        fingerprintPath,
+        sp.GetRequiredService<QdrantHealthStatus>()));
 
 // ── MCP Server ───────────────────────────────────────────────────────────────
 

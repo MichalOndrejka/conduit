@@ -29,7 +29,6 @@ else
                 <tr>
                     <th>Name</th>
                     <th>Type</th>
-                    <th>Status</th>
                     <th>Sync</th>
                     <th>Last Synced</th>
                     <th class="text-end">Actions</th>
@@ -41,16 +40,6 @@ else
                     <tr>
                         <td class="fw-medium">@source.Name</td>
                         <td><code class="text-secondary">@source.Type</code></td>
-                        <td>
-                            @if (source.Enabled)
-                            {
-                                <span class="badge bg-success">Enabled</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary">Disabled</span>
-                            }
-                        </td>
                         <td data-sync-status-cell="@source.Id">
                             @Html.Raw(SyncBadgeHtml(source.SyncStatus, source.SyncError))
                         </td>
@@ -60,6 +49,10 @@ else
                                 : "Never")
                         </td>
                         <td class="text-end">
+                            <form method="post" asp-page-handler="Sync" asp-route-id="@source.Id" class="d-inline me-1">
+                                <button type="submit" class="btn btn-sm btn-outline-primary"
+                                        @(source.SyncStatus == "syncing" ? "disabled" : "")>Sync</button>
+                            </form>
                             <a asp-page="/Sources/Edit" asp-route-id="@source.Id"
                                class="btn btn-sm btn-outline-secondary me-1">Edit</a>
                             <a asp-page="/Sources/Delete" asp-route-id="@source.Id"
@@ -75,11 +68,12 @@ else
 @functions {
     static string SyncBadgeHtml(string status, string? error) => status switch
     {
-        "syncing"   => "<span class=\"badge bg-warning text-dark\"><span class=\"spinner-border spinner-border-sm me-1\" role=\"status\"></span>Syncing&hellip;</span>",
-        "completed" => "<span class=\"badge bg-success\">Synced</span>",
-        "failed"    => $"<span class=\"badge bg-danger\" title=\"{System.Web.HttpUtility.HtmlAttributeEncode(error ?? string.Empty)}\">Failed</span>" +
-                       $"<br><small class=\"text-danger\" style=\"font-size:.7rem\">{System.Web.HttpUtility.HtmlEncode(Truncate(error, 60))}</small>",
-        _           => "<span class=\"badge bg-secondary\">Idle</span>"
+        "syncing"       => "<span class=\"badge bg-warning text-dark\"><span class=\"spinner-border spinner-border-sm me-1\" role=\"status\"></span>Syncing&hellip;</span>",
+        "completed"     => "<span class=\"badge bg-success\">Synced</span>",
+        "failed"        => $"<span class=\"badge bg-danger\" title=\"{System.Web.HttpUtility.HtmlAttributeEncode(error ?? string.Empty)}\">Failed</span>" +
+                           $"<br><small class=\"text-danger\" style=\"font-size:.7rem\">{System.Web.HttpUtility.HtmlEncode(Truncate(error, 60))}</small>",
+        "needs-reindex" => "<span class=\"badge bg-warning text-dark\">Re-index needed</span>",
+        _               => "<span class=\"badge bg-secondary\">Idle</span>"
     };
 
     static string Truncate(string? s, int max) =>
@@ -98,6 +92,8 @@ else
             const short = (error ?? '').substring(0, 60) + ((error ?? '').length > 60 ? '…' : '');
             return `<span class="badge bg-danger" title="${attr}">Failed</span><br><small class="text-danger" style="font-size:.7rem">${short}</small>`;
         }
+        if (status === 'needs-reindex')
+            return '<span class="badge bg-warning text-dark">Re-index needed</span>';
         return '<span class="badge bg-secondary">Idle</span>';
     }
 

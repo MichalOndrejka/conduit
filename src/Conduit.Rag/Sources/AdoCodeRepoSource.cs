@@ -12,14 +12,12 @@ public sealed class AdoCodeRepoSource(SourceDefinition definition, IAdoClient ad
 
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var org      = definition.Config[ConfigKeys.Organization];
-        var project  = definition.Config[ConfigKeys.Project];
-        var pat      = definition.Config[ConfigKeys.Pat];
+        var conn     = AdoConnectionConfig.From(definition.Config);
         var repo     = definition.Config[ConfigKeys.Repository];
         var branch   = definition.Config.GetValueOrDefault(ConfigKeys.Branch, "main");
         var patterns = ParsePatterns(definition.Config.GetValueOrDefault(ConfigKeys.GlobPatterns, "**/*.cs"));
 
-        var allPaths = await ado.GetFileTreeAsync(org, project, pat, repo, branch, ct: ct);
+        var allPaths = await ado.GetFileTreeAsync(conn, repo, branch, ct: ct);
         var matchingPaths = allPaths.Where(p => patterns.Any(pattern => GlobMatch(pattern, p))).ToList();
 
         var documents = new List<SourceDocument>(matchingPaths.Count);
@@ -30,7 +28,7 @@ public sealed class AdoCodeRepoSource(SourceDefinition definition, IAdoClient ad
 
             try
             {
-                var content = await ado.GetFileContentAsync(org, project, pat, repo, branch, path, ct);
+                var content = await ado.GetFileContentAsync(conn, repo, branch, path, ct);
                 if (string.IsNullOrWhiteSpace(content)) continue;
 
                 var ext = Path.GetExtension(path).ToLowerInvariant();

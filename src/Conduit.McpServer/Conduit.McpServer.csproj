@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <PackageReference Include="ModelContextProtocol.AspNetCore" Version="0.3.0-preview.3" />
+    <PackageReference Include="PdfPig" Version="0.1.14" />
+    <PackageReference Include="OllamaSharp" Version="5.4.25" />
     <ProjectReference Include="..\Conduit.Rag\Conduit.Rag.csproj" />
   </ItemGroup>
 

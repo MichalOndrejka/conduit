@@ -22,13 +22,13 @@ public class AdoCodeRepoSourceTests
     public async Task FetchDocumentsAsync_OnlyIncludesFilesMatchingGlobPattern()
     {
         _ado.Setup(a => a.GetFileTreeAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(["/src/Foo.cs", "/src/Foo.js", "/README.md"]);
 
         _ado.Setup(a => a.GetFileContentAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), "/src/Foo.cs",
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("class Foo {}");
@@ -45,13 +45,13 @@ public class AdoCodeRepoSourceTests
     public async Task FetchDocumentsAsync_SkipsEmptyFiles()
     {
         _ado.Setup(a => a.GetFileTreeAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(["/src/File.cs"]);
 
         _ado.Setup(a => a.GetFileContentAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(string.Empty);
@@ -66,13 +66,13 @@ public class AdoCodeRepoSourceTests
     public async Task FetchDocumentsAsync_TagsContainRepositoryAndExtension()
     {
         _ado.Setup(a => a.GetFileTreeAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(["/Service.cs"]);
 
         _ado.Setup(a => a.GetFileContentAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync("// C# code");
@@ -227,14 +227,14 @@ public class AdoCodeRepoSourceTests
 
     private void SetupTree(IEnumerable<string> paths)
         => _ado.Setup(a => a.GetFileTreeAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(paths.ToList());
 
     private void SetupContent(string path, string content)
         => _ado.Setup(a => a.GetFileContentAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<string>(), path,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(content);

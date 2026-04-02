@@ -21,7 +21,7 @@ public class AdoTestCaseSourceTests
     public async Task FetchDocumentsAsync_DocumentIdContainsTestCaseId()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeTestCases(1, startId: 99));
@@ -35,7 +35,7 @@ public class AdoTestCaseSourceTests
     public async Task FetchDocumentsAsync_TitleIncludedInText()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeTestCases(1));
@@ -54,7 +54,7 @@ public class AdoTestCaseSourceTests
             stepsXml: "<steps><step><parameterizedString>Click the button</parameterizedString><parameterizedString isformatted='true'>Button is highlighted</parameterizedString></step></steps>");
 
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<JsonElement> { testCase });

@@ -14,14 +14,12 @@ public sealed class AdoTestCaseSource(SourceDefinition definition, IAdoClient ad
 
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var org     = definition.Config[ConfigKeys.Organization];
-        var project = definition.Config[ConfigKeys.Project];
-        var pat     = definition.Config[ConfigKeys.Pat];
-        var query   = definition.Config[ConfigKeys.Query];
-        var fields  = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields,
+        var conn   = AdoConnectionConfig.From(definition.Config);
+        var query  = definition.Config[ConfigKeys.Query];
+        var fields = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields,
             "System.Id,System.Title,System.State,Microsoft.VSTS.TCM.Steps,Microsoft.VSTS.Common.AutomationStatus"));
 
-        var workItems = await ado.RunWorkItemQueryAsync(org, project, pat, query, fields, ct);
+        var workItems = await ado.RunWorkItemQueryAsync(conn, query, fields, ct);
 
         return workItems.Select(wi => ToDocument(wi)).ToList();
     }

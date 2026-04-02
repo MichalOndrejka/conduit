@@ -67,6 +67,26 @@ public sealed class JsonSourceConfigStore(string filePath) : ISourceConfigStore
         }
     }
 
+    public async Task ResetAllSyncStatusAsync(string status, CancellationToken ct = default)
+    {
+        await _lock.WaitAsync(ct);
+        try
+        {
+            var all = await ReadAllAsync();
+            foreach (var source in all)
+            {
+                source.SyncStatus  = status;
+                source.SyncError   = null;
+                source.LastSyncedAt = null;
+            }
+            await WriteAllAsync(all);
+        }
+        finally
+        {
+            _lock.Release();
+        }
+    }
+
     private async Task<List<SourceDefinition>> ReadAllAsync()
     {
         if (!File.Exists(filePath)) return [];

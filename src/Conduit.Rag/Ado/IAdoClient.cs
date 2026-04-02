@@ -5,27 +5,31 @@ namespace Conduit.Rag.Ado;
 public interface IAdoClient
 {
     Task<IReadOnlyList<JsonElement>> RunWorkItemQueryAsync(
-        string organization, string project, string pat,
+        AdoConnectionConfig conn,
         string wiql, IReadOnlyList<string> fields,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<string>> GetFileTreeAsync(
-        string organization, string project, string pat,
+        AdoConnectionConfig conn,
         string repository, string branch, string scopePath = "/",
         CancellationToken ct = default);
 
     Task<string> GetFileContentAsync(
-        string organization, string project, string pat,
+        AdoConnectionConfig conn,
         string repository, string branch, string path,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<JsonElement>> GetBuildsAsync(
-        string organization, string project, string pat,
+        AdoConnectionConfig conn,
         string pipelineId, int lastN,
         CancellationToken ct = default);
 
     Task<IReadOnlyList<JsonElement>> GetBuildTimelineAsync(
-        string organization, string project, string pat,
+        AdoConnectionConfig conn,
         string buildId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<JsonElement>> GetWikisAsync(
+        AdoConnectionConfig conn,
         CancellationToken ct = default);
 }

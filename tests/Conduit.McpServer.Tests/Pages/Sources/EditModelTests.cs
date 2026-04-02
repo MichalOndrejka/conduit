@@ -63,11 +63,17 @@ public class EditModelTests
         model.Source = new SourceDefinition { Id = "x", Name = "Updated", Type = SourceTypes.ManualDocument };
 
         var result = await model.OnPostAsync(
-            configContent: "C",
-            configOrganization: null, configProject: null, configPat: null,
-            configQuery: null, configFields: null,
-            configRepository: null, configBranch: null, configGlobPatterns: null,
-            configPipelineId: null, configLastNBuilds: null);
+            configContent:      "C",
+            configFile:         null,
+            configBaseUrl:      null, configAuthType:     null,
+            configPat:          null, configToken:        null,
+            configApiKeyHeader: null, configApiKeyValue:  null,
+            configUsername:     null, configPassword:     null, configDomain:       null,
+            configQuery:        null, configFields:       null,
+            configRepository:   null, configBranch:       null, configGlobPatterns: null,
+            configPipelineId:   null, configLastNBuilds:  null,
+            configWikiName:     null, configPathFilter:   null,
+            configUrl:          null, configTitle:        null, configContentType:  null);
 
         Assert.That(result, Is.InstanceOf<RedirectToPageResult>());
         _store.Verify(s => s.SaveAsync(It.IsAny<SourceDefinition>(), It.IsAny<CancellationToken>()),

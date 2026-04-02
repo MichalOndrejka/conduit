@@ -21,7 +21,7 @@ public class AdoRequirementsSourceTests
     public async Task FetchDocumentsAsync_DocumentIdContainsRequirementId()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeRequirements(1, startId: 55));
@@ -35,7 +35,7 @@ public class AdoRequirementsSourceTests
     public async Task FetchDocumentsAsync_TagsContainRequirementType()
     {
         _ado.Setup(a => a.RunWorkItemQueryAsync(
-                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<AdoConnectionConfig>(),
                 It.IsAny<string>(), It.IsAny<IReadOnlyList<string>>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(FakeRequirements(1));

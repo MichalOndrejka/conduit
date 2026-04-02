@@ -13,13 +13,11 @@ public sealed class AdoPipelineBuildSource(SourceDefinition definition, IAdoClie
 
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var org        = definition.Config[ConfigKeys.Organization];
-        var project    = definition.Config[ConfigKeys.Project];
-        var pat        = definition.Config[ConfigKeys.Pat];
+        var conn       = AdoConnectionConfig.From(definition.Config);
         var pipelineId = definition.Config[ConfigKeys.PipelineId];
         var lastN      = int.TryParse(definition.Config.GetValueOrDefault(ConfigKeys.LastNBuilds, "5"), out var n) ? n : 5;
 
-        var builds = await ado.GetBuildsAsync(org, project, pat, pipelineId, lastN, ct);
+        var builds = await ado.GetBuildsAsync(conn, pipelineId, lastN, ct);
 
         var documents = new List<SourceDocument>(builds.Count);
 
@@ -47,7 +45,7 @@ public sealed class AdoPipelineBuildSource(SourceDefinition definition, IAdoClie
             text.AppendLine($"Finish: {finishTime}");
 
             // Fetch timeline to get failed task details
-            var timeline = await ado.GetBuildTimelineAsync(org, project, pat, buildId, ct);
+            var timeline = await ado.GetBuildTimelineAsync(conn, buildId, ct);
             var failedRecords = timeline
                 .Where(r => r.TryGetProperty("result", out var res) && res.GetString() == "failed")
                 .ToList();

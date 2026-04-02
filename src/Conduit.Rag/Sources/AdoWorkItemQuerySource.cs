@@ -13,14 +13,12 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
 
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var org     = definition.Config[ConfigKeys.Organization];
-        var project = definition.Config[ConfigKeys.Project];
-        var pat     = definition.Config[ConfigKeys.Pat];
-        var query   = definition.Config[ConfigKeys.Query];
-        var fields  = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields,
+        var conn   = AdoConnectionConfig.From(definition.Config);
+        var query  = definition.Config[ConfigKeys.Query];
+        var fields = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields,
             "System.Id,System.Title,System.Description,System.WorkItemType,System.State"));
 
-        var workItems = await ado.RunWorkItemQueryAsync(org, project, pat, query, fields, ct);
+        var workItems = await ado.RunWorkItemQueryAsync(conn, query, fields, ct);
 
         return workItems.Select(wi => ToDocument(wi, fields)).ToList();
     }
