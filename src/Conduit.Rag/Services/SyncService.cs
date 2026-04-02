@@ -18,7 +18,7 @@ public sealed class SyncService(
 
         var source = sourceFactory.Create(definition);
 
-        IReadOnlyList<Sources.SourceDocument> documents;
+        IReadOnlyList<Models.SourceDocument> documents;
         try
         {
             documents = await source.FetchDocumentsAsync(ct);
