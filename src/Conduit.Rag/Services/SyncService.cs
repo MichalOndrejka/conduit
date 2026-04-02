@@ -16,23 +16,35 @@ public sealed class SyncService(
         definition.SyncError  = null;
         await configStore.SaveAsync(definition, ct);
 
+        var source = sourceFactory.Create(definition);
+
+        IReadOnlyList<Sources.SourceDocument> documents;
         try
         {
-            var source    = sourceFactory.Create(definition);
-            var documents = await source.FetchDocumentsAsync(ct);
-            await indexer.IndexBatchAsync(source.CollectionName, documents, ct);
-
-            definition.LastSyncedAt = DateTime.UtcNow;
-            definition.SyncStatus   = "completed";
-            definition.SyncError    = null;
-            await configStore.SaveAsync(definition, ct);
+            documents = await source.FetchDocumentsAsync(ct);
         }
         catch (Exception ex)
         {
             definition.SyncStatus = "failed";
-            definition.SyncError  = ex.Message;
+            definition.SyncError  = $"[Fetch error] {ex.Message}";
             await configStore.SaveAsync(definition, ct);
+            return;
         }
+
+        try
+        {
+            await indexer.IndexBatchAsync(source.CollectionName, documents, ct);
+            definition.LastSyncedAt = DateTime.UtcNow;
+            definition.SyncStatus   = "completed";
+            definition.SyncError    = null;
+        }
+        catch (Exception ex)
+        {
+            definition.SyncStatus = "failed";
+            definition.SyncError  = $"[Embedding error] {ex.Message}";
+        }
+
+        await configStore.SaveAsync(definition, ct);
     }
 
     public async Task SyncAllAsync(CancellationToken ct = default)

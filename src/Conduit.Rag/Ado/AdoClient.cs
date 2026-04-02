@@ -52,7 +52,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         ApplyAuth(wiqlRequest, conn);
 
         var wiqlResponse = await client.SendAsync(wiqlRequest, ct);
-        wiqlResponse.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(wiqlResponse, $"WIQL query to {wiqlRequest.RequestUri}");
 
         var wiqlDoc = await JsonSerializer.DeserializeAsync<JsonElement>(
             await wiqlResponse.Content.ReadAsStreamAsync(ct), JsonOpts, ct);
@@ -77,7 +77,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
             ApplyAuth(detailRequest, conn);
 
             var detailResponse = await client.SendAsync(detailRequest, ct);
-            detailResponse.EnsureSuccessStatusCode();
+            await EnsureSuccessAsync(detailResponse, $"Work items fetch to {detailRequest.RequestUri}");
 
             var detailDoc = await JsonSerializer.DeserializeAsync<JsonElement>(
                 await detailResponse.Content.ReadAsStreamAsync(ct), JsonOpts, ct);
@@ -104,7 +104,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         ApplyAuth(request, conn);
 
         var response = await GetClient(conn).SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, $"Git file tree from {url}");
 
         var doc = await JsonSerializer.DeserializeAsync<JsonElement>(
             await response.Content.ReadAsStreamAsync(ct), JsonOpts, ct);
@@ -131,7 +131,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/plain"));
 
         var response = await GetClient(conn).SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, $"Git file content from {url}");
 
         return await response.Content.ReadAsStringAsync(ct);
     }
@@ -151,7 +151,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         ApplyAuth(request, conn);
 
         var response = await GetClient(conn).SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, $"Builds fetch from {url}");
 
         var doc = await JsonSerializer.DeserializeAsync<JsonElement>(
             await response.Content.ReadAsStreamAsync(ct), JsonOpts, ct);
@@ -192,7 +192,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         ApplyAuth(request, conn);
 
         var response = await GetClient(conn).SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response, $"Wikis fetch from {url}");
 
         var doc = await JsonSerializer.DeserializeAsync<JsonElement>(
             await response.Content.ReadAsStreamAsync(ct), JsonOpts, ct);
@@ -201,6 +201,14 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response, string context)
+    {
+        if (response.IsSuccessStatusCode) return;
+        var body = await response.Content.ReadAsStringAsync();
+        throw new HttpRequestException(
+            $"{context} failed: {(int)response.StatusCode} {response.ReasonPhrase}\n{body}");
+    }
 
     /// <summary>
     /// Returns the right <see cref="HttpClient"/> for the connection:
