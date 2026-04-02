@@ -65,11 +65,11 @@ public class EditModelTests
         var result = await model.OnPostAsync(
             configContent:      "C",
             configFile:         null,
-            configBaseUrl:      null, configAuthType:     null,
+            configBaseUrl:      null, configAuthType:     null, configApiVersion: null,
             configPat:          null, configToken:        null,
             configApiKeyHeader: null, configApiKeyValue:  null,
             configUsername:     null, configPassword:     null, configDomain:       null,
-            configQuery:        null, configFields:       null,
+            configQuery:        null,
             configRepository:   null, configBranch:       null, configGlobPatterns: null,
             configPipelineId:   null, configLastNBuilds:  null,
             configWikiName:     null, configPathFilter:   null,

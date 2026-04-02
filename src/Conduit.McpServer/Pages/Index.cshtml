@@ -25,7 +25,7 @@ else
 {
     <div class="card shadow-sm">
         <table class="table table-hover mb-0">
-            <thead class="table-light">
+            <thead>
                 <tr>
                     <th>Name</th>
                     <th>Type</th>
@@ -70,14 +70,25 @@ else
     {
         "syncing"       => "<span class=\"badge bg-warning text-dark\"><span class=\"spinner-border spinner-border-sm me-1\" role=\"status\"></span>Syncing&hellip;</span>",
         "completed"     => "<span class=\"badge bg-success\">Synced</span>",
-        "failed"        => $"<span class=\"badge bg-danger\" title=\"{System.Web.HttpUtility.HtmlAttributeEncode(error ?? string.Empty)}\">Failed</span>" +
-                           $"<br><small class=\"text-danger\" style=\"font-size:.7rem\">{System.Web.HttpUtility.HtmlEncode(Truncate(error, 60))}</small>",
+        "failed"        => FailedBadgeHtml(error),
         "needs-reindex" => "<span class=\"badge bg-warning text-dark\">Re-index needed</span>",
         _               => "<span class=\"badge bg-secondary\">Idle</span>"
     };
 
-    static string Truncate(string? s, int max) =>
-        s is null ? string.Empty : s.Length <= max ? s : s[..max] + "…";
+    static string FailedBadgeHtml(string? error)
+    {
+        var id  = $"err-{Guid.NewGuid():N}";
+        var msg = System.Web.HttpUtility.HtmlEncode(error ?? string.Empty);
+        return $"""
+            <span class="badge bg-danger">Failed</span>
+            {(string.IsNullOrEmpty(error) ? "" : $"""
+            <br><a class="text-danger small" data-bs-toggle="collapse" href="#{id}" style="font-size:.75rem;text-decoration:none">Show error</a>
+            <div class="collapse mt-1" id="{id}">
+              <pre class="text-danger border border-danger rounded p-2 mb-0" style="font-size:.72rem;white-space:pre-wrap;word-break:break-word">{msg}</pre>
+            </div>
+            """)}
+            """;
+    }
 }
 
 @section Scripts {
@@ -88,9 +99,10 @@ else
         if (status === 'completed')
             return '<span class="badge bg-success">Synced</span>';
         if (status === 'failed') {
-            const attr  = (error ?? '').replace(/"/g, '&quot;');
-            const short = (error ?? '').substring(0, 60) + ((error ?? '').length > 60 ? '…' : '');
-            return `<span class="badge bg-danger" title="${attr}">Failed</span><br><small class="text-danger" style="font-size:.7rem">${short}</small>`;
+            const id  = 'err-' + Math.random().toString(36).slice(2);
+            const msg = (error ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            const detail = msg ? `<br><a class="text-danger small" data-bs-toggle="collapse" href="#${id}" style="font-size:.75rem;text-decoration:none">Show error</a><div class="collapse mt-1" id="${id}"><pre class="text-danger border border-danger rounded p-2 mb-0" style="font-size:.72rem;white-space:pre-wrap;word-break:break-word">${msg}</pre></div>` : '';
+            return `<span class="badge bg-danger">Failed</span>${detail}`;
         }
         if (status === 'needs-reindex')
             return '<span class="badge bg-warning text-dark">Re-index needed</span>';

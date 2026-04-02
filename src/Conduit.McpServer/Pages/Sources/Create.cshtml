@@ -87,20 +87,6 @@ else
                         <label class="form-label fw-medium">WIQL Query <span class="text-danger">*</span></label>
                         <textarea name="ConfigQuery" rows="4" class="form-control font-monospace"
                                   placeholder="SELECT [System.Id] FROM WorkItems WHERE ...">@Model.GetConfig(ConfigKeys.Query)</textarea>
-                        <div class="form-text">
-                            Filters which work items to index. The SELECT columns are ignored — field values are controlled by the Fields input below.
-                            Example: <code>SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MyProject' AND [System.WorkItemType] = 'Bug'</code>
-                        </div>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label fw-medium">Fields <small class="text-muted">(comma-separated)</small></label>
-                        <input name="ConfigFields" value="@Model.GetConfig(ConfigKeys.Fields)"
-                               class="form-control font-monospace"
-                               placeholder="System.Id,System.Title,System.Description" />
-                        <div class="form-text">
-                            ADO field reference names to fetch and embed. These determine what content is searchable.
-                            Leave blank to use the default set for this source type. Add custom fields like <code>Custom.MyField</code> as needed.
-                        </div>
                     </div>
                 }
 

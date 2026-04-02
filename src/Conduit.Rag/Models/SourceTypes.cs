@@ -54,7 +54,8 @@ public static class ConfigKeys
     /// Authentication type. One of: pat | bearer | ntlm | negotiate | apikey | none.
     /// Defaults to "pat" when a <see cref="Pat"/> key is present, otherwise "none".
     /// </summary>
-    public const string AuthType = "authType";
+    public const string AuthType   = "authType";
+    public const string ApiVersion = "apiVersion"; // e.g. "7.1" (ADO Services), "4.1" (TFS 2018), "5.1" (ADO Server 2019)
 
     // ── Legacy ADO connection (still supported for backward compatibility) ──
     public const string Organization = "organization";

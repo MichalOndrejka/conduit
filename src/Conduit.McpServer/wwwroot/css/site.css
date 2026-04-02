@@ -1,9 +1,5 @@
 /* Conduit – minimal overrides on top of Bootstrap 5 */
 
-body {
-    background-color: #f8f9fa;
-}
-
 .navbar-brand {
     letter-spacing: 0.03em;
 }

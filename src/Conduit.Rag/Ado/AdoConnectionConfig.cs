@@ -27,6 +27,12 @@ public sealed record AdoConnectionConfig
     public string? Domain { get; init; }       // ntlm / negotiate
 
     /// <summary>
+    /// REST API version string. Defaults to 7.1 (Azure DevOps Services / Server 2022).
+    /// Set to 4.1 for TFS 2018, 5.1 for ADO Server 2019, 6.0 for ADO Server 2020.
+    /// </summary>
+    public string ApiVersion { get; init; } = "7.1";
+
+    /// <summary>
     /// Builds an <see cref="AdoConnectionConfig"/> from a source config dictionary.
     /// Supports both new-style (<c>baseUrl</c> + <c>authType</c>) and legacy (<c>organization</c>
     /// + <c>project</c> + <c>pat</c>) configurations so existing sources keep working unchanged.
@@ -56,10 +62,15 @@ public sealed record AdoConnectionConfig
             ? at.Trim().ToLowerInvariant()
             : (config.ContainsKey("pat") ? "pat" : "none");
 
+        var apiVersion = config.TryGetValue("apiVersion", out var av) && !string.IsNullOrWhiteSpace(av)
+            ? av.Trim()
+            : "7.1";
+
         return new AdoConnectionConfig
         {
             BaseUrl      = baseUrl,
             AuthType     = authType,
+            ApiVersion   = apiVersion,
             Pat          = config.GetValueOrDefault("pat"),
             Token        = config.GetValueOrDefault("token"),
             ApiKeyHeader = config.GetValueOrDefault("apiKeyHeader"),

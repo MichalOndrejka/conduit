@@ -45,7 +45,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
 
         var wiqlRequest = new HttpRequestMessage(
             HttpMethod.Post,
-            $"{conn.BaseUrl}/_apis/wit/wiql?api-version=7.1")
+            $"{conn.BaseUrl}/_apis/wit/wiql?api-version={conn.ApiVersion}")
         {
             Content = JsonContent.Create(new { query = wiql })
         };
@@ -73,7 +73,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
             var fieldsCsv = string.Join(",", fields);
             var detailRequest = new HttpRequestMessage(
                 HttpMethod.Get,
-                $"{conn.BaseUrl}/_apis/wit/workitems?ids={idsCsv}&fields={fieldsCsv}&api-version=7.1");
+                $"{conn.BaseUrl}/_apis/wit/workitems?ids={idsCsv}&fields={fieldsCsv}&api-version={conn.ApiVersion}");
             ApplyAuth(detailRequest, conn);
 
             var detailResponse = await client.SendAsync(detailRequest, ct);
@@ -98,7 +98,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
     {
         var url = $"{conn.BaseUrl}/_apis/git/repositories/{repository}/items" +
                   $"?scopePath={Uri.EscapeDataString(scopePath)}&recursionLevel=Full" +
-                  $"&versionDescriptor.version={Uri.EscapeDataString(branch)}&api-version=7.1";
+                  $"&versionDescriptor.version={Uri.EscapeDataString(branch)}&api-version={conn.ApiVersion}";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyAuth(request, conn);
@@ -124,7 +124,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         CancellationToken ct = default)
     {
         var url = $"{conn.BaseUrl}/_apis/git/repositories/{repository}/items" +
-                  $"?path={Uri.EscapeDataString(path)}&versionDescriptor.version={Uri.EscapeDataString(branch)}&api-version=7.1";
+                  $"?path={Uri.EscapeDataString(path)}&versionDescriptor.version={Uri.EscapeDataString(branch)}&api-version={conn.ApiVersion}";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyAuth(request, conn);
@@ -145,7 +145,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         CancellationToken ct = default)
     {
         var url = $"{conn.BaseUrl}/_apis/build/builds" +
-                  $"?definitions={pipelineId}&$top={lastN}&api-version=7.1";
+                  $"?definitions={pipelineId}&$top={lastN}&api-version={conn.ApiVersion}";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyAuth(request, conn);
@@ -165,7 +165,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         string buildId,
         CancellationToken ct = default)
     {
-        var url = $"{conn.BaseUrl}/_apis/build/builds/{buildId}/timeline?api-version=7.1";
+        var url = $"{conn.BaseUrl}/_apis/build/builds/{buildId}/timeline?api-version={conn.ApiVersion}";
 
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyAuth(request, conn);
@@ -187,7 +187,7 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         AdoConnectionConfig conn,
         CancellationToken ct = default)
     {
-        var url     = $"{conn.BaseUrl}/_apis/wiki/wikis?api-version=7.1";
+        var url     = $"{conn.BaseUrl}/_apis/wiki/wikis?api-version={conn.ApiVersion}";
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         ApplyAuth(request, conn);
 

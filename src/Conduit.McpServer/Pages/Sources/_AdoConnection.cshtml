@@ -14,14 +14,17 @@
     string Show(params string[] types) => types.Contains(currentAuthType) ? string.Empty : "none";
 }
 
-<!-- Base URL -->
-<div class="mb-3">
-    <label class="form-label fw-medium">Base URL <span class="text-danger">*</span></label>
-    <input name="ConfigBaseUrl" value="@Cfg(ConfigKeys.BaseUrl)"
-           class="form-control" placeholder="https://dev.azure.com/myorg/MyProject" />
-    <div class="form-text">
-        Cloud: <code>https://dev.azure.com/org/project</code> &nbsp;·&nbsp;
-        On-premise: <code>https://ado.company.com/Collection/Project</code>
+<!-- Base URL + API Version -->
+<div class="row g-3 mb-3">
+    <div class="col-md-9">
+        <label class="form-label fw-medium">Base URL <span class="text-danger">*</span></label>
+        <input name="ConfigBaseUrl" value="@Cfg(ConfigKeys.BaseUrl)"
+               class="form-control" placeholder="https://dev.azure.com/org/project  or  https://tfs.company.com/tfs/Collection/Project" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label fw-medium">API Version</label>
+        <input name="ConfigApiVersion" value="@Cfg(ConfigKeys.ApiVersion, "7.1")"
+               class="form-control" placeholder="7.1" />
     </div>
 </div>
 
@@ -63,12 +66,11 @@
 
 <!-- NTLM / Negotiate -->
 <div id="auth-windows" class="mt-3" style="display:@Show("ntlm", "negotiate")">
-    <p class="text-muted small mb-2">Leave all fields blank to authenticate as the current process identity (recommended for AD service accounts).</p>
     <div class="row g-2">
         <div class="col-md-4">
             <label class="form-label fw-medium">Username <small class="text-muted">(optional)</small></label>
             <input name="ConfigUsername" value="@Cfg(ConfigKeys.Username)"
-                   class="form-control" placeholder="CORP\svc_account" />
+                   class="form-control" placeholder="CORP\svc_account — blank for process identity" />
         </div>
         <div class="col-md-4">
             <label class="form-label fw-medium">Password <small class="text-muted">(optional)</small></label>

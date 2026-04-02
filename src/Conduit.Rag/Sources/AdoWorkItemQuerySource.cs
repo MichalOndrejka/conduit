@@ -11,25 +11,41 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
     public string Type           => SourceTypes.AdoWorkItemQuery;
     public string CollectionName => CollectionNames.AdoWorkItems;
 
+    // Broad field set — null fields are skipped at embed time, so each WIT naturally
+    // contributes only the fields that exist on it (bugs get repro steps, stories get
+    // acceptance criteria, etc.)
+    private static readonly IReadOnlyList<string> Fields =
+    [
+        "System.Id",
+        "System.Title",
+        "System.Description",
+        "System.WorkItemType",
+        "System.State",
+        "System.AreaPath",
+        "System.Tags",
+        "Microsoft.VSTS.Common.AcceptanceCriteria",
+        "Microsoft.VSTS.Common.ReproSteps",
+        "Microsoft.VSTS.Common.SystemInfo",
+        "Microsoft.VSTS.TCM.Steps",
+        "Microsoft.VSTS.Common.Priority",
+        "Microsoft.VSTS.Scheduling.StoryPoints",
+    ];
+
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var conn   = AdoConnectionConfig.From(definition.Config);
-        var query  = definition.Config[ConfigKeys.Query];
-        var fields = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields,
-            "System.Id,System.Title,System.Description,System.WorkItemType,System.State"));
-
-        var workItems = await ado.RunWorkItemQueryAsync(conn, query, fields, ct);
-
-        return workItems.Select(wi => ToDocument(wi, fields)).ToList();
+        var conn      = AdoConnectionConfig.From(definition.Config);
+        var query     = definition.Config[ConfigKeys.Query];
+        var workItems = await ado.RunWorkItemQueryAsync(conn, query, Fields, ct);
+        return workItems.Select(ToDocument).ToList();
     }
 
-    private SourceDocument ToDocument(JsonElement wi, IReadOnlyList<string> fields)
+    private SourceDocument ToDocument(JsonElement wi)
     {
         var f  = wi.GetProperty("fields");
         var id = wi.GetProperty("id").GetInt32().ToString();
 
         var text = new StringBuilder();
-        foreach (var field in fields)
+        foreach (var field in Fields)
         {
             if (f.TryGetProperty(field, out var val) && val.ValueKind != JsonValueKind.Null)
             {
@@ -38,17 +54,14 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
             }
         }
 
-        var wiType = GetString(f, "System.WorkItemType");
-        var state  = GetString(f, "System.State");
-
         return new SourceDocument(
-            Id:         $"wi-{id}",
-            Text:       text.ToString().Trim(),
+            Id:   $"wi-{id}",
+            Text: text.ToString().Trim(),
             Tags: new Dictionary<string, string>
             {
-                ["source_name"]     = definition.Name,
-                ["work_item_type"]  = wiType,
-                ["state"]           = state
+                ["source_name"]    = definition.Name,
+                ["work_item_type"] = GetString(f, "System.WorkItemType"),
+                ["state"]          = GetString(f, "System.State")
             },
             Properties: new Dictionary<string, string>
             {
@@ -63,7 +76,4 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
         => fields.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? string.Empty
             : string.Empty;
-
-    private static IReadOnlyList<string> ParseFields(string csv)
-        => csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

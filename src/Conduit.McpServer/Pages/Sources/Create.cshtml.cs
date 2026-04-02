@@ -37,11 +37,11 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
     public async Task<IActionResult> OnPostAsync(
         string? configContent,
         IFormFile? configFile,
-        string? configBaseUrl, string? configAuthType,
+        string? configBaseUrl, string? configAuthType, string? configApiVersion,
         string? configPat, string? configToken,
         string? configApiKeyHeader, string? configApiKeyValue,
         string? configUsername, string? configPassword, string? configDomain,
-        string? configQuery, string? configFields,
+        string? configQuery,
         string? configRepository, string? configBranch, string? configGlobPatterns,
         string? configPipelineId, string? configLastNBuilds,
         string? configWikiName, string? configPathFilter,
@@ -57,11 +57,11 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
             configContent = await ReadFileAsync(configFile);
 
         BuildConfig(configContent,
-                    configBaseUrl, configAuthType,
+                    configBaseUrl, configAuthType, configApiVersion,
                     configPat, configToken,
                     configApiKeyHeader, configApiKeyValue,
                     configUsername, configPassword, configDomain,
-                    configQuery, configFields,
+                    configQuery,
                     configRepository, configBranch, configGlobPatterns,
                     configPipelineId, configLastNBuilds,
                     configWikiName, configPathFilter,
@@ -81,11 +81,11 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
 
     private void BuildConfig(
         string? content,
-        string? baseUrl, string? authType,
+        string? baseUrl, string? authType, string? apiVersion,
         string? pat, string? token,
         string? apiKeyHeader, string? apiKeyValue,
         string? username, string? password, string? domain,
-        string? query, string? fields,
+        string? query,
         string? repository, string? branch, string? globPatterns,
         string? pipelineId, string? lastNBuilds,
         string? wikiName, string? pathFilter,
@@ -106,6 +106,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
             Source.Config.Remove(ConfigKeys.Organization);
             Source.Config.Remove(ConfigKeys.Project);
         }
+        Set(ConfigKeys.ApiVersion, apiVersion);
 
         var resolvedAuthType = string.IsNullOrWhiteSpace(authType) ? "none" : authType.Trim().ToLowerInvariant();
         Source.Config[ConfigKeys.AuthType] = resolvedAuthType;
@@ -133,7 +134,6 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
 
         // Source-specific
         Set(ConfigKeys.Query,        query);
-        Set(ConfigKeys.Fields,       fields);
         Set(ConfigKeys.Repository,   repository);
         Set(ConfigKeys.Branch,       branch);
         Set(ConfigKeys.GlobPatterns, globPatterns);

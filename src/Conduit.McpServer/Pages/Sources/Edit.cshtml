@@ -41,11 +41,10 @@
                 <div class="mb-3">
                     <label class="form-label fw-medium">Or paste text</label>
                     <textarea name="ConfigContent" rows="12" class="form-control font-monospace">@Model.GetConfig(ConfigKeys.Content)</textarea>
-                    <div class="form-text">If a file is uploaded it takes precedence over the text above.</div>
                 </div>
             }
 
-            <!-- ADO Connection (standard ADO source types; wiki and http-page handle their own connection UI) -->
+            <!-- ADO Connection -->
             @if (Model.Source.Type != SourceTypes.ManualDocument
               && Model.Source.Type != SourceTypes.AdoWiki
               && Model.Source.Type != SourceTypes.HttpPage)
@@ -62,18 +61,6 @@
                 <div class="mb-3 mt-3">
                     <label class="form-label fw-medium">WIQL Query <span class="text-danger">*</span></label>
                     <textarea name="ConfigQuery" rows="4" class="form-control font-monospace">@Model.GetConfig(ConfigKeys.Query)</textarea>
-                    <div class="form-text">
-                        Filters which work items to index. The SELECT columns are ignored — field values are controlled by the Fields input below.
-                        Example: <code>SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = 'MyProject' AND [System.WorkItemType] = 'Bug'</code>
-                    </div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label fw-medium">Fields <small class="text-muted">(comma-separated)</small></label>
-                    <input name="ConfigFields" value="@Model.GetConfig(ConfigKeys.Fields)" class="form-control font-monospace" />
-                    <div class="form-text">
-                        ADO field reference names to fetch and embed. These determine what content is searchable.
-                        Leave blank to use the default set for this source type. Add custom fields like <code>Custom.MyField</code> as needed.
-                    </div>
                 </div>
             }
 
@@ -84,7 +71,6 @@
                     <div class="col-md-6">
                         <label class="form-label fw-medium">Repository <span class="text-danger">*</span></label>
                         <input name="ConfigRepository" value="@Model.GetConfig(ConfigKeys.Repository)" class="form-control" />
-                        <div class="form-text">The repository name as it appears in ADO (not the full URL).</div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label fw-medium">Branch</label>
@@ -94,10 +80,6 @@
                 <div class="mb-3">
                     <label class="form-label fw-medium">Glob Patterns <small class="text-muted">(comma-separated)</small></label>
                     <input name="ConfigGlobPatterns" value="@Model.GetConfig(ConfigKeys.GlobPatterns)" class="form-control font-monospace" />
-                    <div class="form-text">
-                        Controls which files are fetched. Supports <code>**</code> (any depth) and <code>*</code> (any name within a segment).
-                        Example: <code>**/*.cs,**/*.ts,**/README.md</code>
-                    </div>
                 </div>
             }
 
@@ -108,12 +90,10 @@
                     <div class="col-md-6">
                         <label class="form-label fw-medium">Pipeline ID <span class="text-danger">*</span></label>
                         <input name="ConfigPipelineId" value="@Model.GetConfig(ConfigKeys.PipelineId)" class="form-control" type="number" />
-                        <div class="form-text">The numeric definition ID — visible in the pipeline URL: <code>.../_build?definitionId=42</code></div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label fw-medium">Number of Recent Builds</label>
                         <input name="ConfigLastNBuilds" value="@Model.GetConfig(ConfigKeys.LastNBuilds, "5")" class="form-control" type="number" />
-                        <div class="form-text">How many of the most recent builds to index (default 5, max 50).</div>
                     </div>
                 </div>
             }
@@ -125,14 +105,12 @@
                 <hr class="mt-4" />
                 <div class="row g-3 mb-3 mt-3">
                     <div class="col-md-6">
-                        <label class="form-label fw-medium">Wiki Name <small class="text-muted">(optional — defaults to first wiki)</small></label>
+                        <label class="form-label fw-medium">Wiki Name <small class="text-muted">(optional)</small></label>
                         <input name="ConfigWikiName" value="@Model.GetConfig(ConfigKeys.WikiName)" class="form-control" placeholder="MyProject.wiki" />
-                        <div class="form-text">Leave blank to use the first wiki in the project. The name is visible in the ADO wiki URL.</div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label fw-medium">Path Filter <small class="text-muted">(optional prefix)</small></label>
+                        <label class="form-label fw-medium">Path Filter <small class="text-muted">(optional)</small></label>
                         <input name="ConfigPathFilter" value="@Model.GetConfig(ConfigKeys.PathFilter)" class="form-control" placeholder="/Architecture" />
-                        <div class="form-text">Only index pages under this path. Leave blank to index the entire wiki.</div>
                     </div>
                 </div>
             }
@@ -204,7 +182,33 @@
                 </script>
             }
 
-            <div class="d-flex gap-2 mt-4">
+            <!-- Per-type hints above Save -->
+            <p class="text-muted small mt-4 mb-2">
+                @if (Model.Source.Type == SourceTypes.ManualDocument)
+                {
+                    <span>Uploaded file takes precedence over pasted text. Sync after saving to re-index.</span>
+                }
+                else if (Model.Source.Type == SourceTypes.AdoWorkItemQuery
+                      || Model.Source.Type == SourceTypes.AdoRequirements
+                      || Model.Source.Type == SourceTypes.AdoTestCase)
+                {
+                    <span>SELECT columns in the WIQL are ignored — all relevant fields are fetched automatically.</span>
+                }
+                else if (Model.Source.Type == SourceTypes.AdoCodeRepo)
+                {
+                    <span>Glob patterns match from the repo root — e.g. <code>**/*.cs,**/*.md</code>. Leave blank to index all text files.</span>
+                }
+                else if (Model.Source.Type == SourceTypes.AdoPipelineBuild)
+                {
+                    <span>Pipeline ID is the <code>definitionId</code> in the ADO pipeline URL. Only completed builds are indexed.</span>
+                }
+                else if (Model.Source.Type == SourceTypes.AdoWiki)
+                {
+                    <span>Leave Wiki Name blank to use the project's default wiki. Path Filter limits indexing to a subtree.</span>
+                }
+            </p>
+
+            <div class="d-flex gap-2 mt-2">
                 <button type="submit" class="btn btn-primary">Save Changes</button>
                 <a asp-page="/Index" class="btn btn-outline-secondary">Cancel</a>
             </div>
