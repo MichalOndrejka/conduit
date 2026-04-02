@@ -11,41 +11,27 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
     public string Type           => SourceTypes.AdoWorkItemQuery;
     public string CollectionName => CollectionNames.AdoWorkItems;
 
-    // Broad field set — null fields are skipped at embed time, so each WIT naturally
-    // contributes only the fields that exist on it (bugs get repro steps, stories get
-    // acceptance criteria, etc.)
-    private static readonly IReadOnlyList<string> Fields =
-    [
-        "System.Id",
-        "System.Title",
-        "System.Description",
-        "System.WorkItemType",
-        "System.State",
-        "System.AreaPath",
-        "System.Tags",
-        "Microsoft.VSTS.Common.AcceptanceCriteria",
-        "Microsoft.VSTS.Common.ReproSteps",
-        "Microsoft.VSTS.Common.SystemInfo",
-        "Microsoft.VSTS.TCM.Steps",
-        "Microsoft.VSTS.Common.Priority",
-        "Microsoft.VSTS.Scheduling.StoryPoints",
-    ];
-
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var conn      = AdoConnectionConfig.From(definition.Config);
-        var query     = definition.Config[ConfigKeys.Query];
-        var workItems = await ado.RunWorkItemQueryAsync(conn, query, Fields, ct);
-        return workItems.Select(ToDocument).ToList();
+        var conn   = AdoConnectionConfig.From(definition.Config);
+        var query  = definition.Config[ConfigKeys.Query];
+        var fields = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields, ""));
+        var workItems = await ado.RunWorkItemQueryAsync(conn, query, fields, ct);
+        return workItems.Select(wi => ToDocument(wi, fields)).ToList();
     }
 
-    private SourceDocument ToDocument(JsonElement wi)
+    private SourceDocument ToDocument(JsonElement wi, IReadOnlyList<string> requestedFields)
     {
         var f  = wi.GetProperty("fields");
         var id = wi.GetProperty("id").GetInt32().ToString();
 
+        // If specific fields were requested use those; otherwise embed all string/number fields
+        var fieldsToEmbed = requestedFields.Count > 0
+            ? requestedFields
+            : f.EnumerateObject().Select(p => p.Name).ToList();
+
         var text = new StringBuilder();
-        foreach (var field in Fields)
+        foreach (var field in fieldsToEmbed)
         {
             if (f.TryGetProperty(field, out var val) && val.ValueKind != JsonValueKind.Null)
             {
@@ -76,4 +62,7 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
         => fields.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? string.Empty
             : string.Empty;
+
+    private static IReadOnlyList<string> ParseFields(string csv)
+        => csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

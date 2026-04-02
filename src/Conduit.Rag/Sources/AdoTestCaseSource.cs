@@ -12,23 +12,12 @@ public sealed class AdoTestCaseSource(SourceDefinition definition, IAdoClient ad
     public string Type           => SourceTypes.AdoTestCase;
     public string CollectionName => CollectionNames.AdoTestCases;
 
-    private static readonly IReadOnlyList<string> Fields =
-    [
-        "System.Id",
-        "System.Title",
-        "System.State",
-        "System.AreaPath",
-        "System.Tags",
-        "Microsoft.VSTS.TCM.Steps",
-        "Microsoft.VSTS.Common.AutomationStatus",
-        "Microsoft.VSTS.Common.Priority",
-    ];
-
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
     {
-        var conn      = AdoConnectionConfig.From(definition.Config);
-        var query     = definition.Config[ConfigKeys.Query];
-        var workItems = await ado.RunWorkItemQueryAsync(conn, query, Fields, ct);
+        var conn   = AdoConnectionConfig.From(definition.Config);
+        var query  = definition.Config[ConfigKeys.Query];
+        var fields = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields, ""));
+        var workItems = await ado.RunWorkItemQueryAsync(conn, query, fields, ct);
         return workItems.Select(ToDocument).ToList();
     }
 
@@ -80,4 +69,7 @@ public sealed class AdoTestCaseSource(SourceDefinition definition, IAdoClient ad
         => fields.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String
             ? v.GetString() ?? string.Empty
             : string.Empty;
+
+    private static IReadOnlyList<string> ParseFields(string csv)
+        => csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

@@ -66,14 +66,17 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         if (ids.Count == 0) return [];
 
         // Batch-fetch work item details (max 200 per call)
+        // If no fields specified, omit the parameter — TFS returns all fields and we filter client-side
+        var fieldsCsv = fields.Count > 0 ? string.Join(",", fields) : null;
+
         var results = new List<JsonElement>();
         foreach (var batch in ids.Chunk(200))
         {
             var idsCsv    = string.Join(",", batch);
-            var fieldsCsv = string.Join(",", fields);
+            var fieldsParam = fieldsCsv is not null ? $"&fields={fieldsCsv}" : string.Empty;
             var detailRequest = new HttpRequestMessage(
                 HttpMethod.Get,
-                $"{conn.BaseUrl}/_apis/wit/workitems?ids={idsCsv}&fields={fieldsCsv}&api-version={conn.ApiVersion}");
+                $"{conn.BaseUrl}/_apis/wit/workitems?ids={idsCsv}{fieldsParam}&api-version={conn.ApiVersion}");
             ApplyAuth(detailRequest, conn);
 
             var detailResponse = await client.SendAsync(detailRequest, ct);

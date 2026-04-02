@@ -41,7 +41,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
         string? configPat, string? configToken,
         string? configApiKeyHeader, string? configApiKeyValue,
         string? configUsername, string? configPassword, string? configDomain,
-        string? configQuery,
+        string? configQuery, string? configFields,
         string? configRepository, string? configBranch, string? configGlobPatterns,
         string? configPipelineId, string? configLastNBuilds,
         string? configWikiName, string? configPathFilter,
@@ -61,7 +61,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
                     configPat, configToken,
                     configApiKeyHeader, configApiKeyValue,
                     configUsername, configPassword, configDomain,
-                    configQuery,
+                    configQuery, configFields,
                     configRepository, configBranch, configGlobPatterns,
                     configPipelineId, configLastNBuilds,
                     configWikiName, configPathFilter,
@@ -85,7 +85,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
         string? pat, string? token,
         string? apiKeyHeader, string? apiKeyValue,
         string? username, string? password, string? domain,
-        string? query,
+        string? query, string? fields,
         string? repository, string? branch, string? globPatterns,
         string? pipelineId, string? lastNBuilds,
         string? wikiName, string? pathFilter,
@@ -134,6 +134,7 @@ public class CreateModel(ISourceConfigStore store, ISyncService syncService) : P
 
         // Source-specific
         Set(ConfigKeys.Query,        query);
+        Set(ConfigKeys.Fields,       fields);
         Set(ConfigKeys.Repository,   repository);
         Set(ConfigKeys.Branch,       branch);
         Set(ConfigKeys.GlobPatterns, globPatterns);

@@ -88,6 +88,11 @@ else
                         <textarea name="ConfigQuery" rows="4" class="form-control font-monospace"
                                   placeholder="SELECT [System.Id] FROM WorkItems WHERE ...">@Model.GetConfig(ConfigKeys.Query)</textarea>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-medium">Fields <small class="text-muted">(comma-separated, leave blank to fetch all)</small></label>
+                        <input name="ConfigFields" value="@Model.GetConfig(ConfigKeys.Fields)" class="form-control font-monospace"
+                               placeholder="System.Title,System.Description,System.State" />
+                    </div>
                 }
 
                 <!-- ADO Code Repo -->
