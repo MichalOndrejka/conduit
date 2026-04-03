@@ -1,3 +1,4 @@
+using Conduit.Rag.Models;
 using Conduit.Rag.Sources;
 
 namespace Conduit.Rag.Services;
@@ -5,7 +6,8 @@ namespace Conduit.Rag.Services;
 public sealed class SyncService(
     ISourceConfigStore configStore,
     SourceFactory sourceFactory,
-    IDocumentIndexer indexer) : ISyncService
+    IDocumentIndexer indexer,
+    SyncProgressStore progressStore) : ISyncService
 {
     public async Task SyncAsync(string sourceId, CancellationToken ct = default)
     {
@@ -18,13 +20,15 @@ public sealed class SyncService(
 
         var source = sourceFactory.Create(definition);
 
-        IReadOnlyList<Models.SourceDocument> documents;
+        IReadOnlyList<SourceDocument> documents;
         try
         {
+            progressStore.Set(sourceId, new SyncProgress("fetching", 0, 0));
             documents = await source.FetchDocumentsAsync(ct);
         }
         catch (Exception ex)
         {
+            progressStore.Clear(sourceId);
             definition.SyncStatus = "failed";
             definition.SyncError  = $"[Fetch error] {ex.Message}";
             await configStore.SaveAsync(definition, ct);
@@ -33,7 +37,12 @@ public sealed class SyncService(
 
         try
         {
-            await indexer.IndexBatchAsync(source.CollectionName, documents, ct);
+            progressStore.Set(sourceId, new SyncProgress("embedding", 0, documents.Count));
+
+            var progress = new Progress<(int current, int total)>(p =>
+                progressStore.Set(sourceId, new SyncProgress("embedding", p.current, p.total)));
+
+            await indexer.IndexBatchAsync(source.CollectionName, documents, progress, ct);
             definition.LastSyncedAt = DateTime.UtcNow;
             definition.SyncStatus   = "completed";
             definition.SyncError    = null;
@@ -44,6 +53,7 @@ public sealed class SyncService(
             definition.SyncError  = $"[Embedding error] {ex.Message}";
         }
 
+        progressStore.Clear(sourceId);
         await configStore.SaveAsync(definition, ct);
     }
 

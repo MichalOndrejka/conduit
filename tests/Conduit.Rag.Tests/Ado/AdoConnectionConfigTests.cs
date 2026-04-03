@@ -72,29 +72,39 @@ public class AdoConnectionConfigTests
     [Test]
     public void From_WithExplicitAuthType_UsesIt()
     {
-        var config = MakeConfig(new()
+        Environment.SetEnvironmentVariable("CONDUIT_TEST_TOKEN", "my-token");
+        try
         {
-            [ConfigKeys.BaseUrl]  = "https://ado.company.com/Col/Proj",
-            [ConfigKeys.AuthType] = "bearer",
-            [ConfigKeys.Token]    = "my-token"
-        });
+            var config = MakeConfig(new()
+            {
+                [ConfigKeys.BaseUrl]  = "https://ado.company.com/Col/Proj",
+                [ConfigKeys.AuthType] = "bearer",
+                [ConfigKeys.Token]    = "CONDUIT_TEST_TOKEN"
+            });
 
-        Assert.That(config.AuthType, Is.EqualTo("bearer"));
-        Assert.That(config.Token,    Is.EqualTo("my-token"));
+            Assert.That(config.AuthType, Is.EqualTo("bearer"));
+            Assert.That(config.Token,    Is.EqualTo("my-token"));
+        }
+        finally { Environment.SetEnvironmentVariable("CONDUIT_TEST_TOKEN", null); }
     }
 
     [Test]
     public void From_WithPatKeyAndNoAuthType_DefaultsToPat()
     {
-        var config = MakeConfig(new()
+        Environment.SetEnvironmentVariable("CONDUIT_TEST_PAT", "my-pat");
+        try
         {
-            [ConfigKeys.Organization] = "org",
-            [ConfigKeys.Project]      = "proj",
-            [ConfigKeys.Pat]          = "my-pat"
-        });
+            var config = MakeConfig(new()
+            {
+                [ConfigKeys.Organization] = "org",
+                [ConfigKeys.Project]      = "proj",
+                [ConfigKeys.Pat]          = "CONDUIT_TEST_PAT"
+            });
 
-        Assert.That(config.AuthType, Is.EqualTo("pat"));
-        Assert.That(config.Pat,      Is.EqualTo("my-pat"));
+            Assert.That(config.AuthType, Is.EqualTo("pat"));
+            Assert.That(config.Pat,      Is.EqualTo("my-pat"));
+        }
+        finally { Environment.SetEnvironmentVariable("CONDUIT_TEST_PAT", null); }
     }
 
     [Test]
@@ -125,18 +135,23 @@ public class AdoConnectionConfigTests
     [Test]
     public void From_NtlmWithCredentials_PopulatesUsernamePasswordDomain()
     {
-        var config = MakeConfig(new()
+        Environment.SetEnvironmentVariable("CONDUIT_TEST_PASS", "secret");
+        try
         {
-            [ConfigKeys.BaseUrl]  = "https://ado.company.com/Col/Proj",
-            [ConfigKeys.AuthType] = "ntlm",
-            [ConfigKeys.Username] = "svc_account",
-            [ConfigKeys.Password] = "secret",
-            [ConfigKeys.Domain]   = "CORP"
-        });
+            var config = MakeConfig(new()
+            {
+                [ConfigKeys.BaseUrl]  = "https://ado.company.com/Col/Proj",
+                [ConfigKeys.AuthType] = "ntlm",
+                [ConfigKeys.Username] = "svc_account",
+                [ConfigKeys.Password] = "CONDUIT_TEST_PASS",
+                [ConfigKeys.Domain]   = "CORP"
+            });
 
-        Assert.That(config.Username, Is.EqualTo("svc_account"));
-        Assert.That(config.Password, Is.EqualTo("secret"));
-        Assert.That(config.Domain,   Is.EqualTo("CORP"));
+            Assert.That(config.Username, Is.EqualTo("svc_account"));
+            Assert.That(config.Password, Is.EqualTo("secret"));
+            Assert.That(config.Domain,   Is.EqualTo("CORP"));
+        }
+        finally { Environment.SetEnvironmentVariable("CONDUIT_TEST_PASS", null); }
     }
 
     [Test]
@@ -156,16 +171,21 @@ public class AdoConnectionConfigTests
     [Test]
     public void From_ApiKey_PopulatesHeaderAndValue()
     {
-        var config = MakeConfig(new()
+        Environment.SetEnvironmentVariable("CONDUIT_TEST_APIKEY", "supersecret");
+        try
         {
-            [ConfigKeys.BaseUrl]      = "https://ado.company.com/Col/Proj",
-            [ConfigKeys.AuthType]     = "apikey",
-            [ConfigKeys.ApiKeyHeader] = "X-Api-Key",
-            [ConfigKeys.ApiKeyValue]  = "supersecret"
-        });
+            var config = MakeConfig(new()
+            {
+                [ConfigKeys.BaseUrl]      = "https://ado.company.com/Col/Proj",
+                [ConfigKeys.AuthType]     = "apikey",
+                [ConfigKeys.ApiKeyHeader] = "X-Api-Key",
+                [ConfigKeys.ApiKeyValue]  = "CONDUIT_TEST_APIKEY"
+            });
 
-        Assert.That(config.ApiKeyHeader, Is.EqualTo("X-Api-Key"));
-        Assert.That(config.ApiKeyValue,  Is.EqualTo("supersecret"));
+            Assert.That(config.ApiKeyHeader, Is.EqualTo("X-Api-Key"));
+            Assert.That(config.ApiKeyValue,  Is.EqualTo("supersecret"));
+        }
+        finally { Environment.SetEnvironmentVariable("CONDUIT_TEST_APIKEY", null); }
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

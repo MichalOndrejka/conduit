@@ -70,6 +70,7 @@ builder.Services.AddSingleton<IVectorStore, QdrantVectorStore>();
 builder.Services.AddSingleton<IDocumentIndexer, DocumentIndexer>();
 builder.Services.AddSingleton<ISearchService, SearchService>();
 builder.Services.AddSingleton<ISourceConfigStore>(_ => new JsonSourceConfigStore(sourcesFilePath));
+builder.Services.AddSingleton<SyncProgressStore>();
 builder.Services.AddSingleton<ISyncService, SyncService>();
 builder.Services.AddHttpClient<AdoClient>(); // registers IHttpClientFactory + typed client
 builder.Services.AddSingleton<IAdoClient>(sp => sp.GetRequiredService<AdoClient>());

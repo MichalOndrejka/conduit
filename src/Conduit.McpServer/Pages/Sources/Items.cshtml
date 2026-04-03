@@ -1,0 +1,78 @@
+@page
+@model Conduit.McpServer.Pages.Sources.ItemsModel
+@{
+    ViewData["Title"] = $"{Model.Source.Name} — Embedded Items";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <a asp-page="/Index" class="text-muted small text-decoration-none">&larr; Sources</a>
+        <h1 class="h3 mb-0 mt-1">@Model.Source.Name</h1>
+        <p class="text-muted mb-0 small"><code>@Model.Source.Type</code></p>
+    </div>
+</div>
+
+@if (!Model.Items.Any())
+{
+    <div class="card border-0 text-center py-5">
+        <div class="card-body">
+            <p class="text-muted mb-0">No embedded items found. Run Embed to index this source.</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="d-flex flex-column gap-3">
+        @foreach (var item in Model.Items)
+        {
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            @if (!string.IsNullOrEmpty(item.Title))
+                            {
+                                <h6 class="mb-0 fw-semibold">@item.Title</h6>
+                            }
+                            @if (!string.IsNullOrEmpty(item.Url))
+                            {
+                                <a href="@item.Url" target="_blank" class="text-muted small text-break">@item.Url</a>
+                            }
+                        </div>
+                        <div class="d-flex gap-2 align-items-center flex-shrink-0 ms-3">
+                            @if (item.ChunkIndex is not null && item.TotalChunks is not null)
+                            {
+                                <span class="badge bg-secondary">chunk @((int.Parse(item.ChunkIndex) + 1)) / @item.TotalChunks</span>
+                            }
+                            @if (item.IndexedAt.HasValue)
+                            {
+                                <span class="text-muted small">@item.IndexedAt.Value.ToString("yyyy-MM-dd HH:mm")</span>
+                            }
+                        </div>
+                    </div>
+                    <pre class="mb-0 p-3 rounded small" style="white-space:pre-wrap;word-break:break-word;max-height:200px;overflow-y:auto;background:var(--bs-tertiary-bg)">@item.Text</pre>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mt-4">
+        @if (Request.Query.ContainsKey("offset"))
+        {
+            <a asp-page="/Sources/Items" asp-route-id="@Model.Source.Id" class="btn btn-outline-secondary">&larr; First page</a>
+        }
+        else
+        {
+            <span></span>
+        }
+
+        @if (Model.NextOffset is not null)
+        {
+            <a asp-page="/Sources/Items" asp-route-id="@Model.Source.Id" asp-route-offset="@Model.NextOffset"
+               class="btn btn-outline-secondary">Next &rarr;</a>
+        }
+        else
+        {
+            <span class="text-muted small">End of results</span>
+        }
+    </div>
+}

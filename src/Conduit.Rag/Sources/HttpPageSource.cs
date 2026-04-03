@@ -115,22 +115,32 @@ public sealed partial class HttpPageSource(
         var authType = config.GetValueOrDefault(ConfigKeys.AuthType, "none").ToLowerInvariant();
         switch (authType)
         {
-            case "pat" when config.TryGetValue(ConfigKeys.Pat, out var pat) && !string.IsNullOrEmpty(pat):
-                var encoded = Convert.ToBase64String(Encoding.ASCII.GetBytes($":{pat}"));
-                request.Headers.Authorization = new AuthenticationHeaderValue("Basic", encoded);
+            case "pat":
+                var pat = Resolve(config.GetValueOrDefault(ConfigKeys.Pat));
+                if (!string.IsNullOrEmpty(pat))
+                {
+                    var encoded = Convert.ToBase64String(Encoding.ASCII.GetBytes($":{pat}"));
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Basic", encoded);
+                }
                 break;
 
-            case "bearer" when config.TryGetValue(ConfigKeys.Token, out var token) && !string.IsNullOrEmpty(token):
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            case "bearer":
+                var token = Resolve(config.GetValueOrDefault(ConfigKeys.Token));
+                if (!string.IsNullOrEmpty(token))
+                    request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
                 break;
 
             case "apikey"
-                when config.TryGetValue(ConfigKeys.ApiKeyHeader, out var header) && !string.IsNullOrEmpty(header)
-                  && config.TryGetValue(ConfigKeys.ApiKeyValue, out var value)   && !string.IsNullOrEmpty(value):
-                request.Headers.TryAddWithoutValidation(header, value);
+                when config.TryGetValue(ConfigKeys.ApiKeyHeader, out var header) && !string.IsNullOrEmpty(header):
+                var value = Resolve(config.GetValueOrDefault(ConfigKeys.ApiKeyValue));
+                if (!string.IsNullOrEmpty(value))
+                    request.Headers.TryAddWithoutValidation(header, value);
                 break;
         }
     }
+
+    private static string? Resolve(string? envVarName) =>
+        string.IsNullOrWhiteSpace(envVarName) ? null : Environment.GetEnvironmentVariable(envVarName);
 
     /// <summary>FNV-1a 32-bit hash — stable, URL-safe document ID generation.</summary>
     private static string Fnv1A(string input)

@@ -181,29 +181,39 @@ public class HttpPageSourceTests
     [Test]
     public async Task FetchDocumentsAsync_BearerAuth_SendsAuthorizationHeader()
     {
-        HttpRequestMessage? captured = null;
-        var source = MakeSource(url: "https://example.com", responseBody: "ok", mediaType: "text/plain",
-            authType: "bearer", token: "my-token",
-            captureRequest: req => captured = req);
+        Environment.SetEnvironmentVariable("CONDUIT_TEST_TOKEN", "my-token");
+        try
+        {
+            HttpRequestMessage? captured = null;
+            var source = MakeSource(url: "https://example.com", responseBody: "ok", mediaType: "text/plain",
+                authType: "bearer", token: "CONDUIT_TEST_TOKEN",
+                captureRequest: req => captured = req);
 
-        await source.FetchDocumentsAsync();
+            await source.FetchDocumentsAsync();
 
-        Assert.That(captured?.Headers.Authorization?.Scheme, Is.EqualTo("Bearer"));
-        Assert.That(captured?.Headers.Authorization?.Parameter, Is.EqualTo("my-token"));
+            Assert.That(captured?.Headers.Authorization?.Scheme,    Is.EqualTo("Bearer"));
+            Assert.That(captured?.Headers.Authorization?.Parameter, Is.EqualTo("my-token"));
+        }
+        finally { Environment.SetEnvironmentVariable("CONDUIT_TEST_TOKEN", null); }
     }
 
     [Test]
     public async Task FetchDocumentsAsync_PatAuth_SendsBasicAuthHeader()
     {
-        HttpRequestMessage? captured = null;
-        var source = MakeSource(url: "https://example.com", responseBody: "ok", mediaType: "text/plain",
-            authType: "pat", pat: "secret-pat",
-            captureRequest: req => captured = req);
+        Environment.SetEnvironmentVariable("CONDUIT_TEST_PAT", "secret-pat");
+        try
+        {
+            HttpRequestMessage? captured = null;
+            var source = MakeSource(url: "https://example.com", responseBody: "ok", mediaType: "text/plain",
+                authType: "pat", pat: "CONDUIT_TEST_PAT",
+                captureRequest: req => captured = req);
 
-        await source.FetchDocumentsAsync();
+            await source.FetchDocumentsAsync();
 
-        Assert.That(captured?.Headers.Authorization?.Scheme, Is.EqualTo("Basic"));
-        Assert.That(captured?.Headers.Authorization?.Parameter, Is.Not.Null);
+            Assert.That(captured?.Headers.Authorization?.Scheme,    Is.EqualTo("Basic"));
+            Assert.That(captured?.Headers.Authorization?.Parameter, Is.Not.Null);
+        }
+        finally { Environment.SetEnvironmentVariable("CONDUIT_TEST_PAT", null); }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────

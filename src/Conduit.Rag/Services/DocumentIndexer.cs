@@ -56,9 +56,12 @@ public sealed class DocumentIndexer(
         await store.UpsertAsync(collectionName, points, wait: true, ct: ct);
     }
 
-    public async Task IndexBatchAsync(string collectionName, IReadOnlyList<SourceDocument> documents, CancellationToken ct = default)
+    public async Task IndexBatchAsync(string collectionName, IReadOnlyList<SourceDocument> documents, IProgress<(int current, int total)>? progress = null, CancellationToken ct = default)
     {
-        foreach (var document in documents)
-            await IndexAsync(collectionName, document, ct);
+        for (var i = 0; i < documents.Count; i++)
+        {
+            await IndexAsync(collectionName, documents[i], ct);
+            progress?.Report((i + 1, documents.Count));
+        }
     }
 }

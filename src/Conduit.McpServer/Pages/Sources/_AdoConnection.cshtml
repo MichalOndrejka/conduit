@@ -52,16 +52,16 @@
 
 <!-- PAT -->
 <div id="auth-pat" class="mt-3" style="display:@Show("pat")">
-    <label class="form-label fw-medium">Personal Access Token</label>
-    <input name="ConfigPat" type="password" value="@Cfg(ConfigKeys.Pat)"
-           class="form-control" style="max-width:480px" placeholder="••••••••" />
+    <label class="form-label fw-medium">PAT Environment Variable</label>
+    <input name="ConfigPat" value="@Cfg(ConfigKeys.Pat)"
+           class="form-control font-monospace" style="max-width:480px" placeholder="TFS_PAT" />
 </div>
 
 <!-- Bearer Token -->
 <div id="auth-bearer" class="mt-3" style="display:@Show("bearer")">
-    <label class="form-label fw-medium">Token</label>
-    <input name="ConfigToken" type="password" value="@Cfg(ConfigKeys.Token)"
-           class="form-control" style="max-width:480px" placeholder="••••••••" />
+    <label class="form-label fw-medium">Token Environment Variable</label>
+    <input name="ConfigToken" value="@Cfg(ConfigKeys.Token)"
+           class="form-control font-monospace" style="max-width:480px" placeholder="MY_BEARER_TOKEN" />
 </div>
 
 <!-- NTLM / Negotiate -->
@@ -73,9 +73,9 @@
                    class="form-control" placeholder="CORP\svc_account — blank for process identity" />
         </div>
         <div class="col-md-4">
-            <label class="form-label fw-medium">Password <small class="text-muted">(optional)</small></label>
-            <input name="ConfigPassword" type="password" value="@Cfg(ConfigKeys.Password)"
-                   class="form-control" />
+            <label class="form-label fw-medium">Password Environment Variable <small class="text-muted">(optional)</small></label>
+            <input name="ConfigPassword" value="@Cfg(ConfigKeys.Password)"
+                   class="form-control font-monospace" placeholder="MY_WINDOWS_PASSWORD" />
         </div>
         <div class="col-md-4">
             <label class="form-label fw-medium">Domain <small class="text-muted">(optional)</small></label>
@@ -94,9 +94,9 @@
                    class="form-control" placeholder="X-Api-Key" />
         </div>
         <div class="col-md-8">
-            <label class="form-label fw-medium">Header Value <span class="text-danger">*</span></label>
-            <input name="ConfigApiKeyValue" type="password" value="@Cfg(ConfigKeys.ApiKeyValue)"
-                   class="form-control" />
+            <label class="form-label fw-medium">Header Value Environment Variable <span class="text-danger">*</span></label>
+            <input name="ConfigApiKeyValue" value="@Cfg(ConfigKeys.ApiKeyValue)"
+                   class="form-control font-monospace" placeholder="MY_API_KEY" />
         </div>
     </div>
 </div>

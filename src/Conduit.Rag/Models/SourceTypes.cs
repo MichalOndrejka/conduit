@@ -36,6 +36,19 @@ public static class CollectionNames
         AdoBuilds, AdoRequirements, AdoTestCases,
         AdoWiki, HttpPages
     ];
+
+    public static string? For(string sourceType) => sourceType switch
+    {
+        SourceTypes.ManualDocument   => ManualDocuments,
+        SourceTypes.AdoWorkItemQuery => AdoWorkItems,
+        SourceTypes.AdoCodeRepo      => AdoCode,
+        SourceTypes.AdoPipelineBuild => AdoBuilds,
+        SourceTypes.AdoRequirements  => AdoRequirements,
+        SourceTypes.AdoTestCase      => AdoTestCases,
+        SourceTypes.AdoWiki          => AdoWiki,
+        SourceTypes.HttpPage         => HttpPages,
+        _                            => null
+    };
 }
 
 /// <summary>Well-known config dictionary keys per source type.</summary>

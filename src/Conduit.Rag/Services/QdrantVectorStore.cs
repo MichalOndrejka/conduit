@@ -26,4 +26,22 @@ public sealed class QdrantVectorStore(QdrantClient qdrant) : IVectorStore
             filter:            filter,
             payloadSelector:   withPayload,
             cancellationToken: ct);
+
+    public async Task<(IReadOnlyList<RetrievedPoint> Points, PointId? NextOffset)> ScrollAsync(
+        string collectionName,
+        Filter? filter = null,
+        ulong limit = 20,
+        PointId? offset = null,
+        CancellationToken ct = default)
+    {
+        var response = await qdrant.ScrollAsync(
+            collectionName:    collectionName,
+            filter:            filter,
+            limit:             (uint)limit,
+            offset:            offset,
+            payloadSelector:   true,
+            vectorsSelector:   false,
+            cancellationToken: ct);
+        return (response.Result, response.NextPageOffset);
+    }
 }

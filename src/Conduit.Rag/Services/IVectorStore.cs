@@ -18,4 +18,11 @@ public interface IVectorStore
         Filter? filter = null,
         bool withPayload = true,
         CancellationToken ct = default);
+
+    Task<(IReadOnlyList<RetrievedPoint> Points, PointId? NextOffset)> ScrollAsync(
+        string collectionName,
+        Filter? filter = null,
+        ulong limit = 20,
+        PointId? offset = null,
+        CancellationToken ct = default);
 }

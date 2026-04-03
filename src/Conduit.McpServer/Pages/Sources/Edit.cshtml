@@ -158,12 +158,12 @@
                     </select>
                 </div>
                 <div id="http-auth-pat" class="mb-3" style="display:@(httpAuthType == "pat" ? "block" : "none")">
-                    <label class="form-label fw-medium">Personal Access Token</label>
-                    <input name="ConfigPat" value="@Model.GetConfig(ConfigKeys.Pat)" class="form-control font-monospace" type="password" />
+                    <label class="form-label fw-medium">PAT Environment Variable</label>
+                    <input name="ConfigPat" value="@Model.GetConfig(ConfigKeys.Pat)" class="form-control font-monospace" placeholder="MY_PAT" />
                 </div>
                 <div id="http-auth-bearer" class="mb-3" style="display:@(httpAuthType == "bearer" ? "block" : "none")">
-                    <label class="form-label fw-medium">Bearer Token</label>
-                    <input name="ConfigToken" value="@Model.GetConfig(ConfigKeys.Token)" class="form-control font-monospace" type="password" />
+                    <label class="form-label fw-medium">Token Environment Variable</label>
+                    <input name="ConfigToken" value="@Model.GetConfig(ConfigKeys.Token)" class="form-control font-monospace" placeholder="MY_BEARER_TOKEN" />
                 </div>
                 <div id="http-auth-apikey" style="display:@(httpAuthType == "apikey" ? "block" : "none")">
                     <div class="row g-3 mb-3">
@@ -172,8 +172,8 @@
                             <input name="ConfigApiKeyHeader" value="@Model.GetConfig(ConfigKeys.ApiKeyHeader)" class="form-control" placeholder="X-Api-Key" />
                         </div>
                         <div class="col-md-7">
-                            <label class="form-label fw-medium">Header Value</label>
-                            <input name="ConfigApiKeyValue" value="@Model.GetConfig(ConfigKeys.ApiKeyValue)" class="form-control font-monospace" type="password" />
+                            <label class="form-label fw-medium">Header Value Environment Variable</label>
+                            <input name="ConfigApiKeyValue" value="@Model.GetConfig(ConfigKeys.ApiKeyValue)" class="form-control font-monospace" placeholder="MY_API_KEY" />
                         </div>
                     </div>
                 </div>

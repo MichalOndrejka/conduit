@@ -57,11 +57,19 @@ public sealed class AdoClient(HttpClient http) : IAdoClient, IDisposable
         var wiqlDoc = await JsonSerializer.DeserializeAsync<JsonElement>(
             await wiqlResponse.Content.ReadAsStreamAsync(ct), JsonOpts, ct);
 
-        var ids = wiqlDoc
-            .GetProperty("workItems")
-            .EnumerateArray()
-            .Select(wi => wi.GetProperty("id").GetInt32())
-            .ToList();
+        // Flat queries return "workItems"; tree/hierarchical queries return "workItemRelations"
+        var ids = wiqlDoc.TryGetProperty("workItems", out var flat)
+            ? flat.EnumerateArray()
+                  .Select(wi => wi.GetProperty("id").GetInt32())
+                  .ToList()
+            : wiqlDoc.TryGetProperty("workItemRelations", out var tree)
+                ? tree.EnumerateArray()
+                      .Where(r => r.TryGetProperty("target", out _))
+                      .Select(r => r.GetProperty("target").GetProperty("id").GetInt32())
+                      .Distinct()
+                      .ToList()
+                : throw new InvalidOperationException(
+                      "Unexpected WIQL response format — neither 'workItems' nor 'workItemRelations' found.");
 
         if (ids.Count == 0) return [];
 

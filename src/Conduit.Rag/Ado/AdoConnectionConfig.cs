@@ -71,12 +71,12 @@ public sealed record AdoConnectionConfig
             BaseUrl      = baseUrl,
             AuthType     = authType,
             ApiVersion   = apiVersion,
-            Pat          = config.GetValueOrDefault("pat"),
-            Token        = config.GetValueOrDefault("token"),
+            Pat          = Resolve(config.GetValueOrDefault("pat")),
+            Token        = Resolve(config.GetValueOrDefault("token")),
             ApiKeyHeader = config.GetValueOrDefault("apiKeyHeader"),
-            ApiKeyValue  = config.GetValueOrDefault("apiKeyValue"),
+            ApiKeyValue  = Resolve(config.GetValueOrDefault("apiKeyValue")),
             Username     = config.GetValueOrDefault("username"),
-            Password     = config.GetValueOrDefault("password"),
+            Password     = Resolve(config.GetValueOrDefault("password")),
             Domain       = config.GetValueOrDefault("domain"),
         };
     }
@@ -84,4 +84,8 @@ public sealed record AdoConnectionConfig
     /// <summary>Cache key used to share Windows-auth <see cref="HttpClient"/> instances.</summary>
     internal string WindowsAuthCacheKey =>
         $"{AuthType}|{Username}|{Domain}|{BaseUrl}";
+
+    /// <summary>Treats the stored value as an environment variable name and resolves it at runtime.</summary>
+    private static string? Resolve(string? envVarName) =>
+        string.IsNullOrWhiteSpace(envVarName) ? null : Environment.GetEnvironmentVariable(envVarName);
 }
