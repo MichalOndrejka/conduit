@@ -141,14 +141,15 @@ else
 
 @section Scripts {
 <script>
-    function syncBadge(status, error, phase, current, total) {
+    function syncBadge(status, error, phase, current, total, message) {
         if (status === 'syncing') {
             if (phase === 'embedding' && total > 0) {
                 const pct = Math.round((current / total) * 100);
                 return `<span class="badge bg-info text-dark">Embedding ${current}\u202f/\u202f${total}</span>`
                      + `<div class="progress mt-1" style="height:3px"><div class="progress-bar bg-info" style="width:${pct}%"></div></div>`;
             }
-            return '<span class="badge bg-warning text-dark"><span class="spinner-border spinner-border-sm me-1" role="status"></span>Fetching&hellip;</span>';
+            const msg = message ? `<div class="text-muted mt-1" style="font-size:.72rem">${message}</div>` : '';
+            return '<span class="badge bg-warning text-dark"><span class="spinner-border spinner-border-sm me-1" role="status"></span>Fetching&hellip;</span>' + msg;
         }
         if (status === 'completed')
             return '<span class="badge bg-success">Synced</span>';
@@ -170,7 +171,7 @@ else
                 let stillSyncing = false;
                 data.forEach(s => {
                     const badge = document.querySelector(`[data-sync-status-cell="${s.id}"]`);
-                    if (badge) badge.innerHTML = syncBadge(s.syncStatus, s.syncError, s.syncPhase, s.syncCurrent ?? 0, s.syncTotal ?? 0);
+                    if (badge) badge.innerHTML = syncBadge(s.syncStatus, s.syncError, s.syncPhase, s.syncCurrent ?? 0, s.syncTotal ?? 0, s.syncMessage);
 
                     const time = document.querySelector(`[data-sync-time-cell="${s.id}"]`);
                     if (time) time.textContent = s.lastSyncedAt ?? 'Never';

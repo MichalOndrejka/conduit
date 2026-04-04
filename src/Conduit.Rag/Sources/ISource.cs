@@ -6,5 +6,5 @@ public interface ISource
 {
     string Type { get; }
     string CollectionName { get; }
-    Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default);
+    Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default);
 }

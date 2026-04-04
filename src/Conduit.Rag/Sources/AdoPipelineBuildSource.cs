@@ -11,7 +11,7 @@ public sealed class AdoPipelineBuildSource(SourceDefinition definition, IAdoClie
     public string Type           => SourceTypes.AdoPipelineBuild;
     public string CollectionName => CollectionNames.AdoBuilds;
 
-    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var conn       = AdoConnectionConfig.From(definition.Config);
         var pipelineId = definition.Config[ConfigKeys.PipelineId];

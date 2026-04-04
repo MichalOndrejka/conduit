@@ -24,7 +24,7 @@ public sealed class AdoWikiSource(
     public string CollectionName => CollectionNames.AdoWiki;
 
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(
-        CancellationToken ct = default)
+        IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var conn       = AdoConnectionConfig.From(definition.Config);
         var wikiName   = definition.Config.GetValueOrDefault(ConfigKeys.WikiName);

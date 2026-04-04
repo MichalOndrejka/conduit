@@ -24,7 +24,11 @@ public sealed class SyncService(
         try
         {
             progressStore.Set(sourceId, new SyncProgress("fetching", 0, 0));
-            documents = await source.FetchDocumentsAsync(ct);
+
+            var fetchProgress = new Progress<string>(msg =>
+                progressStore.Set(sourceId, new SyncProgress("fetching", 0, 0, msg)));
+
+            documents = await source.FetchDocumentsAsync(fetchProgress, ct);
         }
         catch (Exception ex)
         {

@@ -19,7 +19,7 @@ public sealed partial class HttpPageSource(
     public string CollectionName => CollectionNames.HttpPages;
 
     public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(
-        CancellationToken ct = default)
+        IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var url         = definition.Config.GetValueOrDefault(ConfigKeys.Url)
                           ?? throw new InvalidOperationException("HttpPageSource requires a 'url' config key.");

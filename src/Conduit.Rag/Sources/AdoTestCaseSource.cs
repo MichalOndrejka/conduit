@@ -12,7 +12,7 @@ public sealed class AdoTestCaseSource(SourceDefinition definition, IAdoClient ad
     public string Type           => SourceTypes.AdoTestCase;
     public string CollectionName => CollectionNames.AdoTestCases;
 
-    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var conn   = AdoConnectionConfig.From(definition.Config);
         var query  = definition.Config[ConfigKeys.Query];

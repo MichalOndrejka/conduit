@@ -8,7 +8,7 @@ public sealed class ManualDocumentSource(SourceDefinition definition) : ISource
     public string Type           => SourceTypes.ManualDocument;
     public string CollectionName => CollectionNames.ManualDocuments;
 
-    public Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
+    public Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         definition.Config.TryGetValue(ConfigKeys.Title, out var title);
         var content = definition.Config.GetValueOrDefault(ConfigKeys.Content, string.Empty);

@@ -11,12 +11,16 @@ public sealed class AdoWorkItemQuerySource(SourceDefinition definition, IAdoClie
     public string Type           => SourceTypes.AdoWorkItemQuery;
     public string CollectionName => CollectionNames.AdoWorkItems;
 
-    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var conn   = AdoConnectionConfig.From(definition.Config);
         var query  = definition.Config[ConfigKeys.Query];
         var fields = ParseFields(definition.Config.GetValueOrDefault(ConfigKeys.Fields, ""));
+
+        fetchProgress?.Report("Running WIQL query\u2026");
         var workItems = await ado.RunWorkItemQueryAsync(conn, query, fields, ct);
+        fetchProgress?.Report($"Loading {workItems.Count} work items\u2026");
+
         return workItems.Select(wi => ToDocument(wi, fields)).ToList();
     }
 

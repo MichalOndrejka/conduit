@@ -11,7 +11,7 @@ public sealed class AdoRequirementsSource(SourceDefinition definition, IAdoClien
     public string Type           => SourceTypes.AdoRequirements;
     public string CollectionName => CollectionNames.AdoRequirements;
 
-    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var conn   = AdoConnectionConfig.From(definition.Config);
         var query  = definition.Config[ConfigKeys.Query];

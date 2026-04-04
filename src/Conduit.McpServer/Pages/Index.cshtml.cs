@@ -53,7 +53,8 @@ public class IndexModel(ISourceConfigStore store, ISyncService syncService, Sync
                 syncError    = s.SyncError,
                 syncPhase    = p?.Phase,
                 syncCurrent  = p?.Current,
-                syncTotal    = p?.Total
+                syncTotal    = p?.Total,
+                syncMessage  = p?.Message
             };
         }));
     }

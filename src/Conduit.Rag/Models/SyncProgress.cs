@@ -4,4 +4,5 @@ namespace Conduit.Rag.Models;
 /// <param name="Phase">"fetching" | "embedding"</param>
 /// <param name="Current">Documents embedded so far (embedding phase only).</param>
 /// <param name="Total">Total documents to embed (embedding phase only).</param>
-public record SyncProgress(string Phase, int Current, int Total);
+/// <param name="Message">Optional status message shown to the user (e.g. "Running WIQL query…").</param>
+public record SyncProgress(string Phase, int Current, int Total, string? Message = null);

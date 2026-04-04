@@ -10,21 +10,24 @@ public sealed class AdoCodeRepoSource(SourceDefinition definition, IAdoClient ad
     public string Type           => SourceTypes.AdoCodeRepo;
     public string CollectionName => CollectionNames.AdoCode;
 
-    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<SourceDocument>> FetchDocumentsAsync(IProgress<string>? fetchProgress = null, CancellationToken ct = default)
     {
         var conn     = AdoConnectionConfig.From(definition.Config);
         var repo     = definition.Config[ConfigKeys.Repository];
         var branch   = definition.Config.GetValueOrDefault(ConfigKeys.Branch, "main");
         var patterns = ParsePatterns(definition.Config.GetValueOrDefault(ConfigKeys.GlobPatterns, "**/*.cs"));
 
+        fetchProgress?.Report("Fetching file list\u2026");
         var allPaths = await ado.GetFileTreeAsync(conn, repo, branch, ct: ct);
         var matchingPaths = allPaths.Where(p => patterns.Any(pattern => GlobMatch(pattern, p))).ToList();
 
         var documents = new List<SourceDocument>(matchingPaths.Count);
 
-        foreach (var path in matchingPaths)
+        for (var fileIndex = 0; fileIndex < matchingPaths.Count; fileIndex++)
         {
+            var path = matchingPaths[fileIndex];
             ct.ThrowIfCancellationRequested();
+            fetchProgress?.Report($"Fetching file {fileIndex + 1}\u202f/\u202f{matchingPaths.Count}\u2026");
 
             try
             {
