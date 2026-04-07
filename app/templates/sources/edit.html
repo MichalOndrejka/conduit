@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block title %}Edit Source{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-2 text-xs text-slate-500 mb-5">
+    <a href="/" class="hover:text-violet-400 transition-colors">Sources</a>
+    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+    <span class="text-slate-400">{{ source.name }}</span>
+</div>
+
+<div class="flex items-center justify-between mb-6">
+    <div>
+        <h1 class="text-lg font-semibold text-slate-100">Edit Source</h1>
+        <p class="text-xs text-slate-500 mt-0.5">{{ type_label }}</p>
+    </div>
+    <a href="/sources/{{ source.id }}/delete" class="btn-danger inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        Delete
+    </a>
+</div>
+
+<div class="card p-6 max-w-2xl">
+    <form method="post" action="/sources/{{ source.id }}/edit">
+        <input type="hidden" name="source_type" value="{{ source.type }}" />
+        <input type="hidden" name="Source.Id" value="{{ source.id }}" />
+
+        {% set cfg = source.config %}
+
+        <div class="mb-5">
+            <label class="field-label">Name <span class="text-red-400">*</span></label>
+            <input name="name" value="{{ source.name }}" class="field-input" required />
+        </div>
+
+        <div class="border-t border-surface-border my-5"></div>
+
+        {% if source.type == "manual" %}
+        <div class="mb-4">
+            <label class="field-label">Content</label>
+            <textarea name="ConfigContent" rows="12" class="field-input">{{ cfg.get('Content', '') }}</textarea>
+        </div>
+        {% endif %}
+
+        {% if source.type not in ("manual", "ado-wiki", "http-page") %}
+        {% include "sources/_ado_connection.html" %}
+        {% endif %}
+
+        {% if source.type in ("ado-workitem-query", "ado-requirements", "ado-test-case") %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="mb-4">
+            <label class="field-label">WIQL Query <span class="text-red-400">*</span></label>
+            <textarea name="ConfigQuery" rows="4" class="field-input">{{ cfg.get('Query', '') }}</textarea>
+        </div>
+        <div class="mb-4">
+            <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
+            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono" />
+        </div>
+        {% endif %}
+
+        {% if source.type == "ado-code" %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Repository <span class="text-red-400">*</span></label>
+                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input" required />
+            </div>
+            <div>
+                <label class="field-label">Branch</label>
+                <input name="ConfigBranch" value="{{ cfg.get('Branch', 'main') }}" class="field-input" />
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="field-label">Glob Patterns</label>
+            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.cs') }}" class="field-input font-mono" />
+        </div>
+        {% endif %}
+
+        {% if source.type == "ado-pipeline-build" %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Pipeline ID <span class="text-red-400">*</span></label>
+                <input name="ConfigPipelineId" value="{{ cfg.get('PipelineId', '') }}" class="field-input" type="number" required />
+            </div>
+            <div>
+                <label class="field-label">Recent Builds</label>
+                <input name="ConfigLastNBuilds" value="{{ cfg.get('LastNBuilds', '5') }}" class="field-input" type="number" min="1" max="50" />
+            </div>
+        </div>
+        {% endif %}
+
+        {% if source.type == "ado-wiki" %}
+        {% include "sources/_ado_connection.html" %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span></label>
+                <input name="ConfigWikiName" value="{{ cfg.get('WikiName', '') }}" class="field-input" placeholder="MyProject.wiki" />
+            </div>
+            <div>
+                <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span></label>
+                <input name="ConfigPathFilter" value="{{ cfg.get('PathFilter', '') }}" class="field-input" placeholder="/Architecture" />
+            </div>
+        </div>
+        {% endif %}
+
+        {% if source.type == "http-page" %}
+        {% set auth_type_val = cfg.get('AuthType', 'none') %}
+        <div class="mb-4">
+            <label class="field-label">URL <span class="text-red-400">*</span></label>
+            <input name="ConfigUrl" value="{{ cfg.get('Url', '') }}" class="field-input font-mono" type="url" required />
+        </div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Title <span class="text-slate-600">(optional)</span></label>
+                <input name="ConfigTitle" value="{{ cfg.get('Title', '') }}" class="field-input" />
+            </div>
+            <div>
+                <label class="field-label">Content Type</label>
+                <select name="ConfigContentType" class="field-input">
+                    <option value="auto"  {% if cfg.get('ContentType','auto') == 'auto'  %}selected{% endif %}>Auto-detect</option>
+                    <option value="html"  {% if cfg.get('ContentType') == 'html'          %}selected{% endif %}>HTML</option>
+                    <option value="json"  {% if cfg.get('ContentType') == 'json'          %}selected{% endif %}>JSON</option>
+                    <option value="text"  {% if cfg.get('ContentType') == 'text'          %}selected{% endif %}>Plain text</option>
+                </select>
+            </div>
+        </div>
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="mb-4">
+            <label class="field-label">Authentication</label>
+            <select name="ConfigAuthType" id="httpAuthType" class="field-input mb-3" onchange="updateHttpAuthFields()" style="max-width:260px">
+                <option value="none"   {% if auth_type_val == 'none'   %}selected{% endif %}>None / Anonymous</option>
+                <option value="pat"    {% if auth_type_val == 'pat'    %}selected{% endif %}>Personal Access Token</option>
+                <option value="bearer" {% if auth_type_val == 'bearer' %}selected{% endif %}>Bearer Token</option>
+                <option value="apikey" {% if auth_type_val == 'apikey' %}selected{% endif %}>API Key Header</option>
+            </select>
+            <div id="http-auth-pat" style="display:{% if auth_type_val == 'pat' %}block{% else %}none{% endif %}" class="mb-3">
+                <label class="field-label">PAT Env Var</label>
+                <input name="ConfigPat" value="{{ cfg.get('Pat', '') }}" class="field-input font-mono" placeholder="MY_PAT" />
+            </div>
+            <div id="http-auth-bearer" style="display:{% if auth_type_val == 'bearer' %}block{% else %}none{% endif %}" class="mb-3">
+                <label class="field-label">Token Env Var</label>
+                <input name="ConfigToken" value="{{ cfg.get('Token', '') }}" class="field-input font-mono" placeholder="MY_BEARER_TOKEN" />
+            </div>
+            <div id="http-auth-apikey" style="display:{% if auth_type_val == 'apikey' %}block{% else %}none{% endif %}">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="field-label">Header Name</label>
+                        <input name="ConfigApiKeyHeader" value="{{ cfg.get('ApiKeyHeader', '') }}" class="field-input" placeholder="X-Api-Key" />
+                    </div>
+                    <div>
+                        <label class="field-label">Header Value Env Var</label>
+                        <input name="ConfigApiKeyValue" value="{{ cfg.get('ApiKeyValue', '') }}" class="field-input font-mono" placeholder="MY_API_KEY" />
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="border-t border-surface-border mt-5 pt-5 flex items-center gap-3">
+            <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                Save Changes
+            </button>
+            <a href="/" class="btn-ghost inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateHttpAuthFields() {
+    var t = document.getElementById('httpAuthType').value;
+    document.getElementById('http-auth-pat').style.display    = (t === 'pat')    ? '' : 'none';
+    document.getElementById('http-auth-bearer').style.display = (t === 'bearer') ? '' : 'none';
+    document.getElementById('http-auth-apikey').style.display = (t === 'apikey') ? '' : 'none';
+}
+</script>
+{% endblock %}

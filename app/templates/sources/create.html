@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Add Source{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-2 text-xs text-slate-500 mb-5">
+    <a href="/" class="hover:text-violet-400 transition-colors">Sources</a>
+    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+    <span class="text-slate-400">Add Source</span>
+</div>
+
+{% if not selected_type %}
+<!-- Step 1: pick type -->
+<div class="mb-6">
+    <h1 class="text-lg font-semibold text-slate-100">Choose a source type</h1>
+    <p class="text-xs text-slate-500 mt-0.5">Connect your knowledge into the vector store</p>
+</div>
+
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    {% for type, label, description in source_types %}
+    <a href="/sources/create?type={{ type }}" class="card p-4 block cursor-pointer group" style="text-decoration:none;">
+        <div class="flex items-start gap-3">
+            <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5" style="background: hsla(199,89%,48%,0.1); border: 1px solid hsla(199,89%,48%,0.22);">
+                <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                </svg>
+            </div>
+            <div class="min-w-0">
+                <div class="text-sm font-medium text-slate-200 group-hover:text-violet-300 transition-colors">{{ label }}</div>
+                <div class="text-xs text-slate-500 mt-0.5 leading-relaxed">{{ description }}</div>
+            </div>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+
+{% else %}
+<!-- Step 2: configure -->
+<div class="mb-6">
+    <h1 class="text-lg font-semibold text-slate-100">Configure: {{ type_label }}</h1>
+    <p class="text-xs text-slate-500 mt-0.5">Fill in source details and connection settings</p>
+</div>
+
+<div class="card p-6 max-w-2xl">
+    <form method="post" action="/sources/create" enctype="multipart/form-data">
+        <input type="hidden" name="source_type" value="{{ selected_type }}" />
+        <input type="hidden" name="Source.Id" value="{{ source.id }}" />
+
+        <div class="mb-5">
+            <label class="field-label">Name <span class="text-red-400">*</span></label>
+            <input name="name" value="{{ source.name }}" class="field-input" placeholder="e.g. Sprint Backlog" required />
+        </div>
+
+        <div class="border-t border-surface-border my-5"></div>
+
+        {% if selected_type == "manual" %}
+        <div class="mb-4">
+            <label class="field-label">Upload file <span class="text-slate-600">(txt, md, pdf)</span></label>
+            <input type="file" name="ConfigFile" accept=".txt,.md,.pdf" class="field-input" style="padding: 0.4rem 0.75rem;" />
+        </div>
+        <div class="mb-4">
+            <label class="field-label">Or paste text</label>
+            <textarea name="ConfigContent" rows="10" class="field-input" placeholder="Paste document content here…"></textarea>
+            <p class="text-xs text-slate-600 mt-1">File upload takes precedence over pasted text.</p>
+        </div>
+        {% endif %}
+
+        {% if selected_type not in ("manual", "ado-wiki", "http-page") %}
+        {% include "sources/_ado_connection.html" %}
+        {% endif %}
+
+        {% if selected_type in ("ado-workitem-query", "ado-requirements", "ado-test-case") %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="mb-4">
+            <label class="field-label">WIQL Query <span class="text-red-400">*</span></label>
+            <textarea name="ConfigQuery" rows="4" class="field-input" placeholder="SELECT [System.Id] FROM WorkItems WHERE …"></textarea>
+        </div>
+        <div class="mb-4">
+            <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
+            <input name="ConfigFields" class="field-input font-mono" placeholder="System.Title,System.Description,System.State" />
+        </div>
+        {% endif %}
+
+        {% if selected_type == "ado-code" %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Repository <span class="text-red-400">*</span></label>
+                <input name="ConfigRepository" class="field-input" placeholder="MyRepo" required />
+            </div>
+            <div>
+                <label class="field-label">Branch</label>
+                <input name="ConfigBranch" value="main" class="field-input" placeholder="main" />
+            </div>
+        </div>
+        <div class="mb-4">
+            <label class="field-label">Glob Patterns <span class="text-slate-600">(comma-separated)</span></label>
+            <input name="ConfigGlobPatterns" value="**/*.cs" class="field-input font-mono" placeholder="**/*.cs,**/*.ts" />
+            <p class="text-xs text-slate-600 mt-1">Supports <code class="text-slate-500">**</code> (any depth) and <code class="text-slate-500">*</code> (any name).</p>
+        </div>
+        {% endif %}
+
+        {% if selected_type == "ado-pipeline-build" %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Pipeline ID <span class="text-red-400">*</span></label>
+                <input name="ConfigPipelineId" class="field-input" type="number" placeholder="42" required />
+                <p class="text-xs text-slate-600 mt-1">Numeric <code class="text-slate-500">definitionId</code> from the URL.</p>
+            </div>
+            <div>
+                <label class="field-label">Recent Builds</label>
+                <input name="ConfigLastNBuilds" value="5" class="field-input" type="number" min="1" max="50" />
+            </div>
+        </div>
+        {% endif %}
+
+        {% if selected_type == "ado-wiki" %}
+        {% include "sources/_ado_connection.html" %}
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span></label>
+                <input name="ConfigWikiName" class="field-input" placeholder="MyProject.wiki" />
+                <p class="text-xs text-slate-600 mt-1">Blank = first wiki in the project.</p>
+            </div>
+            <div>
+                <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span></label>
+                <input name="ConfigPathFilter" class="field-input" placeholder="/Architecture" />
+                <p class="text-xs text-slate-600 mt-1">Only index pages under this path.</p>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if selected_type == "http-page" %}
+        <div class="mb-4">
+            <label class="field-label">URL <span class="text-red-400">*</span></label>
+            <input name="ConfigUrl" class="field-input font-mono" type="url" placeholder="https://example.com/page" required />
+        </div>
+        <div class="grid grid-cols-2 gap-4 mb-4">
+            <div>
+                <label class="field-label">Title <span class="text-slate-600">(optional)</span></label>
+                <input name="ConfigTitle" class="field-input" placeholder="My Doc Page" />
+            </div>
+            <div>
+                <label class="field-label">Content Type</label>
+                <select name="ConfigContentType" class="field-input">
+                    <option value="auto" selected>Auto-detect</option>
+                    <option value="html">HTML</option>
+                    <option value="json">JSON</option>
+                    <option value="text">Plain text</option>
+                </select>
+            </div>
+        </div>
+        <div class="border-t border-surface-border my-5"></div>
+        <div class="mb-4">
+            <label class="field-label">Authentication</label>
+            <select name="ConfigAuthType" id="httpAuthType" class="field-input mb-3" onchange="updateHttpAuthFields()" style="max-width:260px">
+                <option value="none" selected>None / Anonymous</option>
+                <option value="pat">Personal Access Token</option>
+                <option value="bearer">Bearer Token</option>
+                <option value="apikey">API Key Header</option>
+            </select>
+            <div id="http-auth-pat" style="display:none" class="mb-3">
+                <label class="field-label">PAT Env Var</label>
+                <input name="ConfigPat" class="field-input font-mono" placeholder="MY_PAT" />
+            </div>
+            <div id="http-auth-bearer" style="display:none" class="mb-3">
+                <label class="field-label">Token Env Var</label>
+                <input name="ConfigToken" class="field-input font-mono" placeholder="MY_BEARER_TOKEN" />
+            </div>
+            <div id="http-auth-apikey" style="display:none">
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="field-label">Header Name</label>
+                        <input name="ConfigApiKeyHeader" class="field-input" placeholder="X-Api-Key" />
+                    </div>
+                    <div>
+                        <label class="field-label">Header Value Env Var</label>
+                        <input name="ConfigApiKeyValue" class="field-input font-mono" placeholder="MY_API_KEY" />
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="border-t border-surface-border mt-5 pt-5 flex items-center gap-3">
+            <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                Save &amp; Sync
+            </button>
+            <a href="/" class="btn-ghost inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateHttpAuthFields() {
+    var t = document.getElementById('httpAuthType').value;
+    document.getElementById('http-auth-pat').style.display    = (t === 'pat')    ? '' : 'none';
+    document.getElementById('http-auth-bearer').style.display = (t === 'bearer') ? '' : 'none';
+    document.getElementById('http-auth-apikey').style.display = (t === 'apikey') ? '' : 'none';
+}
+</script>
+{% endblock %}

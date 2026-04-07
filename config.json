@@ -1,0 +1,18 @@
+{
+  "embedding": {
+    "provider": "openai",
+    "model": "text-embedding-3-small",
+    "api_key_env_var": "OPENAI_API_KEY",
+    "base_url": "",
+    "dimensions": 1536
+  },
+  "qdrant": {
+    "host": "localhost",
+    "port": 6333
+  },
+  "chunking": {
+    "max_chunk_size": 2000,
+    "overlap": 200
+  },
+  "sources_file_path": "conduit-sources.json"
+}

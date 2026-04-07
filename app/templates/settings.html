@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="text-lg font-semibold text-slate-100">Settings</h1>
+    <p class="text-xs text-slate-500 mt-0.5">Configure embedding model and vector store connection</p>
+</div>
+
+{% if status_message == 'saved' %}
+<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #34d399;">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    Settings saved.
+    {% if was_dropped %} Embedding model changed — all collections dropped and sources marked for reindex.{% endif %}
+</div>
+{% endif %}
+
+{% if was_dropped %}
+<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24;">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.96L13.75 4a2 2 0 00-3.5 0L3.25 16.04A2 2 0 005.07 19z"/></svg>
+    Vector collections were dropped. Re-sync your sources to rebuild the index.
+</div>
+{% endif %}
+
+<form method="post" action="/settings">
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+
+        <!-- Embedding config -->
+        <div class="card p-5">
+            <h2 class="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+                </svg>
+                Embedding
+            </h2>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="field-label">Provider</label>
+                    <select name="provider" id="embProvider" class="field-input" onchange="updateEmbeddingFields()">
+                        <option value="openai" {% if cfg.embedding.provider == 'openai' %}selected{% endif %}>OpenAI</option>
+                        <option value="ollama" {% if cfg.embedding.provider == 'ollama' %}selected{% endif %}>Ollama (local)</option>
+                        <option value="openai-compatible" {% if cfg.embedding.provider == 'openai-compatible' %}selected{% endif %}>OpenAI-compatible API</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="field-label">Model</label>
+                    <input name="model" value="{{ cfg.embedding.model }}" class="field-input font-mono" placeholder="text-embedding-3-small" />
+                </div>
+                <div>
+                    <label class="field-label">Dimensions</label>
+                    <input name="dimensions" value="{{ cfg.embedding.dimensions }}" type="number" class="field-input" placeholder="1536" />
+                    <p class="text-xs text-slate-600 mt-1">Changing this drops all vector collections.</p>
+                </div>
+                <div id="field-api-key">
+                    <label class="field-label">API Key Env Var</label>
+                    <input name="api_key_env_var" value="{{ cfg.embedding.api_key_env_var }}" class="field-input font-mono" placeholder="OPENAI_API_KEY" />
+                    <p class="text-xs text-slate-600 mt-1">Name of the environment variable holding the key.</p>
+                </div>
+                <div id="field-base-url" style="display:none">
+                    <label class="field-label">Base URL</label>
+                    <input name="base_url" value="{{ cfg.embedding.base_url }}" class="field-input font-mono" placeholder="http://localhost:11434/v1" />
+                </div>
+                <div>
+                    <label class="field-label">Max Input Chars</label>
+                    <input name="max_input_chars" value="{{ cfg.embedding.max_input_chars }}" type="number" class="field-input" placeholder="8000" />
+                    <p class="text-xs text-slate-600 mt-1">Hard cap on text sent per embedding call. Protects against token-limit errors on long code. 0 = unlimited.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Qdrant config -->
+        <div class="card p-5">
+            <h2 class="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                </svg>
+                Vector Store (Qdrant)
+            </h2>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="field-label">Host</label>
+                    <input name="qdrant_host" value="{{ cfg.qdrant.host }}" class="field-input font-mono" placeholder="localhost" />
+                    <p class="text-xs text-slate-600 mt-1">In Docker this is the service name, e.g. <code class="text-slate-500">qdrant</code>.</p>
+                </div>
+                <div>
+                    <label class="field-label">Port</label>
+                    <input name="qdrant_port" value="{{ cfg.qdrant.port }}" type="number" class="field-input" placeholder="6333" />
+                </div>
+                <div class="pt-2">
+                    <div class="flex items-center gap-2">
+                        {% if qdrant_ready %}
+                        <span class="glow-dot"></span>
+                        <span class="text-xs text-emerald-400">Connected</span>
+                        {% else %}
+                        <span class="glow-dot red"></span>
+                        <span class="text-xs text-red-400">Offline</span>
+                        {% if qdrant_error %}<span class="text-xs text-slate-600">— {{ qdrant_error }}</span>{% endif %}
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Config path info -->
+        <div class="card p-5 lg:col-span-2">
+            <p class="text-xs text-slate-500">
+                Config file: <code class="font-mono text-slate-400">{{ config_path }}</code>
+            </p>
+        </div>
+    </div>
+
+    <div class="mt-5">
+        <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+            Save Settings
+        </button>
+    </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function updateEmbeddingFields() {
+    var p = document.getElementById('embProvider').value;
+    document.getElementById('field-api-key').style.display  = (p === 'ollama') ? 'none' : '';
+    document.getElementById('field-base-url').style.display = (p !== 'openai') ? '' : 'none';
+}
+updateEmbeddingFields();
+</script>
+{% endblock %}

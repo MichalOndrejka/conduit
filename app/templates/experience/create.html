@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Add Experience{% endblock %}
+
+{% block content %}
+<div class="flex items-center gap-2 text-xs text-slate-500 mb-5">
+    <a href="/experience" class="hover:text-violet-400 transition-colors">Experiences</a>
+    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+    <span class="text-slate-400">Add Experience</span>
+</div>
+
+<div class="mb-6">
+    <h1 class="text-lg font-semibold text-slate-100">Add Experience</h1>
+    <p class="text-xs text-slate-500 mt-0.5">Store knowledge for the LLM to recall in future sessions</p>
+</div>
+
+<div class="card p-6 max-w-2xl">
+    <form method="post" action="/experience/add">
+        <div class="mb-5">
+            <label class="field-label">Content <span class="text-red-400">*</span></label>
+            <textarea name="content" rows="5" class="field-input resize-none"
+                placeholder="What should be remembered? e.g. user prefers short responses, avoid mocking databases in tests…"
+                required></textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4 mb-5">
+            <div>
+                <label class="field-label">Category</label>
+                <select name="category" class="field-input">
+                    <option value="general">General</option>
+                    <option value="preference">Preference</option>
+                    <option value="mistake">Mistake</option>
+                    <option value="fact">Fact</option>
+                    <option value="decision">Decision</option>
+                    <option value="context">Context</option>
+                </select>
+            </div>
+            <div>
+                <label class="field-label">Importance</label>
+                <select name="importance" class="field-input">
+                    <option value="1">1 — Low</option>
+                    <option value="2">2</option>
+                    <option value="3" selected>3 — Normal</option>
+                    <option value="4">4</option>
+                    <option value="5">5 — Critical</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="border-t border-surface-border pt-5 flex items-center gap-3">
+            <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                </svg>
+                Store Experience
+            </button>
+            <a href="/experience" class="btn-ghost inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium">Cancel</a>
+        </div>
+    </form>
+</div>
+{% endblock %}

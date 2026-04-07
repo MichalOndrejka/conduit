@@ -1,0 +1,79 @@
+{# Shared ADO connection partial. Config dict uses PascalCase keys (as stored by ConfigKeys). #}
+{% set cfg = source.config %}
+{% set raw_auth = cfg.get("AuthType", "") %}
+{% set current_auth = raw_auth if raw_auth else ("pat" if cfg.get("Pat") else "none") %}
+
+<div class="grid grid-cols-2 gap-4 mb-4">
+    <div class="col-span-2 sm:col-span-1" style="grid-column: span 2 / span 2;">
+        <label class="field-label">Base URL <span class="text-red-400">*</span></label>
+        <input name="ConfigBaseUrl" value="{{ cfg.get('BaseUrl', '') }}" class="field-input font-mono"
+               placeholder="https://dev.azure.com/org/project" />
+        <p class="text-xs text-slate-600 mt-1">Or <code class="text-slate-500">https://tfs.corp.com/tfs/Collection/Project</code></p>
+    </div>
+    <div>
+        <label class="field-label">API Version</label>
+        <input name="ConfigApiVersion" value="{{ cfg.get('ApiVersion', '7.1') }}" class="field-input font-mono" placeholder="7.1" />
+    </div>
+    <div>
+        <label class="field-label">Authentication</label>
+        <select id="authTypeSelect" name="ConfigAuthType" class="field-input" onchange="updateAuthFields()">
+            <option value="pat"       {% if current_auth == "pat"       %}selected{% endif %}>PAT</option>
+            <option value="bearer"    {% if current_auth == "bearer"    %}selected{% endif %}>Bearer Token</option>
+            <option value="ntlm"      {% if current_auth == "ntlm"      %}selected{% endif %}>NTLM</option>
+            <option value="negotiate" {% if current_auth == "negotiate" %}selected{% endif %}>Negotiate</option>
+            <option value="apikey"    {% if current_auth == "apikey"    %}selected{% endif %}>API Key</option>
+            <option value="none"      {% if current_auth == "none"      %}selected{% endif %}>None</option>
+        </select>
+    </div>
+</div>
+
+<div id="auth-pat" {% if current_auth != "pat" %}style="display:none"{% endif %} class="mb-4">
+    <label class="field-label">PAT Environment Variable</label>
+    <input name="ConfigPat" value="{{ cfg.get('Pat', '') }}" class="field-input font-mono" placeholder="TFS_PAT" />
+    <p class="text-xs text-slate-600 mt-1">Name of the env var holding the Personal Access Token.</p>
+</div>
+
+<div id="auth-bearer" {% if current_auth != "bearer" %}style="display:none"{% endif %} class="mb-4">
+    <label class="field-label">Token Environment Variable</label>
+    <input name="ConfigToken" value="{{ cfg.get('Token', '') }}" class="field-input font-mono" placeholder="MY_BEARER_TOKEN" />
+</div>
+
+<div id="auth-windows" {% if current_auth not in ("ntlm", "negotiate") %}style="display:none"{% endif %} class="mb-4">
+    <div class="grid grid-cols-3 gap-3">
+        <div>
+            <label class="field-label">Username</label>
+            <input name="ConfigUsername" value="{{ cfg.get('Username', '') }}" class="field-input" placeholder="CORP\svc" />
+        </div>
+        <div>
+            <label class="field-label">Password Env Var</label>
+            <input name="ConfigPassword" value="{{ cfg.get('Password', '') }}" class="field-input font-mono" placeholder="MY_PASSWORD" />
+        </div>
+        <div>
+            <label class="field-label">Domain</label>
+            <input name="ConfigDomain" value="{{ cfg.get('Domain', '') }}" class="field-input" placeholder="CORP" />
+        </div>
+    </div>
+</div>
+
+<div id="auth-apikey" {% if current_auth != "apikey" %}style="display:none"{% endif %} class="mb-4">
+    <div class="grid grid-cols-2 gap-3">
+        <div>
+            <label class="field-label">Header Name <span class="text-red-400">*</span></label>
+            <input name="ConfigApiKeyHeader" value="{{ cfg.get('ApiKeyHeader', '') }}" class="field-input" placeholder="X-Api-Key" />
+        </div>
+        <div>
+            <label class="field-label">Header Value Env Var <span class="text-red-400">*</span></label>
+            <input name="ConfigApiKeyValue" value="{{ cfg.get('ApiKeyValue', '') }}" class="field-input font-mono" placeholder="MY_API_KEY" />
+        </div>
+    </div>
+</div>
+
+<script>
+function updateAuthFields() {
+    var t = document.getElementById('authTypeSelect').value;
+    document.getElementById('auth-pat').style.display     = (t === 'pat')                       ? '' : 'none';
+    document.getElementById('auth-bearer').style.display  = (t === 'bearer')                    ? '' : 'none';
+    document.getElementById('auth-windows').style.display = (t === 'ntlm'||t === 'negotiate')   ? '' : 'none';
+    document.getElementById('auth-apikey').style.display  = (t === 'apikey')                    ? '' : 'none';
+}
+</script>

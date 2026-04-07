@@ -1,0 +1,36 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  conduit:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - conduit_data:/data
+      - ./config.json:/app/config.json   # mount config for easy editing without rebuild
+    environment:
+      # Qdrant — must point to the service name inside compose network
+      CONDUIT_CONFIG: /app/config.json
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      # Embedding API key — set this or use a .env file
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Any other secrets your sources need (PAT, bearer tokens, etc.)
+      # TFS_PAT: ${TFS_PAT:-}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+
+volumes:
+  qdrant_data:
+  conduit_data:
