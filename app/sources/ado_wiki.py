@@ -71,6 +71,7 @@ class AdoWikiSource(Source):
                         id=f"{self._source.id}_{path}_{unit.to_id_slug()}",
                         text=unit.full_text,
                         tags={
+                            "source_id": self._source.id,
                             "source_name": self._source.name,
                             "wiki_name": wiki_name,
                             "section": section,

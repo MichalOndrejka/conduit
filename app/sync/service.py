@@ -39,7 +39,7 @@ class SyncService:
 
         try:
             impl = self._factory.create(source)
-            collection = collection_for(source.type)
+            collection = collection_for(source)
 
             def on_fetch_progress(p: SyncProgress) -> None:
                 self._progress_store.set(source_id, p)

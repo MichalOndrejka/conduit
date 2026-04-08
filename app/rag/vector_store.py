@@ -50,13 +50,14 @@ class VectorStore:
         tags: Optional[dict[str, str]] = None,
     ) -> list[ScoredPoint]:
         query_filter = _build_filter(tags) if tags else None
-        return await self._client.search(
+        result = await self._client.query_points(
             collection_name=collection,
-            query_vector=vector,
+            query=vector,
             limit=limit,
             query_filter=query_filter,
             with_payload=True,
         )
+        return result.points
 
     async def scroll(
         self,

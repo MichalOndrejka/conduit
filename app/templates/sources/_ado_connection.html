@@ -1,14 +1,13 @@
 {# Shared ADO connection partial. Config dict uses PascalCase keys (as stored by ConfigKeys). #}
 {% set cfg = source.config %}
 {% set raw_auth = cfg.get("AuthType", "") %}
-{% set current_auth = raw_auth if raw_auth else ("pat" if cfg.get("Pat") else "none") %}
+{% set current_auth = raw_auth if raw_auth else "pat" %}
 
 <div class="grid grid-cols-2 gap-4 mb-4">
     <div class="col-span-2 sm:col-span-1" style="grid-column: span 2 / span 2;">
-        <label class="field-label">Base URL <span class="text-red-400">*</span></label>
+        <label class="field-label">Base URL <span class="text-red-400">*</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">For on-premise: https://tfs.corp.com/tfs/Collection/Project</span></span></label>
         <input name="ConfigBaseUrl" value="{{ cfg.get('BaseUrl', '') }}" class="field-input font-mono"
                placeholder="https://dev.azure.com/org/project" />
-        <p class="text-xs text-slate-600 mt-1">Or <code class="text-slate-500">https://tfs.corp.com/tfs/Collection/Project</code></p>
     </div>
     <div>
         <label class="field-label">API Version</label>
@@ -28,9 +27,8 @@
 </div>
 
 <div id="auth-pat" {% if current_auth != "pat" %}style="display:none"{% endif %} class="mb-4">
-    <label class="field-label">PAT Environment Variable</label>
+    <label class="field-label">PAT Environment Variable<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Name of the environment variable that holds your Personal Access Token</span></span></label>
     <input name="ConfigPat" value="{{ cfg.get('Pat', '') }}" class="field-input font-mono" placeholder="TFS_PAT" />
-    <p class="text-xs text-slate-600 mt-1">Name of the env var holding the Personal Access Token.</p>
 </div>
 
 <div id="auth-bearer" {% if current_auth != "bearer" %}style="display:none"{% endif %} class="mb-4">

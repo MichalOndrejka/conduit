@@ -112,6 +112,9 @@
             transition: all 0.15s;
         }
         .btn-danger:hover { background: hsla(0,84%,60%,0.1); border-color: var(--destructive); }
+        .btn-primary:disabled, .btn-danger:disabled, .btn-ghost:disabled {
+            opacity: 0.5; cursor: not-allowed; pointer-events: none;
+        }
 
         /* ── Form fields ───────────────────────────────────────────────────────── */
         .field-input {
@@ -206,6 +209,32 @@
         ::-webkit-scrollbar-track { background: var(--bg); }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
         ::-webkit-scrollbar-thumb:hover { background: hsl(217,33%,25%); }
+
+        /* Field tooltip */
+        .tip { position: relative; display: inline-flex; align-items: center; margin-left: 4px; cursor: help; }
+        .tip svg { color: #475569; }
+        .tip:hover svg { color: #94a3b8; }
+        .tip-text {
+            display: none;
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #1e293b;
+            border: 1px solid rgba(148,163,184,0.15);
+            color: #94a3b8;
+            font-size: 11px;
+            line-height: 1.5;
+            padding: 6px 9px;
+            border-radius: 6px;
+            width: max-content;
+            max-width: 260px;
+            z-index: 50;
+            white-space: normal;
+            pointer-events: none;
+            font-weight: 400;
+        }
+        .tip:hover .tip-text { display: block; }
     </style>
 </head>
 <body class="h-full flex font-sans antialiased">
@@ -320,11 +349,30 @@
 
 <!-- Main -->
 <div class="flex-1 overflow-auto">
-    <main class="p-8 max-w-5xl">
+    <main class="p-8">
         {% block content %}{% endblock %}
     </main>
 </div>
 
 {% block scripts %}{% endblock %}
+<script>
+// Disable submit buttons on form submit to prevent double-submission.
+// Excludes forms that opt-out with data-no-loading or that use AJAX (Preview button).
+document.addEventListener('submit', function(e) {
+    var form = e.target;
+    if (form.dataset.noLoading) return;
+    var btn = form.querySelector('button[type=submit]');
+    if (!btn) return;
+    btn.disabled = true;
+    // Replace inner content with spinner + label
+    var label = btn.innerText.trim();
+    btn.innerHTML =
+        '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">' +
+        '<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>' +
+        '<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>' +
+        '</svg>' +
+        '<span>' + label + '…</span>';
+}, true);
+</script>
 </body>
 </html>

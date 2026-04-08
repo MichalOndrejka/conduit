@@ -7,12 +7,20 @@ from typing import Optional
 from pydantic import BaseModel
 
 
+# Per-provider defaults shown in the UI when the user switches provider
+PROVIDER_DEFAULTS: dict[str, dict] = {
+    "openai":             {"model": "text-embedding-3-small", "dimensions": 1536},
+    "ollama":             {"model": "nomic-embed-text-v2-moe", "dimensions": 768},
+    "openai-compatible":  {"model": "",                        "dimensions": 1536},
+}
+
+
 class EmbeddingConfig(BaseModel):
-    provider: str = "openai"          # openai | ollama | openai-compatible
-    model: str = "text-embedding-3-small"
-    api_key_env_var: str = "OPENAI_API_KEY"
+    provider: str = "ollama"          # openai | ollama | openai-compatible
+    model: str = "nomic-embed-text-v2-moe"
+    api_key_env_var: str = ""
     base_url: str = ""
-    dimensions: int = 1536
+    dimensions: int = 768
     max_input_chars: int = 8000       # Hard cap on chars sent to the API (≈2 000 tokens for dense code)
 
 

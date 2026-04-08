@@ -58,6 +58,7 @@ class AdoPipelineBuildSource(Source):
                 id=f"{self._source.id}_build_{build_id}",
                 text="\n".join(text_parts),
                 tags={
+                    "source_id": self._source.id,
                     "source_name": self._source.name,
                     "pipeline_id": str(pipeline_id),
                     "build_result": result,

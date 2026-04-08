@@ -80,6 +80,7 @@ class AdoCodeRepoSource(Source):
                     id=f"{self._source.id}_{path}_{unit.to_id_slug()}",
                     text=unit.enriched_text,
                     tags={
+                        "source_id": self._source.id,
                         "source_name": self._source.name,
                         "language": unit.language,
                         "kind": unit.kind.value,

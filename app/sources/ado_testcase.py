@@ -10,6 +10,12 @@ from app.sources.base import Source, ProgressCallback
 
 _XML_TAG_RE = re.compile(r"<[^>]+>")
 
+_DEFAULT_WIQL = (
+    "SELECT [System.Id] FROM WorkItems "
+    "WHERE [System.WorkItemType] = 'Test Case' "
+    "ORDER BY [System.ChangedDate] DESC"
+)
+
 
 def _strip_xml(text: str) -> str:
     return _XML_TAG_RE.sub(" ", text).strip()
@@ -24,7 +30,9 @@ class AdoTestCaseSource(Source):
         self, progress_cb: Optional[ProgressCallback] = None
     ) -> list[SourceDocument]:
         conn = AdoConnection.from_config(self._source.config)
-        wiql = self._source.get_config(ConfigKeys.QUERY)
+
+        # Custom WIQL for power users; otherwise use the default test case query
+        wiql = self._source.get_config(ConfigKeys.QUERY) or _DEFAULT_WIQL
         fields_raw = self._source.get_config(ConfigKeys.FIELDS)
         fields = [f.strip() for f in fields_raw.split(",") if f.strip()]
 
@@ -49,13 +57,14 @@ class AdoTestCaseSource(Source):
             if steps_xml:
                 text_parts.append("Steps: " + _strip_xml(steps_xml))
             for k, v in fields_data.items():
-                if v and str(v).strip() and k not in ("Microsoft.VSTS.TCM.Steps",):
+                if v and str(v).strip() and k != "Microsoft.VSTS.TCM.Steps":
                     text_parts.append(f"{k}: {v}")
 
             docs.append(SourceDocument(
                 id=f"{self._source.id}_tc_{item_id}",
                 text="\n".join(text_parts),
                 tags={
+                    "source_id": self._source.id,
                     "source_name": self._source.name,
                     "automation_status": automation_status,
                     "state": state,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -58,16 +59,23 @@ async def lifespan(app: FastAPI):
     container.memory_service = memory_service
 
     register_tools(mcp, search_service, memory_service)
-    await bootstrap_qdrant(cfg, vector_store, health)
 
-    yield
+    # Bootstrap Qdrant in the background so the UI is immediately available
+    # even when Qdrant is offline or still starting up.
+    asyncio.create_task(bootstrap_qdrant(cfg, vector_store, health))
+
+    # Run the FastMCP session manager so its task group is initialized.
+    # streamable_http_app() is called at mount time (below), which lazily
+    # creates the session manager — we just need to start it here.
+    async with mcp.session_manager.run():
+        yield
 
 
 app = FastAPI(title="Conduit", lifespan=lifespan)
 
 from app.web.routes import router  # noqa: E402 — imported after app creation to avoid circular
 app.include_router(router)
-app.mount("/mcp", mcp.streamable_http_app())
+app.mount("/", mcp.streamable_http_app())
 
 
 def run():

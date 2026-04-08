@@ -21,6 +21,6 @@ class ManualDocumentSource(Source):
         return [SourceDocument(
             id=self._source.id,
             text=content,
-            tags={"source_name": self._source.name},
+            tags={"source_id": self._source.id, "source_name": self._source.name},
             properties={"title": title},
         )]

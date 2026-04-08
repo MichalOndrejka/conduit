@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import io
 import json
 import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-import pypdf
 from fastapi import APIRouter, BackgroundTasks, Form, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from qdrant_client.models import FieldCondition, Filter, MatchValue
@@ -14,7 +12,7 @@ from qdrant_client.models import FieldCondition, Filter, MatchValue
 from app import container
 from app.templates_cfg import templates
 from app.models import ConfigKeys, PayloadKeys, SourceDefinition, SourceTypes
-from app.sources.factory import SOURCE_TYPE_META, collection_for
+from app.sources.factory import PLATFORMS, PROVIDERS, SOURCE_TYPE_META, collection_for
 from app.store.source_config import _normalise_keys
 
 router = APIRouter()
@@ -111,8 +109,27 @@ async def import_sources(request: Request, file: UploadFile):
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 
+def _reload_embedding_services(cfg) -> None:
+    """Reinitialize all embedding-dependent services in the container after a config change."""
+    from app.rag.chunker import TextChunker
+    from app.rag.embedding import EmbeddingService
+    from app.rag.indexer import DocumentIndexer
+    from app.rag.search import SearchService
+    from app.memory.service import MemoryService
+
+    new_embedding = EmbeddingService(cfg)
+    new_chunker = TextChunker(cfg)
+
+    container.search_service = SearchService(container.vector_store, new_embedding)
+    container.memory_service = MemoryService(container.vector_store, new_embedding)
+
+    # Patch the indexer held inside sync_service so subsequent syncs use the new model
+    new_indexer = DocumentIndexer(container.vector_store, new_embedding, new_chunker)
+    container.sync_service._indexer = new_indexer
+
+
 @router.get("/settings")
-async def settings_get(request: Request):
+async def settings_get(request: Request, notice: str = ""):
     from app.config import get_config, get_config_path
     cfg = get_config()
     return templates.TemplateResponse(request, "settings.html", _ctx(
@@ -121,6 +138,7 @@ async def settings_get(request: Request):
         config_path=get_config_path(),
         status_message=None,
         was_dropped=False,
+        notice=notice,
     ))
 
 
@@ -173,6 +191,7 @@ async def settings_post(
             except Exception:
                 pass
         await container.config_store.reset_all_sync_status("needs-reindex")
+        _reload_embedding_services(new_cfg)
 
     return templates.TemplateResponse(request, "settings.html", _ctx(
         request,
@@ -183,32 +202,135 @@ async def settings_post(
     ))
 
 
+# ── Settings: Danger zone ─────────────────────────────────────────────────────
+
+@router.post("/settings/delete-all-sources")
+async def delete_all_sources():
+    sources = await container.config_store.get_all()
+    for source in sources:
+        col = collection_for(source)
+        try:
+            filt = Filter(must=[
+                FieldCondition(key=PayloadKeys.tag("source_id"), match=MatchValue(value=source.id))
+            ])
+            await container.vector_store.delete_by_filter(col, filt)
+        except Exception:
+            pass
+        await container.config_store.delete(source.id)
+    return RedirectResponse("/settings?notice=sources_deleted", status_code=303)
+
+
+@router.post("/settings/delete-all-experiences")
+async def delete_all_experiences():
+    from app.models import CollectionNames
+    try:
+        await container.vector_store.delete_collection(CollectionNames.EXPERIENCE)
+        await container.vector_store.create_collection(CollectionNames.EXPERIENCE)
+    except Exception:
+        pass
+    return RedirectResponse("/settings?notice=experiences_deleted", status_code=303)
+
+
+@router.post("/settings/clean-source-embeddings")
+async def clean_source_embeddings():
+    from app.models import CollectionNames
+    for col in CollectionNames.ALL:
+        if col == CollectionNames.EXPERIENCE:
+            continue
+        try:
+            if await container.vector_store.collection_exists(col):
+                await container.vector_store.delete_collection(col)
+        except Exception:
+            pass
+    await container.config_store.reset_all_sync_status("needs-reindex")
+    return RedirectResponse("/settings?notice=source_embeddings_cleaned", status_code=303)
+
+
+@router.post("/settings/clean-experience-embeddings")
+async def clean_experience_embeddings():
+    from app.models import CollectionNames
+    try:
+        await container.vector_store.delete_collection(CollectionNames.EXPERIENCE)
+        await container.vector_store.create_collection(CollectionNames.EXPERIENCE)
+    except Exception:
+        pass
+    return RedirectResponse("/settings?notice=experience_embeddings_cleaned", status_code=303)
+
+
+# ── Sources: Preview ───────────────────────────────────────────────────────────
+
+@router.post("/sources/preview")
+async def sources_preview(request: Request):
+    import asyncio
+    import traceback
+
+    try:
+        form = await request.form()
+        source = _build_source_from_form(form)
+        if not source.type:
+            return JSONResponse({"error": "Source type could not be determined from the form. Please reload the page and try again."}, status_code=400)
+        factory = container.sync_service._factory
+        impl = factory.create(source)
+        docs = await asyncio.wait_for(impl.fetch_documents(), timeout=30.0)
+        sample = docs[:5]
+        return JSONResponse({
+            "total": len(docs),
+            "docs": [
+                {
+                    "text": d.text[:600],
+                    "tags": d.tags,
+                    "properties": d.properties,
+                }
+                for d in sample
+            ],
+        })
+    except asyncio.TimeoutError:
+        return JSONResponse({"error": "Preview timed out after 30 s — try a smaller query or limit."}, status_code=408)
+    except Exception as exc:
+        return JSONResponse({"error": f"{type(exc).__name__}: {exc}"}, status_code=500)
+
+
 # ── Sources: Create ────────────────────────────────────────────────────────────
 
 @router.get("/sources/create")
-async def sources_create_get(request: Request, type: str = ""):
-    type_label = next((label for t, label, _ in SOURCE_TYPE_META if t == type), "")
-    return templates.TemplateResponse(request, "sources/create.html", _ctx(
-        request,
-        selected_type=type,
-        type_label=type_label,
-        source_types=SOURCE_TYPE_META,
-        source=SourceDefinition(type=type, name=""),
-    ))
+async def sources_create_get(request: Request, type: str = "", provider: str = ""):
+    _meta_map = {m.type: m for m in SOURCE_TYPE_META}
+    meta = _meta_map.get(type)
+
+    # Step 3 — configure a specific type
+    if type:
+        return templates.TemplateResponse(request, "sources/create.html", _ctx(
+            request,
+            step="configure",
+            selected_type=type,
+            selected_provider=meta.provider if meta else "",
+            type_label=meta.label if meta else type,
+            provider_label=PROVIDERS.get(meta.provider if meta else "", {}).get("label", ""),
+            source=SourceDefinition(type=type, name=""),
+        ))
+
+    # Step 2 — pick a type within a platform
+    if provider:
+        types_in_provider = [m for m in SOURCE_TYPE_META if m.provider == provider]
+        platform = PLATFORMS.get(provider, {})
+        return templates.TemplateResponse(request, "sources/create.html", _ctx(
+            request,
+            step="pick_type",
+            selected_type="",
+            selected_provider=provider,
+            platform_label=platform.get("label", provider),
+            source_types=types_in_provider,
+            source=SourceDefinition(type="", name=""),
+        ))
+
+    # Only one platform — skip the picker and go straight to the type list
+    return RedirectResponse("/sources/create?provider=ado", status_code=302)
 
 
 @router.post("/sources/create")
 async def sources_create_post(request: Request, background_tasks: BackgroundTasks):
     form = await request.form()
     source = _build_source_from_form(form)
-
-    if source.type == SourceTypes.MANUAL_DOCUMENT:
-        file = form.get("ConfigFile")
-        if file and hasattr(file, "filename") and file.filename:
-            text = await _read_upload(file)
-            if text:
-                source.config[ConfigKeys.CONTENT] = text
-                source.config[ConfigKeys.TITLE] = source.config.get(ConfigKeys.TITLE) or file.filename
 
     await container.config_store.save(source)
     background_tasks.add_task(container.sync_service.sync, source.id)
@@ -222,11 +344,14 @@ async def sources_edit_get(request: Request, source_id: str):
     source = await container.config_store.get_by_id(source_id)
     if not source:
         return RedirectResponse("/")
-    type_label = next((label for t, label, _ in SOURCE_TYPE_META if t == source.type), source.type)
+    meta = next((m for m in SOURCE_TYPE_META if m.type == source.type), None)
+    type_label = meta.label if meta else source.type
+    provider_label = PROVIDERS.get(meta.provider, {}).get("label", "") if meta else ""
     return templates.TemplateResponse(request, "sources/edit.html", _ctx(
         request,
         source=source,
         type_label=type_label,
+        provider_label=provider_label,
     ))
 
 
@@ -262,10 +387,10 @@ async def sources_delete_get(request: Request, source_id: str):
 async def sources_delete_post(source_id: str):
     source = await container.config_store.get_by_id(source_id)
     if source:
-        collection = collection_for(source.type)
+        collection = collection_for(source)
         try:
             filt = Filter(must=[
-                FieldCondition(key=PayloadKeys.tag("source_name"), match=MatchValue(value=source.name))
+                FieldCondition(key=PayloadKeys.tag("source_id"), match=MatchValue(value=source.id))
             ])
             await container.vector_store.delete_by_filter(collection, filt)
         except Exception:
@@ -284,9 +409,9 @@ async def sources_items_get(
     if not source:
         return RedirectResponse("/")
 
-    collection = collection_for(source.type)
+    collection = collection_for(source)
     scroll_filter = Filter(must=[
-        FieldCondition(key="tag_source_name", match=MatchValue(value=source.name))
+        FieldCondition(key=PayloadKeys.tag("source_id"), match=MatchValue(value=source.id))
     ])
 
     items = []
@@ -325,15 +450,41 @@ async def sources_items_get(
 # ── Experience ─────────────────────────────────────────────────────────────────
 
 @router.get("/experience")
-async def experience_list(request: Request, offset: Optional[str] = None):
-    entries, next_offset = await container.memory_service.get_all_paginated(limit=20, offset=offset)
+async def experience_list(request: Request, q: str = "", offset: Optional[str] = None):
+    import logging
+    log = logging.getLogger(__name__)
+
     total = await container.memory_service.count()
+    search_error: str | None = None
+
+    if q.strip():
+        try:
+            results = await container.memory_service.retrieve(q.strip(), top_k=20)
+        except Exception as exc:
+            log.exception("Experience search failed for query %r", q)
+            results = []
+            search_error = str(exc)
+        entries = [{"id": "", "situation": r["situation"], "guidance": r["guidance"], "created_at": "", "score": r["score"]} for r in results]
+        next_offset = None
+        has_prev = False
+    else:
+        try:
+            entries, next_offset = await container.memory_service.get_all_paginated(limit=20, offset=offset)
+        except Exception:
+            entries, next_offset = [], None
+        for e in entries:
+            e["score"] = None
+        has_prev = offset is not None
+        search_error = None
+
     return templates.TemplateResponse(request, "experience/list.html", _ctx(
         request,
         entries=entries,
         next_offset=next_offset,
-        has_prev=offset is not None,
+        has_prev=has_prev,
         total=total,
+        q=q,
+        search_error=search_error,
     ))
 
 
@@ -344,19 +495,25 @@ async def experience_create_get(request: Request):
 
 @router.post("/experience/add")
 async def experience_add(
-    content: str = Form(...),
-    category: str = Form("general"),
-    importance: int = Form(3),
+    situation: str = Form(...),
+    guidance: str = Form(...),
 ):
-    content = content.strip()
-    if content:
-        await container.memory_service.remember(content, category, importance)
+    situation = situation.strip()
+    guidance = guidance.strip()
+    if situation and guidance:
+        try:
+            await container.memory_service.remember(situation, guidance)
+        except Exception:
+            pass  # Qdrant offline — silently skip; user sees "Qdrant offline" in sidebar
     return RedirectResponse("/experience", status_code=303)
 
 
 @router.post("/experience/{entry_id}/delete")
 async def experience_delete(entry_id: str):
-    await container.memory_service.delete(entry_id)
+    try:
+        await container.memory_service.delete(entry_id)
+    except Exception:
+        pass  # Qdrant offline — proceed to redirect
     return RedirectResponse("/experience", status_code=303)
 
 
@@ -400,8 +557,7 @@ async def experience_map_data():
             "x": float(coords[i, 0]),
             "y": float(coords[i, 1]) if n >= 2 else 0.0,
             "text": e["text"],
-            "category": e["category"],
-            "importance": e["importance"],
+            "guidance": e["guidance"],
             "created_at": e["created_at"],
         })
     return JSONResponse({"points": points})
@@ -409,10 +565,19 @@ async def experience_map_data():
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _get_form_str(form, *keys: str) -> str:
+    """Return first non-None form value; treats empty string as a valid value only for the first key."""
+    for k in keys:
+        v = form.get(k)
+        if v is not None:
+            return str(v)
+    return ""
+
+
 def _build_source_from_form(form) -> SourceDefinition:
-    source_type = str(form.get("source_type") or form.get("Source.Type") or "")
-    name = str(form.get("name") or form.get("Source.Name") or "")
-    source_id = str(form.get("Source.Id") or uuid.uuid4())
+    source_type = _get_form_str(form, "source_type", "Source.Type")
+    name = _get_form_str(form, "name", "Source.Name")
+    source_id = _get_form_str(form, "Source.Id") or str(uuid.uuid4())
 
     config: dict[str, str] = {}
 
@@ -442,38 +607,44 @@ def _build_source_from_form(form) -> SourceDefinition:
         _set(ConfigKeys.API_KEY_HEADER, "ConfigApiKeyHeader")
         _set(ConfigKeys.API_KEY_VALUE, "ConfigApiKeyValue")
 
-    if source_type == SourceTypes.MANUAL_DOCUMENT:
-        _set(ConfigKeys.CONTENT, "ConfigContent")
-        _set(ConfigKeys.TITLE, "ConfigTitle")
-
-    if source_type in (SourceTypes.ADO_WORK_ITEM_QUERY, SourceTypes.ADO_REQUIREMENTS, SourceTypes.ADO_TEST_CASE):
-        _set(ConfigKeys.QUERY, "ConfigQuery")
+    if source_type == SourceTypes.WORK_ITEM_QUERY:
+        item_types = form.getlist("ConfigItemTypes")
+        if item_types:
+            config[ConfigKeys.ITEM_TYPES] = ",".join(item_types)
+        _set(ConfigKeys.AREA_PATH, "ConfigAreaPath")
+        _set(ConfigKeys.QUERY, "ConfigQuery")  # advanced override
         _set(ConfigKeys.FIELDS, "ConfigFields")
 
-    if source_type == SourceTypes.ADO_CODE_REPO:
+    if source_type == SourceTypes.TEST_CASE:
+        _set(ConfigKeys.QUERY, "ConfigQuery")  # advanced override only
+
+    if source_type == SourceTypes.CODE_REPO:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
         _set(ConfigKeys.BRANCH, "ConfigBranch", default="main")
         _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.cs")
 
-    if source_type == SourceTypes.ADO_PIPELINE_BUILD:
+    if source_type == SourceTypes.PIPELINE_BUILD:
         _set(ConfigKeys.PIPELINE_ID, "ConfigPipelineId")
         _set(ConfigKeys.LAST_N_BUILDS, "ConfigLastNBuilds", default="5")
 
-    if source_type == SourceTypes.ADO_WIKI:
+    if source_type == SourceTypes.WIKI:
         _set(ConfigKeys.WIKI_NAME, "ConfigWikiName")
         _set(ConfigKeys.PATH_FILTER, "ConfigPathFilter")
 
-    if source_type == SourceTypes.HTTP_PAGE:
-        _set(ConfigKeys.URL, "ConfigUrl")
-        _set(ConfigKeys.TITLE, "ConfigTitle")
-        _set(ConfigKeys.CONTENT_TYPE, "ConfigContentType", default="auto")
+    if source_type == SourceTypes.PULL_REQUEST:
+        _set(ConfigKeys.REPOSITORY, "ConfigRepository")
+        _set(ConfigKeys.STATUS_FILTER, "ConfigStatusFilter", default="all")
+        _set(ConfigKeys.TOP, "ConfigTop", default="200")
+
+    if source_type == SourceTypes.TEST_RESULTS:
+        _set(ConfigKeys.LAST_N_RUNS, "ConfigLastNRuns", default="10")
+        _set(ConfigKeys.RESULTS_PER_RUN, "ConfigResultsPerRun", default="200")
+
+    if source_type == SourceTypes.GIT_COMMITS:
+        _set(ConfigKeys.REPOSITORY, "ConfigRepository")
+        _set(ConfigKeys.BRANCH, "ConfigBranch", default="main")
+        _set(ConfigKeys.LAST_N_COMMITS, "ConfigLastNCommits", default="100")
 
     return SourceDefinition(id=source_id, type=source_type, name=name, config=config)
 
 
-async def _read_upload(file: UploadFile) -> str:
-    content = await file.read()
-    if file.filename and file.filename.lower().endswith(".pdf"):
-        reader = pypdf.PdfReader(io.BytesIO(content))
-        return "\n\n".join(page.extract_text() or "" for page in reader.pages)
-    return content.decode("utf-8", errors="replace")

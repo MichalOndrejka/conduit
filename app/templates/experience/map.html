@@ -26,16 +26,7 @@
     </div>
     {% else %}
 
-    <!-- Legend -->
-    <div class="flex flex-wrap gap-3 text-xs text-slate-400">
-        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#94a3b8"></span>general</span>
-        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#60a5fa"></span>preference</span>
-        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#f87171"></span>mistake</span>
-        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#34d399"></span>fact</span>
-        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:#fbbf24"></span>decision</span>
-        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full inline-block" style="background:hsl(262,83%,73%)"></span>context</span>
-        <span class="ml-2 text-slate-600">· Marker size = importance (1–5)</span>
-    </div>
+    <p class="text-xs text-slate-600">Hover over a point to see the situation. Points close together have semantically similar triggers.</p>
 
     <!-- Plot container -->
     <div class="card p-0 overflow-hidden" style="height: 560px; position: relative;">
@@ -53,15 +44,6 @@
 {% if total >= 2 %}
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
-const CATEGORY_COLORS = {
-    general:    '#94a3b8',
-    preference: '#60a5fa',
-    mistake:    '#f87171',
-    fact:       '#34d399',
-    decision:   '#fbbf24',
-    context:    'hsl(262,83%,73%)',
-};
-
 async function loadMap() {
     let data;
     try {
@@ -85,38 +67,29 @@ async function loadMap() {
         return;
     }
 
-    // Group by category for separate traces (legend entries)
-    const groups = {};
+    const xs = [], ys = [], texts = [];
     for (const p of points) {
-        const cat = p.category || 'general';
-        if (!groups[cat]) groups[cat] = { x: [], y: [], text: [], size: [], ids: [] };
-        groups[cat].x.push(p.x);
-        groups[cat].y.push(p.y);
-        groups[cat].size.push(6 + p.importance * 3);  // 9–21px
-        groups[cat].ids.push(p.id);
-
-        // Wrap text for tooltip
-        const wrapped = p.text.length > 120 ? p.text.slice(0, 117) + '…' : p.text;
-        groups[cat].text.push(
-            `<b>${cat}</b> · importance ${p.importance}<br>${wrapped}`
-        );
+        xs.push(p.x);
+        ys.push(p.y);
+        const sit = p.text.length > 100 ? p.text.slice(0, 97) + '…' : p.text;
+        const guid = p.guidance.length > 120 ? p.guidance.slice(0, 117) + '…' : p.guidance;
+        texts.push(`<b>Situation:</b> ${sit}<br><b>Guidance:</b> ${guid}`);
     }
 
-    const traces = Object.entries(groups).map(([cat, g]) => ({
+    const traces = [{
         type: 'scatter',
         mode: 'markers',
-        name: cat,
-        x: g.x,
-        y: g.y,
-        text: g.text,
+        x: xs,
+        y: ys,
+        text: texts,
         hovertemplate: '%{text}<extra></extra>',
         marker: {
-            color: CATEGORY_COLORS[cat] || '#94a3b8',
-            size: g.size,
-            opacity: 0.85,
+            color: 'hsl(199,89%,48%)',
+            size: 10,
+            opacity: 0.8,
             line: { width: 0 },
         },
-    }));
+    }];
 
     const layout = {
         paper_bgcolor: 'hsl(222,47%,6%)',

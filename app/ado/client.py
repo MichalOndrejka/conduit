@@ -229,3 +229,57 @@ class AdoClient:
             path=path,
             includeContent="true",
         )
+
+    async def get_pull_requests(
+        self, conn: AdoConnection, repository: str, status: str = "all", top: int = 200
+    ) -> list[dict]:
+        return await asyncio.to_thread(
+            self._sync_get_pull_requests, conn, repository, status, top
+        )
+
+    def _sync_get_pull_requests(
+        self, conn: AdoConnection, repository: str, status: str, top: int
+    ) -> list[dict]:
+        data = conn._get(
+            f"_apis/git/repositories/{repository}/pullrequests",
+            **{"searchCriteria.status": status, "$top": str(top)},
+        )
+        return data.get("value", [])
+
+    async def get_test_runs(self, conn: AdoConnection, top: int = 10) -> list[dict]:
+        return await asyncio.to_thread(self._sync_get_test_runs, conn, top)
+
+    def _sync_get_test_runs(self, conn: AdoConnection, top: int) -> list[dict]:
+        data = conn._get("_apis/test/runs", **{"$top": str(top)})
+        return data.get("value", [])
+
+    async def get_test_results(
+        self, conn: AdoConnection, run_id: int, top: int = 200
+    ) -> list[dict]:
+        return await asyncio.to_thread(self._sync_get_test_results, conn, run_id, top)
+
+    def _sync_get_test_results(
+        self, conn: AdoConnection, run_id: int, top: int
+    ) -> list[dict]:
+        data = conn._get(
+            f"_apis/test/runs/{run_id}/results",
+            **{"$top": str(top)},
+        )
+        return data.get("value", [])
+
+    async def get_commits(
+        self, conn: AdoConnection, repository: str, branch: str = "", top: int = 100
+    ) -> list[dict]:
+        return await asyncio.to_thread(self._sync_get_commits, conn, repository, branch, top)
+
+    def _sync_get_commits(
+        self, conn: AdoConnection, repository: str, branch: str, top: int
+    ) -> list[dict]:
+        params: dict[str, Any] = {"$top": str(top)}
+        if branch:
+            params["searchCriteria.itemVersion.version"] = branch
+        data = conn._get(
+            f"_apis/git/repositories/{repository}/commits",
+            **params,
+        )
+        return data.get("value", [])

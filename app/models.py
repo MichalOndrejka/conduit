@@ -10,20 +10,20 @@ import uuid
 # ── Collection names ────────────────────────────────────────────────────────
 
 class CollectionNames:
-    MANUAL_DOCUMENTS  = "conduit_manual_documents"
-    ADO_WORK_ITEMS    = "conduit_ado_workitems"
-    ADO_CODE          = "conduit_ado_code"
-    ADO_BUILDS        = "conduit_ado_builds"
-    ADO_REQUIREMENTS  = "conduit_ado_requirements"
-    ADO_TEST_CASES    = "conduit_ado_testcases"
-    ADO_WIKI          = "conduit_ado_wiki"
-    HTTP_PAGES        = "conduit_http_pages"
-
-    EXPERIENCE        = "conduit_experience"
+    MANUAL_DOCUMENTS = "conduit_manual_documents"
+    WORK_ITEMS       = "conduit_workitems"
+    CODE             = "conduit_code"
+    BUILDS           = "conduit_builds"
+    TEST_CASES       = "conduit_testcases"
+    WIKI             = "conduit_wiki"
+    PULL_REQUESTS    = "conduit_pullrequests"
+    TEST_RESULTS     = "conduit_test_results"
+    COMMITS          = "conduit_commits"
+    EXPERIENCE       = "conduit_experience"
 
     ALL: list[str] = [
-        MANUAL_DOCUMENTS, ADO_WORK_ITEMS, ADO_CODE, ADO_BUILDS,
-        ADO_REQUIREMENTS, ADO_TEST_CASES, ADO_WIKI, HTTP_PAGES,
+        MANUAL_DOCUMENTS, WORK_ITEMS, CODE, BUILDS,
+        TEST_CASES, WIKI, PULL_REQUESTS, TEST_RESULTS, COMMITS,
         EXPERIENCE,
     ]
 
@@ -31,14 +31,14 @@ class CollectionNames:
 # ── Source types ─────────────────────────────────────────────────────────────
 
 class SourceTypes:
-    MANUAL_DOCUMENT    = "manual"
-    ADO_WORK_ITEM_QUERY = "ado-workitem-query"
-    ADO_CODE_REPO      = "ado-code"
-    ADO_PIPELINE_BUILD = "ado-pipeline-build"
-    ADO_REQUIREMENTS   = "ado-requirements"
-    ADO_TEST_CASE      = "ado-test-case"
-    ADO_WIKI           = "ado-wiki"
-    HTTP_PAGE          = "http-page"
+    WORK_ITEM_QUERY = "workitem-query"
+    TEST_CASE       = "test-case"
+    CODE_REPO       = "code"
+    PIPELINE_BUILD  = "pipeline-build"
+    WIKI            = "wiki"
+    PULL_REQUEST    = "pull-request"
+    TEST_RESULTS    = "test-results"
+    GIT_COMMITS     = "git-commits"
 
 
 # ── Config keys ───────────────────────────────────────────────────────────────
@@ -58,6 +58,8 @@ class ConfigKeys:
     CONTENT         = "Content"
     QUERY           = "Query"
     FIELDS          = "Fields"
+    ITEM_TYPES      = "ItemTypes"
+    AREA_PATH       = "AreaPath"
     REPOSITORY      = "Repository"
     BRANCH          = "Branch"
     GLOB_PATTERNS   = "GlobPatterns"
@@ -65,6 +67,11 @@ class ConfigKeys:
     LAST_N_BUILDS   = "LastNBuilds"
     WIKI_NAME       = "WikiName"
     PATH_FILTER     = "PathFilter"
+    STATUS_FILTER   = "StatusFilter"
+    TOP             = "Top"
+    LAST_N_RUNS     = "LastNRuns"
+    RESULTS_PER_RUN = "ResultsPerRun"
+    LAST_N_COMMITS  = "LastNCommits"
     URL             = "Url"
     CONTENT_TYPE    = "ContentType"
 

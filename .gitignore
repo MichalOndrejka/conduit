@@ -1,40 +1,50 @@
-# Build output
-bin/
-obj/
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.whl
 
-# Visual Studio
-.vs/
-*.user
-*.suo
-*.userosscache
-*.sln.docstates
-
-# NuGet
-*.nupkg
-*.snupkg
-project.lock.json
-packages/
-nuget.config.local
-
-# Test results
-TestResults/
-coverage/
-*.coverage
-*.coveragexml
+# Virtual environments
+.venv/
+venv/
+env/
+.env
 
 # Runtime / secrets
 conduit-sources.json
-appsettings.Development.json
-appsettings.Local.json
+conduit-settings.json
+conduit-embedding.json
+*.local.json
 
-# Claude Code local settings
-.claude/settings.local.json
+# Qdrant local storage
+qdrant_storage/
 
 # OS
 .DS_Store
 Thumbs.db
 Desktop.ini
 
-# JetBrains Rider
+# IDEs
+.vs/
 .idea/
-*.sln.iml
+*.user
+*.suo
+.vscode/mcp.json
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Test results
+TestResults/
+coverage/
+*.coverage
+.pytest_cache/
+htmlcov/
+
+**/*.pyc
