@@ -51,7 +51,7 @@
 </div>
 
 <div class="card p-6 max-w-2xl">
-    <form method="post" action="/sources/create">
+    <form id="source-form" method="post" action="/sources/create" enctype="multipart/form-data">
         <input type="hidden" name="source_type" value="{{ selected_type }}" />
         <input type="hidden" name="Source.Id" value="{{ source.id }}" />
 
@@ -62,9 +62,22 @@
 
         <div class="border-t border-surface-border my-5"></div>
 
+        {# ── Documentation tab switcher (above connection fields) ── #}
+        {% if selected_type == "documentation" %}
+        <div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
+            <button type="button" id="doc-tab-wiki" onclick="docTab('wiki')"
+                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">ADO Wiki</button>
+            <button type="button" id="doc-tab-upload" onclick="docTab('upload')"
+                    class="px-4 py-1.5 transition-colors">File Upload</button>
+        </div>
+        <input type="hidden" name="ConfigDocType" id="ConfigDocType" value="wiki" />
+        {% endif %}
+
         {# ── ADO connection (shared by all ADO sources) ── #}
-        {% if selected_type in ("workitem-query", "test-case", "code", "pipeline-build", "wiki", "pull-request", "test-results", "git-commits") %}
+        {% if selected_type in ("workitem-query", "test-case", "code", "pipeline-build", "documentation", "pull-request", "test-results", "git-commits") %}
+        <div id="ado-connection-block">
         {% include "sources/_ado_connection.html" %}
+        </div>
         {% endif %}
 
         {# ── Work Items ── #}
@@ -218,7 +231,7 @@
             </div>
             <div>
                 <label class="field-label">Branch</label>
-                <input name="ConfigBranch" value="main" class="field-input" placeholder="main" />
+                <input name="ConfigBranch" value="Main" class="field-input" placeholder="Main" />
             </div>
         </div>
         <div class="mb-4">
@@ -237,7 +250,7 @@
             </div>
             <div>
                 <label class="field-label">Branch</label>
-                <input name="ConfigBranch" value="main" class="field-input" placeholder="main" />
+                <input name="ConfigBranch" value="Main" class="field-input" placeholder="Main" />
             </div>
         </div>
         <div class="mb-4">
@@ -261,19 +274,58 @@
         </div>
         {% endif %}
 
-        {# ── ADO wiki ── #}
-        {% if selected_type == "wiki" %}
+        {# ── Documentation panels ── #}
+        {% if selected_type == "documentation" %}
         <div class="border-t border-surface-border my-5"></div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Leave blank to use the first wiki in the project</span></span></label>
-                <input name="ConfigWikiName" class="field-input" placeholder="MyProject.wiki" />
-            </div>
-            <div>
-                <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Only index pages under this path, e.g. /Architecture</span></span></label>
-                <input name="ConfigPathFilter" class="field-input" placeholder="/Architecture" />
+
+        <div id="doc-panel-wiki">
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Leave blank to use the first wiki in the project</span></span></label>
+                    <input name="ConfigWikiName" class="field-input" placeholder="MyProject.wiki" />
+                </div>
+                <div>
+                    <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Only index pages under this path, e.g. /Architecture</span></span></label>
+                    <input name="ConfigPathFilter" class="field-input" placeholder="/Architecture" />
+                </div>
             </div>
         </div>
+
+        <div id="doc-panel-upload" class="hidden">
+            <div class="mb-4 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
+                Upload a PDF. Text is extracted and indexed — the file itself is not stored.
+            </div>
+            <div class="mb-4">
+                <label class="field-label">PDF File <span class="text-red-400">*</span></label>
+                <label class="flex items-center gap-3 cursor-pointer group">
+                    <input type="file" name="doc_file" accept=".pdf" class="sr-only"
+                           onchange="document.getElementById('doc-file-name-create').textContent = this.files[0]?.name || 'No file chosen'" />
+                    <span class="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium group-hover:border-violet-400 group-hover:text-violet-300">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                        </svg>
+                        Choose PDF
+                    </span>
+                    <span id="doc-file-name-create" class="text-xs text-slate-500">No file chosen</span>
+                </label>
+            </div>
+        </div>
+
+        <script>
+        function docTab(name) {
+            var isWiki = name === 'wiki';
+            document.getElementById('doc-panel-wiki').classList.toggle('hidden', !isWiki);
+            document.getElementById('doc-panel-upload').classList.toggle('hidden', isWiki);
+            document.getElementById('ConfigDocType').value = name;
+            var adoBlock = document.getElementById('ado-connection-block');
+            if (adoBlock) adoBlock.classList.toggle('hidden', !isWiki);
+            var on = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
+            var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
+            document.getElementById('doc-tab-wiki').className = (isWiki ? on : off) + ' border-r border-slate-700';
+            document.getElementById('doc-tab-upload').className = isWiki ? off : on;
+        }
+        docTab('wiki');
+        </script>
         {% endif %}
 
         <div class="border-t border-surface-border mt-5 pt-5 flex items-center gap-3">
@@ -327,7 +379,7 @@ async function runPreview() {
     var btn = document.getElementById('preview-btn');
     var overlay = document.getElementById('preview-overlay');
     var content = document.getElementById('preview-content');
-    var form = document.querySelector('form');
+    var form = document.getElementById('source-form');
 
     btn.disabled = true;
     btn.querySelector('svg').style.display = 'none';

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 from app.ado.client import AdoClient
-from app.models import SourceDefinition, SourceTypes, CollectionNames
+from app.models import SourceDefinition, SourceTypes, CollectionNames, ConfigKeys
 from app.parsing.registry import ParserRegistry
 from app.sources.base import Source
 from app.sources.ado_workitem import AdoWorkItemQuerySource
@@ -11,6 +11,7 @@ from app.sources.ado_testcase import AdoTestCaseSource
 from app.sources.ado_code import AdoCodeRepoSource
 from app.sources.ado_build import AdoPipelineBuildSource
 from app.sources.ado_wiki import AdoWikiSource
+from app.sources.manual import ManualDocumentSource
 from app.sources.ado_pullrequest import AdoPullRequestSource
 from app.sources.ado_testresults import AdoTestResultsSource
 from app.sources.ado_commits import AdoGitCommitsSource
@@ -49,7 +50,7 @@ SOURCE_TYPE_META: list[SourceTypeMeta] = [
     SourceTypeMeta(SourceTypes.PULL_REQUEST,    "Pull Requests",  "PR titles, descriptions, reviewers and branch context.", "ado"),
     SourceTypeMeta(SourceTypes.GIT_COMMITS,     "Git Commits",    "Commit history with messages, authors and change counts.", "ado"),
     SourceTypeMeta(SourceTypes.CODE_REPO,       "Source Code",    "Source files from a git repository, filtered by glob patterns.", "ado"),
-    SourceTypeMeta(SourceTypes.WIKI,            "Wiki & Docs",    "Pages from an Azure DevOps wiki, with optional path filter.", "ado"),
+    SourceTypeMeta(SourceTypes.DOCUMENTATION,   "Documentation",  "Pages from an Azure DevOps wiki, with optional path filter.", "ado"),
     SourceTypeMeta(SourceTypes.PIPELINE_BUILD,  "Build Results",  "Recent CI/CD build logs and failure details for a pipeline.", "ado"),
 ]
 
@@ -63,7 +64,7 @@ def collection_for(source: SourceDefinition) -> str:
         SourceTypes.GIT_COMMITS:     CollectionNames.COMMITS,
         SourceTypes.CODE_REPO:       CollectionNames.CODE,
         SourceTypes.PIPELINE_BUILD:  CollectionNames.BUILDS,
-        SourceTypes.WIKI:            CollectionNames.WIKI,
+        SourceTypes.DOCUMENTATION:   CollectionNames.DOCUMENTATION,
     }.get(source.type, CollectionNames.WORK_ITEMS)
 
 
@@ -82,7 +83,9 @@ class SourceFactory:
             return AdoCodeRepoSource(source, self._ado, self._registry)
         if t == SourceTypes.PIPELINE_BUILD:
             return AdoPipelineBuildSource(source, self._ado)
-        if t == SourceTypes.WIKI:
+        if t == SourceTypes.DOCUMENTATION:
+            if source.get_config(ConfigKeys.DOC_TYPE) == "upload":
+                return ManualDocumentSource(source)
             return AdoWikiSource(source, self._ado)
         if t == SourceTypes.PULL_REQUEST:
             return AdoPullRequestSource(source, self._ado)

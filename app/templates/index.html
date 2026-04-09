@@ -160,9 +160,9 @@
                 var badge = '';
                 if (s.syncStatus === 'syncing') {
                     stillSyncing = true;
-                    var msg = s.syncMessage || (s.syncPhase === 'embedding' ? 'Embedding…' : 'Fetching…');
+                    var msg = s.syncMessage || (s.syncPhase === 'embedding' ? 'Indexing…' : 'Fetching…');
                     badge = '<span class="badge badge-syncing"><span class="spinner"></span>' + msg + '</span>';
-                    if (s.syncPhase === 'embedding' && s.syncTotal) {
+                    if (s.syncPhase === 'indexing' && s.syncTotal) {
                         var pct = Math.round((s.syncCurrent / s.syncTotal) * 100);
                         badge += '<div class="progress-bar mt-1.5"><div class="progress-fill" style="width:' + pct + '%"></div></div>';
                     }

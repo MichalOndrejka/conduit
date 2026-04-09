@@ -50,7 +50,7 @@ class SyncService:
 
             def on_embed_progress(current: int, total: int) -> None:
                 self._progress_store.set(source_id, SyncProgress(
-                    phase="embedding",
+                    phase="indexing",
                     current=current,
                     total=total,
                 ))

@@ -54,8 +54,8 @@ def register_tools(mcp: FastMCP, search_service, memory_service) -> None:
         "Semantic search over test cases including test steps.",
     )
     _make_search_tool(
-        CollectionNames.WIKI,
-        "search_wiki",
+        CollectionNames.DOCUMENTATION,
+        "search_documentation",
         "Semantic search over wiki pages and documentation sections.",
     )
     _make_search_tool(

@@ -74,6 +74,11 @@ class AdoConnection:
         return session
 
     def _url(self, path: str, **params: Any) -> str:
+        if not self.base_url:
+            raise ValueError(
+                "BaseUrl is not configured for this source. "
+                "Edit the source and enter the full project URL (e.g. https://tfs.company.com/DefaultCollection/MyProject)."
+            )
         url = f"{self.base_url}/{path.lstrip('/')}"
         query = dict(params)
         query["api-version"] = self.api_version
@@ -81,18 +86,36 @@ class AdoConnection:
         return f"{url}?{query_str}"
 
     def _get(self, path: str, **params: Any) -> Any:
+        import json as _json
         session = self._make_session()
         url = self._url(path, **params)
         resp = session.get(url, timeout=60)
         resp.raise_for_status()
-        return resp.json()
+        _check_html_auth_redirect(resp, url, "GET")
+        try:
+            return resp.json()
+        except _json.JSONDecodeError as exc:
+            preview = resp.text[:300] if resp.text else "<empty body>"
+            raise ValueError(
+                f"ADO returned non-JSON (HTTP {resp.status_code}) for GET {url}\n"
+                f"Body preview: {preview}"
+            ) from exc
 
     def _post(self, path: str, body: Any, **params: Any) -> Any:
+        import json as _json
         session = self._make_session()
         url = self._url(path, **params)
         resp = session.post(url, json=body, timeout=60)
         resp.raise_for_status()
-        return resp.json()
+        _check_html_auth_redirect(resp, url, "POST")
+        try:
+            return resp.json()
+        except _json.JSONDecodeError as exc:
+            preview = resp.text[:300] if resp.text else "<empty body>"
+            raise ValueError(
+                f"ADO returned non-JSON (HTTP {resp.status_code}) for POST {url}\n"
+                f"Body preview: {preview}"
+            ) from exc
 
     def _get_text(self, path: str, **params: Any) -> str:
         session = self._make_session()
@@ -100,6 +123,19 @@ class AdoConnection:
         resp = session.get(url, timeout=60)
         resp.raise_for_status()
         return resp.text
+
+
+def _check_html_auth_redirect(resp, url: str, method: str) -> None:
+    """Raise a clear error when ADO returns an HTML sign-in page (HTTP 203 or text/html)."""
+    ct = resp.headers.get("Content-Type", "")
+    is_html = "text/html" in ct or "xhtml" in ct
+    if not is_html and resp.text:
+        is_html = resp.text.lstrip().startswith("<!DOCTYPE") or resp.text.lstrip().startswith("<html")
+    if is_html:
+        raise ValueError(
+            f"ADO returned an HTML sign-in page (HTTP {resp.status_code}) for {method} {url}. "
+            "Authentication failed — check that your PAT environment variable is set and has the required scopes."
+        )
 
 
 class AdoClient:

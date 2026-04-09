@@ -1,6 +1,6 @@
 services:
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.13.6
     restart: unless-stopped
     volumes:
       - qdrant_data:/qdrant/storage
@@ -26,7 +26,7 @@ services:
       # Embedding API key — set this or use a .env file
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Any other secrets your sources need (PAT, bearer tokens, etc.)
-      # TFS_PAT: ${TFS_PAT:-}
+      ADO_PAT: ${ADO_PAT:-}
     depends_on:
       qdrant:
         condition: service_healthy

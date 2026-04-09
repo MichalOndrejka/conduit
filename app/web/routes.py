@@ -18,6 +18,20 @@ from app.store.source_config import _normalise_keys
 router = APIRouter()
 
 
+async def _extract_pdf_text(file) -> str:
+    """Extract plain text from an uploaded PDF using pypdf."""
+    import io
+    from pypdf import PdfReader
+    data = await file.read()
+    reader = PdfReader(io.BytesIO(data))
+    pages = []
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        if text.strip():
+            pages.append(text)
+    return "\n\n".join(pages)
+
+
 def _ctx(request: Request, **kwargs) -> dict:
     """Base context injected into every template."""
     return {
@@ -332,6 +346,12 @@ async def sources_create_post(request: Request, background_tasks: BackgroundTask
     form = await request.form()
     source = _build_source_from_form(form)
 
+    if source.get_config(ConfigKeys.DOC_TYPE) == "upload":
+        doc_file = form.get("doc_file")
+        if doc_file and getattr(doc_file, "filename", None):
+            source.config[ConfigKeys.CONTENT] = await _extract_pdf_text(doc_file)
+            source.config[ConfigKeys.TITLE] = doc_file.filename
+
     await container.config_store.save(source)
     background_tasks.add_task(container.sync_service.sync, source.id)
     return RedirectResponse("/", status_code=303)
@@ -366,6 +386,17 @@ async def sources_edit_post(request: Request, source_id: str, background_tasks: 
     updated.last_synced_at = existing.last_synced_at
     updated.sync_status = "idle"
     updated.sync_error = None
+
+    if updated.get_config(ConfigKeys.DOC_TYPE) == "upload":
+        doc_file = form.get("doc_file")
+        if doc_file and getattr(doc_file, "filename", None):
+            updated.config[ConfigKeys.CONTENT] = await _extract_pdf_text(doc_file)
+            updated.config[ConfigKeys.TITLE] = doc_file.filename
+        else:
+            # Keep existing content if no new file uploaded
+            updated.config[ConfigKeys.CONTENT] = existing.get_config(ConfigKeys.CONTENT)
+            updated.config[ConfigKeys.TITLE] = existing.get_config(ConfigKeys.TITLE)
+
     await container.config_store.save(updated)
     return RedirectResponse("/", status_code=303)
 
@@ -620,16 +651,18 @@ def _build_source_from_form(form) -> SourceDefinition:
 
     if source_type == SourceTypes.CODE_REPO:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
-        _set(ConfigKeys.BRANCH, "ConfigBranch", default="main")
+        _set(ConfigKeys.BRANCH, "ConfigBranch", default="Main")
         _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.cs")
 
     if source_type == SourceTypes.PIPELINE_BUILD:
         _set(ConfigKeys.PIPELINE_ID, "ConfigPipelineId")
         _set(ConfigKeys.LAST_N_BUILDS, "ConfigLastNBuilds", default="5")
 
-    if source_type == SourceTypes.WIKI:
-        _set(ConfigKeys.WIKI_NAME, "ConfigWikiName")
-        _set(ConfigKeys.PATH_FILTER, "ConfigPathFilter")
+    if source_type == SourceTypes.DOCUMENTATION:
+        _set(ConfigKeys.DOC_TYPE, "ConfigDocType", default="wiki")
+        if config.get(ConfigKeys.DOC_TYPE) == "wiki":
+            _set(ConfigKeys.WIKI_NAME, "ConfigWikiName")
+            _set(ConfigKeys.PATH_FILTER, "ConfigPathFilter")
 
     if source_type == SourceTypes.PULL_REQUEST:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
@@ -642,7 +675,7 @@ def _build_source_from_form(form) -> SourceDefinition:
 
     if source_type == SourceTypes.GIT_COMMITS:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
-        _set(ConfigKeys.BRANCH, "ConfigBranch", default="main")
+        _set(ConfigKeys.BRANCH, "ConfigBranch", default="Main")
         _set(ConfigKeys.LAST_N_COMMITS, "ConfigLastNCommits", default="100")
 
     return SourceDefinition(id=source_id, type=source_type, name=name, config=config)

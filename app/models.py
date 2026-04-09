@@ -15,7 +15,7 @@ class CollectionNames:
     CODE             = "conduit_code"
     BUILDS           = "conduit_builds"
     TEST_CASES       = "conduit_testcases"
-    WIKI             = "conduit_wiki"
+    DOCUMENTATION    = "conduit_documentation"
     PULL_REQUESTS    = "conduit_pullrequests"
     TEST_RESULTS     = "conduit_test_results"
     COMMITS          = "conduit_commits"
@@ -23,7 +23,7 @@ class CollectionNames:
 
     ALL: list[str] = [
         MANUAL_DOCUMENTS, WORK_ITEMS, CODE, BUILDS,
-        TEST_CASES, WIKI, PULL_REQUESTS, TEST_RESULTS, COMMITS,
+        TEST_CASES, DOCUMENTATION, PULL_REQUESTS, TEST_RESULTS, COMMITS,
         EXPERIENCE,
     ]
 
@@ -35,7 +35,7 @@ class SourceTypes:
     TEST_CASE       = "test-case"
     CODE_REPO       = "code"
     PIPELINE_BUILD  = "pipeline-build"
-    WIKI            = "wiki"
+    DOCUMENTATION   = "documentation"
     PULL_REQUEST    = "pull-request"
     TEST_RESULTS    = "test-results"
     GIT_COMMITS     = "git-commits"
@@ -65,6 +65,7 @@ class ConfigKeys:
     GLOB_PATTERNS   = "GlobPatterns"
     PIPELINE_ID     = "PipelineId"
     LAST_N_BUILDS   = "LastNBuilds"
+    DOC_TYPE        = "DocType"
     WIKI_NAME       = "WikiName"
     PATH_FILTER     = "PathFilter"
     STATUS_FILTER   = "StatusFilter"

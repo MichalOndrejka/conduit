@@ -16,6 +16,7 @@ class VectorStore:
             host=cfg.qdrant.host,
             port=cfg.qdrant.port,
             timeout=30,
+            check_compatibility=False,
         )
         self._dimensions = cfg.embedding.dimensions
 
