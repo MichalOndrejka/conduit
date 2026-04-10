@@ -85,6 +85,13 @@ class VectorStore:
             points_selector=FilterSelector(filter=filter),
         )
 
+    async def count_points(self, collection: str, filter: Optional[Filter] = None) -> int:
+        try:
+            result = await self._client.count(collection_name=collection, count_filter=filter, exact=False)
+            return result.count
+        except Exception:
+            return 0
+
     async def health_check(self) -> None:
         """Raises if Qdrant is unreachable."""
         await self._client.get_collections()

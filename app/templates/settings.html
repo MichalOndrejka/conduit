@@ -29,18 +29,20 @@
 </div>
 {% endif %}
 
-{% if status_message == 'saved' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); color: #34d399;">
+{% if notice == 'embedding_saved' %}
+<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
     <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    Settings saved.
-    {% if was_dropped %} Embedding model changed — all collections dropped and sources marked for reindex.{% endif %}
+    Embedding settings saved.
 </div>
-{% endif %}
-
-{% if was_dropped %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); color: #fbbf24;">
+{% elif notice == 'embedding_saved_dropped' %}
+<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;">
     <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.96L13.75 4a2 2 0 00-3.5 0L3.25 16.04A2 2 0 005.07 19z"/></svg>
-    Vector collections were dropped. Re-sync your sources to rebuild the index.
+    Embedding settings saved. Model changed — all collections dropped and sources marked for re-sync.
+</div>
+{% elif notice == 'qdrant_saved' %}
+<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    Vector store settings saved.
 </div>
 {% endif %}
 
@@ -65,10 +67,10 @@
     </div>
 </div>
 
-<form method="post" action="/settings">
-    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+<div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
 
-        <!-- Embedding config -->
+    <!-- Embedding config -->
+    <form method="post" action="/settings/embedding" id="form-embedding">
         <div class="card p-5">
             <h2 class="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
                 <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -107,9 +109,24 @@
                     <input name="max_input_chars" value="{{ cfg.embedding.max_input_chars }}" type="number" class="field-input" placeholder="8000" />
                 </div>
             </div>
-        </div>
 
-        <!-- Qdrant config -->
+            <div id="verify-embedding-result" class="hidden mt-3 text-xs px-3 py-2 rounded-md"></div>
+
+            <div class="flex items-center gap-2 mt-5">
+                <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                    Save
+                </button>
+                <button type="button" onclick="verifyService('embedding')" class="btn-ghost inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    Verify
+                </button>
+            </div>
+        </div>
+    </form>
+
+    <!-- Qdrant config -->
+    <form method="post" action="/settings/qdrant" id="form-qdrant">
         <div class="card p-5">
             <h2 class="text-sm font-semibold text-slate-200 mb-4 flex items-center gap-2">
                 <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -127,36 +144,30 @@
                     <label class="field-label">Port</label>
                     <input name="qdrant_port" value="{{ cfg.qdrant.port }}" type="number" class="field-input" placeholder="6333" />
                 </div>
-                <div class="pt-2">
-                    <div class="flex items-center gap-2">
-                        {% if qdrant_ready %}
-                        <span class="glow-dot"></span>
-                        <span class="text-xs text-emerald-400">Connected</span>
-                        {% else %}
-                        <span class="glow-dot red"></span>
-                        <span class="text-xs text-red-400">Offline</span>
-                        {% if qdrant_error %}<span class="text-xs text-slate-600">— {{ qdrant_error }}</span>{% endif %}
-                        {% endif %}
-                    </div>
-                </div>
+            </div>
+
+            <div id="verify-qdrant-result" class="hidden mt-3 text-xs px-3 py-2 rounded-md"></div>
+
+            <div class="flex items-center gap-2 mt-5">
+                <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                    Save
+                </button>
+                <button type="button" onclick="verifyService('qdrant')" class="btn-ghost inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    Verify
+                </button>
             </div>
         </div>
+    </form>
 
-        <!-- Config path info -->
-        <div class="card p-5 lg:col-span-2">
-            <p class="text-xs text-slate-500">
-                Config file: <code class="font-mono text-slate-400">{{ config_path }}</code>
-            </p>
-        </div>
+    <!-- Config path info -->
+    <div class="card p-5 lg:col-span-2">
+        <p class="text-xs text-slate-500">
+            Config file: <code class="font-mono text-slate-400">{{ config_path }}</code>
+        </p>
     </div>
-
-    <div class="mt-5">
-        <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-            Save Settings
-        </button>
-    </div>
-</form>
+</div>
 
 <!-- Danger Zone -->
 <div class="mt-8">
@@ -282,11 +293,45 @@ function updateEmbeddingFields(applyDefaults) {
 }
 updateEmbeddingFields(false);
 
-document.querySelector('form[action="/settings"]').addEventListener('submit', function() {
-    this.querySelectorAll('input[placeholder]').forEach(function(el) {
-        if (el.value.trim() === '') el.value = el.placeholder;
+['form-embedding', 'form-qdrant'].forEach(function(id) {
+    var f = document.getElementById(id);
+    if (f) f.addEventListener('submit', function() {
+        this.querySelectorAll('input[placeholder]').forEach(function(el) {
+            if (el.value.trim() === '') el.value = el.placeholder;
+        });
     });
 });
+
+function verifyService(service) {
+    var form = document.getElementById('form-' + service);
+    var result = document.getElementById('verify-' + service + '-result');
+    var data = new FormData(form);
+    result.className = 'mt-3 text-xs px-3 py-2 rounded-md';
+    result.style.background = 'rgba(100,116,139,0.15)';
+    result.style.border = '1px solid rgba(100,116,139,0.3)';
+    result.style.color = '#94a3b8';
+    result.textContent = 'Verifying…';
+    fetch('/settings/verify/' + service, { method: 'POST', body: data })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+            if (d.ok) {
+                result.style.background = 'rgba(16,185,129,0.1)';
+                result.style.border = '1px solid rgba(16,185,129,0.3)';
+                result.style.color = '#34d399';
+            } else {
+                result.style.background = 'rgba(239,68,68,0.1)';
+                result.style.border = '1px solid rgba(239,68,68,0.3)';
+                result.style.color = '#f87171';
+            }
+            result.textContent = d.message;
+        })
+        .catch(function(e) {
+            result.style.background = 'rgba(239,68,68,0.1)';
+            result.style.border = '1px solid rgba(239,68,68,0.3)';
+            result.style.color = '#f87171';
+            result.textContent = 'Request failed: ' + e;
+        });
+}
 
 function confirmDanger(action, title, body) {
     document.getElementById('modal-title').textContent = title;

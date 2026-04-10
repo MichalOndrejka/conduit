@@ -20,7 +20,7 @@ class QdrantHealth:
         self.error: str | None = None
 
 
-async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHealth) -> None:
+async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHealth, config_store=None) -> None:
     """Verify Qdrant connectivity, detect embedding model changes, create collections."""
     max_retries = 30
 
@@ -63,6 +63,29 @@ async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHea
         if not await store.collection_exists(name):
             await store.create_collection(name)
             logger.info("Created collection: %s", name)
+
+    # For each source marked completed, verify it actually has data in Qdrant
+    if config_store is not None:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+        from app.models import PayloadKeys
+        from app.sources.factory import collection_for
+
+        sources = await config_store.get_all()
+        stale = []
+        for source in sources:
+            if source.sync_status != "completed":
+                continue
+            collection = collection_for(source)
+            tag_key = PayloadKeys.tag("source_id")
+            f = Filter(must=[FieldCondition(key=tag_key, match=MatchValue(value=source.id))])
+            count = await store.count_points(collection, f)
+            if count == 0:
+                source.sync_status = "needs-reindex"
+                stale.append(source)
+
+        for source in stale:
+            await config_store.save(source)
+            logger.info("Source '%s' has no data in Qdrant — marked for re-sync", source.name)
 
     health.is_ready = True
     health.error = None

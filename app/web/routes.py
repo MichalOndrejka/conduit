@@ -150,54 +150,48 @@ async def settings_get(request: Request, notice: str = ""):
         request,
         cfg=cfg,
         config_path=get_config_path(),
-        status_message=None,
-        was_dropped=False,
         notice=notice,
     ))
 
 
-@router.post("/settings")
-async def settings_post(
-    request: Request,
+@router.post("/settings/embedding")
+async def settings_save_embedding(
     provider: str = Form(...),
     model: str = Form(...),
     api_key_env_var: str = Form(""),
     base_url: str = Form(""),
     dimensions: int = Form(1536),
     max_input_chars: int = Form(8000),
-    qdrant_host: str = Form("localhost"),
-    qdrant_port: int = Form(6333),
 ):
-    from app.config import AppConfig, EmbeddingConfig, QdrantConfig, get_config, get_config_path, save_config
+    from app.config import AppConfig, EmbeddingConfig, get_config, save_config
     from app.models import CollectionNames
 
     old_cfg = get_config()
+    new_embedding = EmbeddingConfig(
+        provider=provider,
+        model=model,
+        api_key_env_var=api_key_env_var,
+        base_url=base_url,
+        dimensions=dimensions,
+        max_input_chars=max_input_chars,
+    )
     new_cfg = AppConfig(
-        embedding=EmbeddingConfig(
-            provider=provider,
-            model=model,
-            api_key_env_var=api_key_env_var,
-            base_url=base_url,
-            dimensions=dimensions,
-            max_input_chars=max_input_chars,
-        ),
-        qdrant=QdrantConfig(host=qdrant_host, port=qdrant_port),
+        embedding=new_embedding,
+        qdrant=old_cfg.qdrant,
         chunking=old_cfg.chunking,
         sources_file_path=old_cfg.sources_file_path,
     )
 
     embedding_changed = (
-        old_cfg.embedding.model != new_cfg.embedding.model
-        or old_cfg.embedding.dimensions != new_cfg.embedding.dimensions
-        or old_cfg.embedding.provider != new_cfg.embedding.provider
-        or old_cfg.embedding.base_url != new_cfg.embedding.base_url
+        old_cfg.embedding.model != model
+        or old_cfg.embedding.dimensions != dimensions
+        or old_cfg.embedding.provider != provider
+        or old_cfg.embedding.base_url != base_url
     )
 
     save_config(new_cfg)
-    was_dropped = False
 
     if embedding_changed:
-        was_dropped = True
         for col in CollectionNames.ALL:
             try:
                 if await container.vector_store.collection_exists(col):
@@ -206,14 +200,77 @@ async def settings_post(
                 pass
         await container.config_store.reset_all_sync_status("needs-reindex")
         _reload_embedding_services(new_cfg)
+        return RedirectResponse("/settings?notice=embedding_saved_dropped", status_code=303)
 
-    return templates.TemplateResponse(request, "settings.html", _ctx(
-        request,
-        cfg=new_cfg,
-        config_path=get_config_path(),
-        status_message="saved",
-        was_dropped=was_dropped,
-    ))
+    _reload_embedding_services(new_cfg)
+    return RedirectResponse("/settings?notice=embedding_saved", status_code=303)
+
+
+@router.post("/settings/qdrant")
+async def settings_save_qdrant(
+    qdrant_host: str = Form("localhost"),
+    qdrant_port: int = Form(6333),
+):
+    from app.config import AppConfig, get_config, QdrantConfig, save_config
+
+    old_cfg = get_config()
+    new_cfg = AppConfig(
+        embedding=old_cfg.embedding,
+        qdrant=QdrantConfig(host=qdrant_host, port=qdrant_port),
+        chunking=old_cfg.chunking,
+        sources_file_path=old_cfg.sources_file_path,
+    )
+    save_config(new_cfg)
+    return RedirectResponse("/settings?notice=qdrant_saved", status_code=303)
+
+
+@router.post("/settings/verify/qdrant")
+async def settings_verify_qdrant(
+    qdrant_host: str = Form("localhost"),
+    qdrant_port: int = Form(6333),
+):
+    try:
+        from qdrant_client import AsyncQdrantClient
+        client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port, timeout=5, check_compatibility=False)
+        collections = await client.get_collections()
+        count = len(collections.collections)
+        await client.close()
+        return JSONResponse({"ok": True, "message": f"Connected — {count} collection(s)"})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)})
+
+
+@router.post("/settings/verify/embedding")
+async def settings_verify_embedding(
+    provider: str = Form(...),
+    model: str = Form(...),
+    api_key_env_var: str = Form(""),
+    base_url: str = Form(""),
+    dimensions: int = Form(1536),
+    max_input_chars: int = Form(8000),
+):
+    try:
+        from app.config import AppConfig, EmbeddingConfig, get_config
+        from app.rag.embedding import EmbeddingService
+        cfg = get_config()
+        test_cfg = AppConfig(
+            embedding=EmbeddingConfig(
+                provider=provider,
+                model=model,
+                api_key_env_var=api_key_env_var,
+                base_url=base_url,
+                dimensions=dimensions,
+                max_input_chars=max_input_chars,
+            ),
+            qdrant=cfg.qdrant,
+            chunking=cfg.chunking,
+            sources_file_path=cfg.sources_file_path,
+        )
+        svc = EmbeddingService(test_cfg)
+        vector = await svc.embed("connection test")
+        return JSONResponse({"ok": True, "message": f"OK — model returned {len(vector)}-dim vector"})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)})
 
 
 # ── Settings: Danger zone ─────────────────────────────────────────────────────
