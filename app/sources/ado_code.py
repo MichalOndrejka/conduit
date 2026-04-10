@@ -21,8 +21,8 @@ def _glob_matches(path: str, patterns: list[str]) -> bool:
         pat_n = pattern.replace("\\", "/")
         if fnmatch.fnmatch(path_n, pat_n):
             return True
-        # Allow ** to match across path separators
-        regex = "^" + re.escape(pat_n).replace(r"\*\*", ".*").replace(r"\*", "[^/]*") + "$"
+        # Allow ** to match across path separators (including zero directories)
+        regex = "^" + re.escape(pat_n).replace(r"\*\*/", "(.*/)?").replace(r"\*\*", ".*").replace(r"\*", "[^/]*") + "$"
         if re.match(regex, path_n):
             return True
     return False
@@ -92,4 +92,37 @@ class AdoCodeRepoSource(Source):
                     },
                 ))
 
+        return docs
+
+    async def preview_documents(self) -> list[SourceDocument]:
+        conn = AdoConnection.from_config(self._source.config)
+        repository = self._source.get_config(ConfigKeys.REPOSITORY)
+        branch = self._source.get_config(ConfigKeys.BRANCH) or "main"
+        patterns_raw = self._source.get_config(ConfigKeys.GLOB_PATTERNS) or _DEFAULT_PATTERNS
+        patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
+
+        tree = await self._client.get_file_tree(conn, repository, branch)
+        matched = [f for f in tree if _glob_matches(f.get("path", ""), patterns)]
+
+        docs: list[SourceDocument] = []
+        for file_info in matched:
+            path = file_info.get("path", "")
+            try:
+                content = await self._client.get_file_content(conn, repository, branch, path)
+            except Exception:
+                continue
+            import os as _os
+            docs.append(SourceDocument(
+                id=f"{self._source.id}_{path}",
+                text=content[:2000],
+                tags={
+                    "source_id": self._source.id,
+                    "source_name": self._source.name,
+                },
+                properties={
+                    "title": _os.path.basename(path),
+                    "file_path": path,
+                    "repository": repository,
+                },
+            ))
         return docs

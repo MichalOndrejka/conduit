@@ -73,22 +73,22 @@ class AdoConnection:
 
         return session
 
-    def _url(self, path: str, **params: Any) -> str:
+    def _url(self, api_path: str, **params: Any) -> str:
         if not self.base_url:
             raise ValueError(
                 "BaseUrl is not configured for this source. "
                 "Edit the source and enter the full project URL (e.g. https://tfs.company.com/DefaultCollection/MyProject)."
             )
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        url = f"{self.base_url}/{api_path.lstrip('/')}"
         query = dict(params)
         query["api-version"] = self.api_version
         query_str = "&".join(f"{k}={v}" for k, v in query.items())
         return f"{url}?{query_str}"
 
-    def _get(self, path: str, **params: Any) -> Any:
+    def _get(self, api_path: str, **params: Any) -> Any:
         import json as _json
         session = self._make_session()
-        url = self._url(path, **params)
+        url = self._url(api_path, **params)
         resp = session.get(url, timeout=60)
         resp.raise_for_status()
         _check_html_auth_redirect(resp, url, "GET")
@@ -101,10 +101,10 @@ class AdoConnection:
                 f"Body preview: {preview}"
             ) from exc
 
-    def _post(self, path: str, body: Any, **params: Any) -> Any:
+    def _post(self, api_path: str, body: Any, **params: Any) -> Any:
         import json as _json
         session = self._make_session()
-        url = self._url(path, **params)
+        url = self._url(api_path, **params)
         resp = session.post(url, json=body, timeout=60)
         resp.raise_for_status()
         _check_html_auth_redirect(resp, url, "POST")
@@ -117,9 +117,9 @@ class AdoConnection:
                 f"Body preview: {preview}"
             ) from exc
 
-    def _get_text(self, path: str, **params: Any) -> str:
+    def _get_text(self, api_path: str, **params: Any) -> str:
         session = self._make_session()
-        url = self._url(path, **params)
+        url = self._url(api_path, **params)
         resp = session.get(url, timeout=60)
         resp.raise_for_status()
         return resp.text

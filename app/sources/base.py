@@ -13,3 +13,7 @@ class Source(ABC):
     async def fetch_documents(
         self, progress_cb: Optional[ProgressCallback] = None
     ) -> list[SourceDocument]: ...
+
+    async def preview_documents(self) -> list[SourceDocument]:
+        """Return documents suitable for preview (before chunking). Defaults to fetch_documents()."""
+        return await self.fetch_documents()

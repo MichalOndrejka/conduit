@@ -285,7 +285,7 @@ async def sources_preview(request: Request):
             return JSONResponse({"error": "Source type could not be determined from the form. Please reload the page and try again."}, status_code=400)
         factory = container.sync_service._factory
         impl = factory.create(source)
-        docs = await asyncio.wait_for(impl.fetch_documents(), timeout=30.0)
+        docs = await asyncio.wait_for(impl.preview_documents(), timeout=30.0)
         sample = docs[:5]
         return JSONResponse({
             "total": len(docs),
