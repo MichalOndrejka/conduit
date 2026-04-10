@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Sources Map{% endblock %}
+
+{% block content %}
+<div class="space-y-4">
+
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-xl font-semibold text-slate-100">Sources Map</h1>
+            <p class="text-sm text-slate-500 mt-0.5">2D semantic projection of indexed documents — points close together share similar meaning</p>
+        </div>
+        <a href="/" class="btn-ghost px-3 py-1.5 rounded-lg text-sm flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+            </svg>
+            Sources
+        </a>
+    </div>
+
+    {% if total < 1 %}
+    <div class="card p-10 text-center">
+        <p class="text-slate-400 text-sm">No indexed documents yet.</p>
+        <p class="text-slate-600 text-xs mt-1">Sync at least one source to see the map.</p>
+        <a href="/" class="btn-primary inline-block mt-4 px-4 py-2 rounded-lg text-sm">Go to Sources</a>
+    </div>
+    {% else %}
+
+    <p class="text-xs text-slate-600">Click a source in the legend to toggle it. Scroll to zoom, drag to pan.</p>
+
+    <div class="card p-0 overflow-hidden" style="height: 600px; position: relative;">
+        <div id="loading" class="absolute inset-0 flex items-center justify-center z-10">
+            <span class="spinner" style="width:1.2rem;height:1.2rem;border-width:2px;color:#7c3aed"></span>
+        </div>
+        <div id="plot" style="width:100%;height:100%;"></div>
+    </div>
+
+    <div id="map-footer" class="hidden text-xs text-slate-600 text-right"></div>
+
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if total >= 1 %}
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script>
+const COLORS = [
+    '#7c3aed','#0ea5e9','#10b981','#f59e0b','#ef4444',
+    '#8b5cf6','#06b6d4','#84cc16','#f97316','#ec4899',
+    '#6366f1','#14b8a6','#eab308','#f43f5e','#a855f7',
+];
+
+async function loadMap() {
+    let data;
+    try {
+        const resp = await fetch('/api/map-data');
+        data = await resp.json();
+    } catch (e) {
+        document.getElementById('loading').innerHTML = '<p class="text-red-400 text-sm">Failed to fetch map data.</p>';
+        return;
+    }
+
+    if (data.error) {
+        document.getElementById('loading').innerHTML = `<p class="text-red-400 text-sm">Error: ${data.error}</p>`;
+        return;
+    }
+
+    const points = data.points || [];
+    if (points.length < 2) {
+        document.getElementById('loading').innerHTML =
+            `<p class="text-slate-500 text-sm">${data.note || 'Not enough data to render map.'}</p>`;
+        return;
+    }
+
+    // Group points by source
+    const bySource = {};
+    for (const p of points) {
+        if (!bySource[p.source_id]) bySource[p.source_id] = { name: p.source_name, type: p.source_type, pts: [] };
+        bySource[p.source_id].pts.push(p);
+    }
+
+    const traces = Object.entries(bySource).map(([sid, s], i) => {
+        const color = COLORS[i % COLORS.length];
+        return {
+            type: 'scatter',
+            mode: 'markers',
+            name: s.name,
+            x: s.pts.map(p => p.x),
+            y: s.pts.map(p => p.y),
+            text: s.pts.map(p => {
+                const title = p.title || '(no title)';
+                const preview = p.text ? p.text.slice(0, 100) + (p.text.length > 100 ? '…' : '') : '';
+                return `<b>${s.name}</b><br>${title}${preview ? '<br><span style="color:#94a3b8">' + preview + '</span>' : ''}`;
+            }),
+            hovertemplate: '%{text}<extra></extra>',
+            marker: { color, size: 8, opacity: 0.75, line: { width: 0 } },
+        };
+    });
+
+    const layout = {
+        paper_bgcolor: 'hsl(222,47%,6%)',
+        plot_bgcolor:  'hsl(222,47%,8%)',
+        font: { color: 'hsl(215,20%,55%)', family: 'Inter, system-ui, sans-serif', size: 11 },
+        margin: { t: 20, r: 20, b: 40, l: 50 },
+        xaxis: {
+            gridcolor: 'hsl(217,33%,12%)', zerolinecolor: 'hsl(217,33%,18%)',
+            tickfont: { size: 10 }, title: { text: 'PC 1', font: { size: 11 } },
+        },
+        yaxis: {
+            gridcolor: 'hsl(217,33%,12%)', zerolinecolor: 'hsl(217,33%,18%)',
+            tickfont: { size: 10 }, title: { text: 'PC 2', font: { size: 11 } },
+        },
+        legend: {
+            bgcolor: 'hsla(222,47%,8%,0.95)', bordercolor: 'hsl(217,33%,18%)', borderwidth: 1,
+            font: { size: 11 }, orientation: 'v', x: 1.01, y: 1,
+        },
+        hoverlabel: {
+            bgcolor: 'hsl(222,47%,11%)', bordercolor: 'hsl(217,33%,18%)',
+            font: { color: 'hsl(210,40%,98%)', size: 12 }, align: 'left',
+        },
+    };
+
+    const config = { responsive: true, displayModeBar: false, scrollZoom: true };
+
+    document.getElementById('loading').style.display = 'none';
+    Plotly.newPlot('plot', traces, layout, config);
+
+    const sources = data.sources || [];
+    const footer = document.getElementById('map-footer');
+    const totalSampled = sources.reduce((a, s) => a + s.sampled, 0);
+    footer.textContent = `${totalSampled} documents shown across ${sources.length} source${sources.length !== 1 ? 's' : ''} (up to 200 per source)`;
+    footer.classList.remove('hidden');
+}
+
+loadMap();
+</script>
+{% endif %}
+{% endblock %}

@@ -49,16 +49,22 @@
 <div class="card overflow-hidden">
     <!-- Table header -->
     <div class="grid grid-cols-12 gap-4 px-5 py-3 text-xs font-medium text-slate-500 uppercase tracking-wider border-b border-surface-border">
-        <div class="col-span-4">Name</div>
-        <div class="col-span-2">Type</div>
-        <div class="col-span-3">Status</div>
-        <div class="col-span-2">Last synced</div>
+        <div class="col-span-4"><button class="sort-btn flex items-center gap-1 hover:text-slate-300 transition-colors" data-col="name">Name<span class="sort-icon opacity-40">↕</span></button></div>
+        <div class="col-span-2"><button class="sort-btn flex items-center gap-1 hover:text-slate-300 transition-colors" data-col="type">Type<span class="sort-icon opacity-40">↕</span></button></div>
+        <div class="col-span-3"><button class="sort-btn flex items-center gap-1 hover:text-slate-300 transition-colors" data-col="status">Status<span class="sort-icon opacity-40">↕</span></button></div>
+        <div class="col-span-2"><button class="sort-btn flex items-center gap-1 hover:text-slate-300 transition-colors" data-col="synced">Last synced<span class="sort-icon opacity-40">↕</span></button></div>
         <div class="col-span-1 text-right">Actions</div>
     </div>
 
     <!-- Rows -->
     {% for source in sources %}
-    <div class="table-row grid grid-cols-12 gap-4 px-5 py-3.5 items-center" id="row-{{ source.id }}">
+    {% set st = source.sync_status %}
+    {% set status_order = {'error': 0, 'failed': 0, 'needs-reindex': 1, 'syncing': 2, 'idle': 3, 'completed': 4} %}
+    <div class="table-row grid grid-cols-12 gap-4 px-5 py-3.5 items-center" id="row-{{ source.id }}"
+         data-name="{{ source.name | lower }}"
+         data-type="{{ source.type | lower }}"
+         data-status="{{ status_order.get(st, 3) }}"
+         data-synced="{{ source.last_synced_at.strftime('%Y%m%d%H%M') if source.last_synced_at else '0' }}">
         <!-- Name -->
         <div class="col-span-4">
             <a href="/sources/{{ source.id }}/items" class="text-sm font-medium text-slate-200 hover:text-violet-400 transition-colors">
@@ -73,7 +79,6 @@
 
         <!-- Status -->
         <div class="col-span-3" id="status-{{ source.id }}">
-            {% set st = source.sync_status %}
             {% if st == 'syncing' %}
             <span class="badge badge-syncing"><span class="spinner"></span>Syncing</span>
             {% elif st == 'completed' %}
@@ -212,5 +217,39 @@ function closeError() {
 document.getElementById('error-overlay').addEventListener('click', function(e) {
     if (e.target === this) closeError();
 });
+
+// Column sorting
+var sortState = { col: null, asc: true };
+document.querySelectorAll('.sort-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+        var col = this.dataset.col;
+        if (sortState.col === col) {
+            sortState.asc = !sortState.asc;
+        } else {
+            sortState.col = col;
+            sortState.asc = true;
+        }
+        // Update icons
+        document.querySelectorAll('.sort-btn').forEach(function(b) {
+            b.querySelector('.sort-icon').textContent = '↕';
+            b.querySelector('.sort-icon').style.opacity = '0.4';
+        });
+        this.querySelector('.sort-icon').textContent = sortState.asc ? '↑' : '↓';
+        this.querySelector('.sort-icon').style.opacity = '1';
+        sortRows(col, sortState.asc);
+    });
+});
+
+function sortRows(col, asc) {
+    var container = document.querySelector('.card.overflow-hidden');
+    var rows = Array.from(container.querySelectorAll('[data-name]'));
+    rows.sort(function(a, b) {
+        var av = a.dataset[col] || '';
+        var bv = b.dataset[col] || '';
+        var cmp = isNaN(av) || isNaN(bv) ? av.localeCompare(bv) : Number(av) - Number(bv);
+        return asc ? cmp : -cmp;
+    });
+    rows.forEach(function(row) { container.appendChild(row); });
+}
 </script>
 {% endblock %}

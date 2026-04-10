@@ -614,6 +614,93 @@ async def experience_map(request: Request):
     ))
 
 
+@router.get("/map")
+async def sources_map(request: Request):
+    sources = await container.config_store.get_all()
+    total = sum(1 for s in sources if s.sync_status == "completed")
+    return templates.TemplateResponse(request, "map.html", _ctx(request, total=total))
+
+
+@router.get("/api/map-data")
+async def sources_map_data():
+    try:
+        import numpy as np
+        from sklearn.decomposition import PCA
+    except ImportError:
+        return JSONResponse({"error": "scikit-learn not installed. Run: uv pip install scikit-learn"}, status_code=500)
+
+    SAMPLE_PER_SOURCE = 200
+
+    sources = await container.config_store.get_all()
+    all_vectors: list[list[float]] = []
+    all_meta: list[dict] = []
+    source_stats: list[dict] = []
+
+    for source in sources:
+        if source.sync_status != "completed":
+            continue
+        collection = collection_for(source)
+        try:
+            points, _ = await container.vector_store.client.scroll(
+                collection_name=collection,
+                scroll_filter=Filter(must=[FieldCondition(
+                    key=PayloadKeys.tag("source_id"),
+                    match=MatchValue(value=source.id),
+                )]),
+                limit=SAMPLE_PER_SOURCE,
+                with_payload=True,
+                with_vectors=True,
+            )
+        except Exception:
+            continue
+
+        count = 0
+        for p in points:
+            vector = p.vector
+            if vector is None:
+                continue
+            if isinstance(vector, dict):
+                vector = next(iter(vector.values()), None)
+                if not vector:
+                    continue
+            payload = p.payload or {}
+            title = payload.get(PayloadKeys.prop("title"), "") or ""
+            text = payload.get(PayloadKeys.TEXT, "") or ""
+            all_vectors.append(list(vector))
+            all_meta.append({
+                "source_id": source.id,
+                "source_name": source.name,
+                "source_type": source.type,
+                "title": title[:80],
+                "text": text[:120],
+            })
+            count += 1
+
+        if count:
+            source_stats.append({"id": source.id, "name": source.name, "type": source.type, "sampled": count})
+
+    if len(all_vectors) < 2:
+        return JSONResponse({"points": [], "sources": [], "total": len(all_vectors),
+                             "note": f"Need at least 2 indexed documents (have {len(all_vectors)})."})
+
+    try:
+        vectors = np.array(all_vectors, dtype=float)
+        n = min(2, len(all_vectors), vectors.shape[1])
+        coords = PCA(n_components=n).fit_transform(vectors)
+    except Exception as exc:
+        return JSONResponse({"error": f"PCA failed: {exc}", "points": []}, status_code=500)
+
+    points = []
+    for i, meta in enumerate(all_meta):
+        points.append({
+            **meta,
+            "x": float(coords[i, 0]),
+            "y": float(coords[i, 1]) if n >= 2 else 0.0,
+        })
+
+    return JSONResponse({"points": points, "sources": source_stats, "total": len(points)})
+
+
 @router.get("/api/experience/map-data")
 async def experience_map_data():
     try:
