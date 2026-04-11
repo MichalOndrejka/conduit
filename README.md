@@ -1,6 +1,6 @@
 # Conduit
 
-A RAG + MCP server that gives Claude semantic search over your Azure DevOps repositories, work items, wikis, pipeline builds, test cases, documents, and web pages — plus a persistent **Experience** store so the LLM can remember facts, preferences, and past decisions across sessions.
+A RAG + MCP server that gives Claude semantic search over your Azure DevOps data, custom API endpoints, and uploaded documents — plus a persistent **Experience** store so Claude can remember facts, preferences, and past decisions across sessions.
 
 ## How it works
 
@@ -8,12 +8,11 @@ A RAG + MCP server that gives Claude semantic search over your Azure DevOps repo
 Claude
   └─► MCP Tools (Conduit)
         └─► Qdrant Vector Store
-              └─► Indexed from: ADO Repos / Work Items / Wikis / Builds /
-                                Test Cases / Requirements / HTTP Pages / Docs
+              └─► Indexed from sources (ADO / Custom API / Manual)
 ```
 
 **Indexing pipeline**
-1. Fetch documents from configured sources (ADO REST APIs, git content, manual upload, HTTP pages)
+1. Fetch documents from configured sources
 2. Parse code with language-aware parsers (C#, TypeScript, Go, PowerShell, Markdown)
 3. Chunk text with sentence-boundary and newline-priority splitting
 4. Generate embeddings via OpenAI / Ollama / any OpenAI-compatible API
@@ -26,33 +25,42 @@ Claude
 
 ## MCP Tools
 
-| Tool | Description |
-|------|-------------|
-| `search_manual_documents` | Manually uploaded documents (ADRs, design docs, PDFs, markdown) |
-| `search_ado_workitems` | Work items — bugs, user stories, tasks, features |
-| `search_ado_code` | Source code from Azure DevOps git repositories |
-| `search_ado_builds` | Pipeline build results and failure details |
-| `search_ado_requirements` | Requirements work items |
-| `search_ado_testcases` | Test cases including test steps |
-| `search_ado_wiki` | Azure DevOps wiki pages |
-| `search_http_pages` | Indexed HTTP pages and JSON endpoints |
-| `retrieve_experience` | Recall relevant past experience — preferences, mistakes, decisions. **Call at the start of every task.** |
-| `remember` | Store any information worth retaining across sessions. **Call proactively.** |
+| Tool | What it searches |
+|------|-----------------|
+| `search_documents` | Manually uploaded documents and pasted text |
+| `search_workitems` | Work items — bugs, user stories, tasks, features |
+| `search_code` | Source code (classes, methods, functions) |
+| `search_builds` | Pipeline build results and failure details |
+| `search_testcases` | Test cases including test steps |
+| `search_documentation` | Wiki pages and documentation sections |
+| `search_pullrequests` | Pull requests — titles, descriptions, reviewers |
+| `search_test_results` | Test execution results — outcomes and error messages |
+| `search_commits` | Git commit history — messages, authors, change summaries |
+| `retrieve_experience` | Recall relevant past experience. **Call at the start of every task.** |
+| `remember` | Store information worth retaining across sessions. **Call proactively.** |
 
 All search tools accept `query` (string), optional `top_k` (default 5), and optional `source_name` filter.
 
 ## Source types
 
-| Type | What it indexes |
-|------|----------------|
-| `manual` | Pasted text or uploaded file (txt, md, PDF) |
-| `ado-workitem-query` | Work items returned by a WIQL query |
-| `ado-code` | Source files from an ADO git repo (glob-filtered) |
-| `ado-pipeline-build` | Last N builds of a pipeline definition |
-| `ado-requirements` | Requirements work items via WIQL |
-| `ado-test-case` | Test cases via WIQL |
-| `ado-wiki` | Pages from an ADO wiki (optional path filter) |
-| `http-page` | A single web page or JSON endpoint |
+Each source type maps to a Qdrant collection. Within any source type you can choose the backend using the **provider tab**:
+
+| Tab | Description |
+|-----|-------------|
+| **Azure DevOps** | Fetch from ADO REST APIs using PAT, bearer, NTLM, or API-key auth |
+| **Custom API** | Fetch from any HTTP JSON endpoint with configurable field mapping |
+| **Manual** | Paste text directly or upload a PDF, TXT, or Markdown file |
+
+| Source Type | Collection | Azure DevOps data |
+|-------------|------------|-------------------|
+| Work Items | `search_workitems` | Bugs, tasks, user stories, features — filtered by type or custom WIQL |
+| Test Cases | `search_testcases` | Test case definitions with steps and automation status |
+| Test Results | `search_test_results` | Runtime test outcomes, error messages, stack traces |
+| Pull Requests | `search_pullrequests` | PR titles, descriptions, reviewers, branch context |
+| Git Commits | `search_commits` | Commit messages, authors, change counts |
+| Source Code | `search_code` | Source files filtered by glob pattern |
+| Documentation | `search_documentation` | Wiki pages with optional path filter; or file upload |
+| Build Results | `search_builds` | Recent CI/CD builds and failed task details |
 
 ## Prerequisites
 
@@ -60,7 +68,6 @@ All search tools accept `query` (string), optional `top_k` (default 5), and opti
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - [Docker](https://docs.docker.com/get-docker/) (for Qdrant)
 - OpenAI API key **or** a local Ollama instance (for embeddings)
-- Azure DevOps Personal Access Token (for ADO sources)
 
 ## Quick start
 
@@ -75,15 +82,27 @@ uv sync
 ### 2. Start Qdrant
 
 ```bash
-docker-compose up -d
+docker-compose up -d qdrant
 ```
 
-### 3. Set environment variables
+### 3. Configure embeddings
 
+Edit `config.json` (auto-created on first run) or use the **Settings** page in the web UI.
+
+**OpenAI:**
 ```bash
 export OPENAI_API_KEY="sk-..."
-# For ADO sources, set the env var you reference in the source config:
-export TFS_PAT="..."
+```
+```json
+{ "embedding": { "provider": "openai", "model": "text-embedding-3-small", "api_key_env_var": "OPENAI_API_KEY", "dimensions": 1536 } }
+```
+
+**Ollama (default):**
+```bash
+# No API key needed — just run Ollama locally
+```
+```json
+{ "embedding": { "provider": "ollama", "model": "nomic-embed-text-v2-moe", "base_url": "http://localhost:11434/v1", "dimensions": 768 } }
 ```
 
 ### 4. Run Conduit
@@ -97,7 +116,7 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 5000 --reload
 
 ### 5. Add sources and sync
 
-Open `http://localhost:5000`, click **Add Source**, choose a type, fill in the connection details, and hit **Save & Sync**. Sources can be re-synced at any time from the main page.
+Open `http://localhost:5000`, click **Add Source**, choose a type, select the backend tab (Azure DevOps / Custom API / Manual), fill in the connection details, and hit **Save & Sync**.
 
 ### 6. Connect to Claude
 
@@ -113,40 +132,28 @@ Open `http://localhost:5000`, click **Add Source**, choose a type, fill in the c
 }
 ```
 
-**VS Code** — `.vscode/mcp.json` is already included:
-```json
-{
-  "servers": {
-    "conduit": {
-      "type": "http",
-      "url": "http://localhost:5000/mcp"
-    }
-  }
-}
-```
+**VS Code** — `.vscode/mcp.json` is already included in the repo.
 
 ## Docker Compose (full stack)
 
-Run Qdrant + Conduit together:
+Run Qdrant and Conduit together:
 
 ```bash
 OPENAI_API_KEY=sk-... docker-compose up
 ```
 
-The `docker-compose.yml` at the repo root starts both services. Conduit waits for Qdrant to be healthy before starting.
+## Configuration reference
 
-## Configuration
-
-`config.json` (auto-created on first run):
+`config.json` (auto-created with Ollama defaults on first run):
 
 ```json
 {
   "embedding": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "api_key_env_var": "OPENAI_API_KEY",
-    "base_url": "",
-    "dimensions": 1536,
+    "provider": "ollama",
+    "model": "nomic-embed-text-v2-moe",
+    "base_url": "http://localhost:11434/v1",
+    "api_key_env_var": "",
+    "dimensions": 768,
     "max_input_chars": 8000
   },
   "qdrant": {
@@ -161,64 +168,40 @@ The `docker-compose.yml` at the repo root starts both services. Conduit waits fo
 }
 ```
 
-All settings are also editable via the **Settings** page in the web UI. Changing the embedding model or dimensions drops all Qdrant collections and marks sources for re-indexing.
-
-### Alternative embedding providers
-
-**Ollama (local):**
-```json
-{
-  "embedding": {
-    "provider": "ollama",
-    "model": "nomic-embed-text",
-    "base_url": "http://localhost:11434/v1",
-    "dimensions": 768
-  }
-}
-```
-
-**Any OpenAI-compatible API:**
-```json
-{
-  "embedding": {
-    "provider": "openai-compatible",
-    "model": "your-model",
-    "base_url": "https://your-endpoint/v1",
-    "api_key_env_var": "YOUR_API_KEY_ENV_VAR",
-    "dimensions": 1536
-  }
-}
-```
+All settings are editable via the **Settings** page. Changing `dimensions` or embedding model drops all Qdrant collections and marks every source for re-indexing.
 
 ### Environment variables
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Default API key env var (referenced by name in config) |
+| `OPENAI_API_KEY` | Example embedding key (referenced by name in config) |
 | `QDRANT_HOST` | Override Qdrant host (default: `localhost`) |
 | `QDRANT_PORT` | Override Qdrant port (default: `6333`) |
 | `CONDUIT_CONFIG` | Path to `config.json` (default: `config.json` in CWD) |
-| `CONDUIT_DATA_DIR` | Directory for `conduit-sources.json` and config (optional) |
+| `CONDUIT_DATA_DIR` | Directory for `conduit-sources.json` and config |
+
+ADO credentials (PAT, bearer token, passwords) are stored as **environment variable names**, not values. The actual secret is read from the environment at sync time, so `conduit-sources.json` never contains plaintext credentials.
 
 ## Project structure
 
 ```
 app/
-  ado/           # Azure DevOps REST client
-  memory/        # Experience store (remember / retrieve)
+  ado/           # Azure DevOps REST client and connection model
+  memory/        # Experience store (remember / retrieve_experience)
   mcp_tools/     # FastMCP tool registrations
   parsing/       # Language-aware code parsers (C#, TS, Go, PS, Markdown)
   rag/           # Embedding, chunking, vector store, indexer, search
-  sources/       # Source type implementations
-  store/         # Source config persistence and sync progress tracking
+  sources/       # Source implementations (ADO, Custom API, Manual)
+  store/         # Source config persistence (JSON file)
   sync/          # Sync orchestration service
-  templates/     # Jinja2 HTML templates (Tailwind CSS dark UI)
-  web/           # FastAPI routes
-  config.py      # Configuration models
+  templates/     # Jinja2 HTML templates (Tailwind CSS)
+  web/           # FastAPI route handlers
+  config.py      # Configuration models and loader
   container.py   # Dependency wiring
   main.py        # App entry point (FastAPI + FastMCP + lifespan)
   models.py      # Shared domain models
-config.json         # Runtime config (embedding, Qdrant, chunking)
+tests/           # pytest test suite (227 tests)
+config.json      # Runtime config (embedding, Qdrant, chunking)
 conduit-sources.json  # Persisted source definitions
 docker-compose.yml
 Dockerfile
@@ -227,22 +210,23 @@ pyproject.toml
 
 ## Transactional indexing
 
-Indexing is split into two phases:
+Indexing runs in two phases to prevent partial writes:
 
-1. **Embed phase** — all chunks are embedded in memory. If any embedding call fails, no data has been written to Qdrant.
-2. **Write phase** — points are upserted in batches of 100. If a batch fails, all points written in earlier batches of this sync run are deleted before the error propagates.
+1. **Embed phase** — all document chunks are embedded in memory. A failure here writes nothing to Qdrant.
+2. **Write phase** — points are upserted in batches of 100. If any batch fails, all points written by earlier batches in this sync run are deleted before the error is surfaced.
 
-This ensures a failed sync never leaves partial or stale data in the vector store.
+## Running tests
 
-## Authentication for ADO sources
+```bash
+uv sync
+uv run pytest          # all 227 tests
+uv run pytest -v       # verbose
+uv run pytest -x       # stop on first failure
+uv run pytest -k "ado" # filter by keyword
+```
 
-Conduit supports multiple auth methods per source:
+## Further reading
 
-| Method | When to use |
-|--------|------------|
-| PAT (Personal Access Token) | Azure DevOps cloud or on-premise |
-| Bearer token | Generic bearer auth |
-| NTLM / Negotiate | On-premise TFS with Windows auth |
-| API Key header | Custom key/value header |
-
-Credentials are stored as **environment variable names** (not values) in `conduit-sources.json`. The actual secrets are read from the environment at sync time.
+- [Source configuration reference](docs/sources.md) — all config keys, provider options, auth methods
+- [MCP tools reference](docs/mcp-tools.md) — tool signatures, search parameters, experience store
+- [Configuration reference](docs/configuration.md) — embedding providers, chunking, environment variables
