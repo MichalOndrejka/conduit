@@ -75,6 +75,12 @@ class ConfigKeys:
     LAST_N_COMMITS  = "LastNCommits"
     URL             = "Url"
     CONTENT_TYPE    = "ContentType"
+    PROVIDER        = "Provider"
+    HTTP_METHOD     = "HttpMethod"
+    ITEMS_PATH      = "ItemsPath"
+    TITLE_FIELD     = "TitleField"
+    CONTENT_FIELDS  = "ContentFields"
+    MANUAL_TYPE     = "ManualType"
 
 
 # ── Core domain models ────────────────────────────────────────────────────────

@@ -1,0 +1,94 @@
+{# Manual input partial — text paste or file upload with drag-and-drop. #}
+{% set cfg = source.config %}
+{% set manual_type = cfg.get('ManualType', 'text') %}
+
+<div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
+    <button type="button" id="manual-tab-text"   onclick="manualTab('text')"
+            class="px-4 py-1.5 border-r border-slate-700 transition-colors">Text</button>
+    <button type="button" id="manual-tab-upload" onclick="manualTab('upload')"
+            class="px-4 py-1.5 transition-colors">File Upload</button>
+</div>
+<input type="hidden" name="ConfigManualType" id="ConfigManualType" value="{{ manual_type }}" />
+{# Carry existing content so preview works without re-uploading on edit #}
+{% if manual_type == 'upload' and cfg.get('Content') %}
+<input type="hidden" name="ConfigManualExistingContent" value="{{ cfg.get('Content') | e }}" />
+{% endif %}
+
+<div id="manual-panel-text" {% if manual_type != 'text' %}class="hidden"{% endif %}>
+    <div class="mb-4">
+        <label class="field-label">Title <span class="text-slate-600">(optional)</span></label>
+        <input name="ConfigManualTitle" value="{{ cfg.get('Title', '') }}" class="field-input" placeholder="e.g. Architecture Notes" />
+    </div>
+    <div class="mb-4">
+        <label class="field-label">Content <span class="text-red-400">*</span></label>
+        <textarea name="ConfigManualText" rows="10" class="field-input font-mono text-xs" placeholder="Paste or type your content here…">{{ cfg.get('Content', '') }}</textarea>
+    </div>
+</div>
+
+<div id="manual-panel-upload" {% if manual_type == 'text' %}class="hidden"{% endif %}>
+    {% if cfg.get('Title') and cfg.get('ManualType') == 'upload' %}
+    <div class="mb-3 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
+        Current file: <span class="text-slate-300 font-medium">{{ cfg.get('Title') }}</span>. Drop or choose a new file to replace it.
+    </div>
+    {% endif %}
+
+    <label id="manual-drop-zone"
+           class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-700 px-6 py-10 cursor-pointer transition-colors hover:border-violet-500 hover:bg-violet-500/5"
+           ondragover="manualDragOver(event)" ondragleave="manualDragLeave(event)" ondrop="manualDrop(event)">
+        <input type="file" name="manual_file" id="manual-file-input" accept=".pdf,.txt,.md"
+               class="sr-only" onchange="manualFileChosen(this.files[0])" />
+        <svg id="manual-drop-icon" class="w-8 h-8 text-slate-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        <span id="manual-drop-label" class="text-xs text-slate-400">
+            <span class="text-violet-400 font-medium">Choose a file</span> or drag and drop here
+        </span>
+        <span class="text-xs text-slate-600">PDF, TXT, MD</span>
+    </label>
+</div>
+
+<script>
+function manualTab(name) {
+    var isText = name === 'text';
+    document.getElementById('manual-panel-text').classList.toggle('hidden', !isText);
+    document.getElementById('manual-panel-upload').classList.toggle('hidden', isText);
+    document.getElementById('ConfigManualType').value = name;
+    document.querySelectorAll('#manual-panel-text input,#manual-panel-text textarea').forEach(function(el){ el.disabled = !isText; });
+    document.querySelectorAll('#manual-panel-upload input').forEach(function(el){ el.disabled = isText; });
+    var on  = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
+    var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
+    document.getElementById('manual-tab-text').className   = (isText ? on : off) + ' border-r border-slate-700';
+    document.getElementById('manual-tab-upload').className = isText ? off : on;
+}
+manualTab('{{ manual_type }}');
+
+function manualFileChosen(file) {
+    if (!file) return;
+    var label = document.getElementById('manual-drop-label');
+    var icon  = document.getElementById('manual-drop-icon');
+    label.innerHTML = '<span class="text-violet-300 font-medium">' + file.name + '</span>';
+    icon.style.color = 'rgb(167,139,250)';
+}
+
+function manualDragOver(e) {
+    e.preventDefault();
+    document.getElementById('manual-drop-zone').classList.add('border-violet-500', 'bg-violet-500/5');
+}
+
+function manualDragLeave(e) {
+    document.getElementById('manual-drop-zone').classList.remove('border-violet-500', 'bg-violet-500/5');
+}
+
+function manualDrop(e) {
+    e.preventDefault();
+    manualDragLeave(e);
+    var files = e.dataTransfer.files;
+    if (!files.length) return;
+    var input = document.getElementById('manual-file-input');
+    // transfer files to the real input via DataTransfer
+    var dt = new DataTransfer();
+    dt.items.add(files[0]);
+    input.files = dt.files;
+    manualFileChosen(files[0]);
+}
+</script>

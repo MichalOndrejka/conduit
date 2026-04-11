@@ -32,6 +32,16 @@ async def _extract_pdf_text(file) -> str:
     return "\n\n".join(pages)
 
 
+async def _extract_file_text(file) -> str:
+    """Extract plain text from an uploaded file (pdf, txt, md)."""
+    filename = getattr(file, "filename", "") or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "pdf":
+        return await _extract_pdf_text(file)
+    data = await file.read()
+    return data.decode("utf-8", errors="replace")
+
+
 def _ctx(request: Request, **kwargs) -> dict:
     """Base context injected into every template."""
     return {
@@ -340,6 +350,17 @@ async def sources_preview(request: Request):
         source = _build_source_from_form(form)
         if not source.type:
             return JSONResponse({"error": "Source type could not be determined from the form. Please reload the page and try again."}, status_code=400)
+
+        if source.get_config(ConfigKeys.PROVIDER) == "manual" and source.get_config(ConfigKeys.MANUAL_TYPE) == "upload":
+            manual_file = form.get("manual_file")
+            if manual_file and getattr(manual_file, "filename", None):
+                # New file dropped/chosen — extract and override
+                source.config[ConfigKeys.CONTENT] = await _extract_file_text(manual_file)
+                if not source.get_config(ConfigKeys.TITLE):
+                    source.config[ConfigKeys.TITLE] = manual_file.filename
+            elif not source.get_config(ConfigKeys.CONTENT):
+                return JSONResponse({"error": "No file provided. Choose or drop a file to preview."}, status_code=400)
+
         factory = container.sync_service._factory
         impl = factory.create(source)
         docs = await asyncio.wait_for(impl.preview_documents(), timeout=30.0)
@@ -409,6 +430,13 @@ async def sources_create_post(request: Request, background_tasks: BackgroundTask
             source.config[ConfigKeys.CONTENT] = await _extract_pdf_text(doc_file)
             source.config[ConfigKeys.TITLE] = doc_file.filename
 
+    if source.get_config(ConfigKeys.PROVIDER) == "manual" and source.get_config(ConfigKeys.MANUAL_TYPE) == "upload":
+        manual_file = form.get("manual_file")
+        if manual_file and getattr(manual_file, "filename", None):
+            source.config[ConfigKeys.CONTENT] = await _extract_file_text(manual_file)
+            if not source.get_config(ConfigKeys.TITLE):
+                source.config[ConfigKeys.TITLE] = manual_file.filename
+
     await container.config_store.save(source)
     background_tasks.add_task(container.sync_service.sync, source.id)
     return RedirectResponse("/", status_code=303)
@@ -453,6 +481,18 @@ async def sources_edit_post(request: Request, source_id: str, background_tasks: 
             # Keep existing content if no new file uploaded
             updated.config[ConfigKeys.CONTENT] = existing.get_config(ConfigKeys.CONTENT)
             updated.config[ConfigKeys.TITLE] = existing.get_config(ConfigKeys.TITLE)
+
+    if updated.get_config(ConfigKeys.PROVIDER) == "manual" and updated.get_config(ConfigKeys.MANUAL_TYPE) == "upload":
+        manual_file = form.get("manual_file")
+        if manual_file and getattr(manual_file, "filename", None):
+            updated.config[ConfigKeys.CONTENT] = await _extract_pdf_text(manual_file)
+            if not updated.get_config(ConfigKeys.TITLE):
+                updated.config[ConfigKeys.TITLE] = manual_file.filename
+        else:
+            # Keep existing content if no new file uploaded
+            updated.config[ConfigKeys.CONTENT] = existing.get_config(ConfigKeys.CONTENT)
+            if not updated.get_config(ConfigKeys.TITLE):
+                updated.config[ConfigKeys.TITLE] = existing.get_config(ConfigKeys.TITLE)
 
     await container.config_store.save(updated)
     return RedirectResponse("/", status_code=303)
@@ -765,6 +805,8 @@ def _build_source_from_form(form) -> SourceDefinition:
         if default:
             config[key] = default
 
+    _set(ConfigKeys.PROVIDER, "ConfigProvider", default="ado")
+
     _set(ConfigKeys.BASE_URL, "ConfigBaseUrl")
     _set(ConfigKeys.AUTH_TYPE, "ConfigAuthType")
     _set(ConfigKeys.API_VERSION, "ConfigApiVersion")
@@ -821,6 +863,22 @@ def _build_source_from_form(form) -> SourceDefinition:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
         _set(ConfigKeys.BRANCH, "ConfigBranch", default="Main")
         _set(ConfigKeys.LAST_N_COMMITS, "ConfigLastNCommits", default="100")
+
+    if config.get(ConfigKeys.PROVIDER, "ado") == "custom":
+        _set(ConfigKeys.URL, "ConfigUrl")
+        _set(ConfigKeys.HTTP_METHOD, "ConfigHttpMethod", default="GET")
+        _set(ConfigKeys.ITEMS_PATH, "ConfigItemsPath")
+        _set(ConfigKeys.TITLE_FIELD, "ConfigTitleField", default="title")
+        _set(ConfigKeys.CONTENT_FIELDS, "ConfigContentFields")
+
+    if config.get(ConfigKeys.PROVIDER, "ado") == "manual":
+        _set(ConfigKeys.MANUAL_TYPE, "ConfigManualType", default="text")
+        _set(ConfigKeys.TITLE, "ConfigManualTitle")
+        if config.get(ConfigKeys.MANUAL_TYPE, "text") == "text":
+            _set(ConfigKeys.CONTENT, "ConfigManualText")
+        else:
+            # Carry existing content when no new file is uploaded (edit + preview flows)
+            _set(ConfigKeys.CONTENT, "ConfigManualExistingContent")
 
     return SourceDefinition(id=source_id, type=source_type, name=name, config=config)
 

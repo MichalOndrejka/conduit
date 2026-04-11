@@ -15,6 +15,7 @@ from app.sources.manual import ManualDocumentSource
 from app.sources.ado_pullrequest import AdoPullRequestSource
 from app.sources.ado_testresults import AdoTestResultsSource
 from app.sources.ado_commits import AdoGitCommitsSource
+from app.sources.custom_api import CustomApiSource
 
 
 # ── Registry types ─────────────────────────────────────────────────────────────
@@ -74,6 +75,12 @@ class SourceFactory:
         self._registry = parser_registry
 
     def create(self, source: SourceDefinition) -> Source:
+        provider = source.get_config(ConfigKeys.PROVIDER, "ado")
+        if provider == "custom":
+            return CustomApiSource(source)
+        if provider == "manual":
+            return ManualDocumentSource(source)
+
         t = source.type
         if t == SourceTypes.WORK_ITEM_QUERY:
             return AdoWorkItemQuerySource(source, self._ado)

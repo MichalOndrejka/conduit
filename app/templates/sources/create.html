@@ -42,9 +42,6 @@
     <div>
         <div class="flex items-center gap-2 mb-0.5">
             <h1 class="text-lg font-semibold text-slate-100">{{ type_label }}</h1>
-            {% if provider_label %}
-            <span class="badge badge-idle">{{ provider_label }}</span>
-            {% endif %}
         </div>
         <p class="text-xs text-slate-500">Fill in source details and connection settings</p>
     </div>
@@ -54,6 +51,17 @@
     <form id="source-form" method="post" action="/sources/create" enctype="multipart/form-data">
         <input type="hidden" name="source_type" value="{{ selected_type }}" />
         <input type="hidden" name="Source.Id" value="{{ source.id }}" />
+
+        {# ── Source system tab (ADO vs Custom API) ── #}
+        <input type="hidden" name="ConfigProvider" id="ConfigProvider" value="ado" />
+        <div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
+            <button type="button" id="sys-tab-ado"    onclick="sysTab('ado')"
+                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Azure DevOps</button>
+            <button type="button" id="sys-tab-custom" onclick="sysTab('custom')"
+                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Custom API</button>
+            <button type="button" id="sys-tab-manual" onclick="sysTab('manual')"
+                    class="px-4 py-1.5 transition-colors">Manual</button>
+        </div>
 
         <div class="mb-5">
             <label class="field-label">Name <span class="text-red-400">*</span></label>
@@ -79,6 +87,19 @@
         {% include "sources/_ado_connection.html" %}
         </div>
         {% endif %}
+
+        {# ── Custom API connection ── #}
+        <div id="custom-api-block" class="hidden">
+        {% include "sources/_custom_api_connection.html" %}
+        </div>
+
+        {# ── Manual input ── #}
+        <div id="manual-block" class="hidden">
+        {% include "sources/_manual_connection.html" %}
+        </div>
+
+        {# ── ADO source-type-specific panels (hidden when Custom API tab is active) ── #}
+        <div id="ado-type-panels">
 
         {# ── Work Items ── #}
         {% if selected_type == "workitem-query" %}
@@ -327,6 +348,31 @@
         docTab('wiki');
         </script>
         {% endif %}
+
+        </div>{# /ado-type-panels #}
+
+        <script>
+        function sysTab(name) {
+            var isAdo    = name === 'ado';
+            var isCustom = name === 'custom';
+            var isManual = name === 'manual';
+            document.getElementById('ConfigProvider').value = name;
+            var adoBlock    = document.getElementById('ado-connection-block');
+            var customBlock = document.getElementById('custom-api-block');
+            var manualBlock = document.getElementById('manual-block');
+            if (adoBlock)    { adoBlock.classList.toggle('hidden', !isAdo);    adoBlock.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isAdo; }); }
+            if (customBlock) { customBlock.classList.toggle('hidden', !isCustom); customBlock.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isCustom; }); }
+            if (manualBlock) { manualBlock.classList.toggle('hidden', !isManual); manualBlock.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isManual; }); }
+            var adoPanels = document.getElementById('ado-type-panels');
+            if (adoPanels) adoPanels.classList.toggle('hidden', !isAdo);
+            var on  = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
+            var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
+            document.getElementById('sys-tab-ado').className    = (isAdo    ? on : off) + ' border-r border-slate-700';
+            document.getElementById('sys-tab-custom').className = (isCustom ? on : off) + ' border-r border-slate-700';
+            document.getElementById('sys-tab-manual').className = isManual  ? on : off;
+        }
+        sysTab('ado');
+        </script>
 
         <div class="border-t border-surface-border mt-5 pt-5 flex items-center gap-3">
             <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
