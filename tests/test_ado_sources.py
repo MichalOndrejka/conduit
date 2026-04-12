@@ -15,7 +15,7 @@ from app.sources.ado_pullrequest import AdoPullRequestSource
 from app.sources.ado_testcase import AdoTestCaseSource, _strip_xml
 from app.sources.ado_testresults import AdoTestResultsSource
 from app.sources.ado_wiki import AdoWikiSource
-from app.sources.ado_workitem import AdoWorkItemQuerySource, _build_wiql
+from app.sources.ado_workitem import AdoWorkItemQuerySource, _build_wiql, _strip_html
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
@@ -92,6 +92,45 @@ def test_strip_xml_empty_string():
 
 def test_strip_xml_no_tags_returns_stripped():
     assert _strip_xml("  plain text  ") == "plain text"
+
+
+# ── _strip_html (pure unit tests) ─────────────────────────────────────────────
+
+def test_strip_html_removes_simple_tags():
+    assert _strip_html("<div>Hello <b>world</b></div>") == "Hello world"
+
+
+def test_strip_html_removes_html_entities():
+    assert _strip_html("Hello&nbsp;world") == "Hello world"
+
+
+def test_strip_html_collapses_whitespace():
+    assert _strip_html("<p>  lots   of   space  </p>") == "lots of space"
+
+
+def test_strip_html_empty_string():
+    assert _strip_html("") == ""
+
+
+def test_strip_html_plain_text_unchanged():
+    assert _strip_html("plain text") == "plain text"
+
+
+def test_strip_html_self_closing_tags():
+    assert _strip_html("line1<br/>line2") == "line1 line2"
+
+
+def test_strip_html_nested_tags():
+    result = _strip_html("<div><p>Acceptance <strong>criteria</strong></p></div>")
+    assert "<" not in result
+    assert "Acceptance" in result
+    assert "criteria" in result
+
+
+def test_strip_html_multiple_entities():
+    result = _strip_html("A&nbsp;&amp;B")
+    assert "<" not in result
+    assert "&" not in result
 
 
 # ── _glob_matches (pure unit tests) ───────────────────────────────────────────
@@ -211,6 +250,43 @@ async def test_workitem_empty_fields_config_passes_empty_list():
     await AdoWorkItemQuerySource(_source(), client).fetch_documents()
     called_fields = client.run_work_item_query.call_args[0][2]
     assert called_fields == []
+
+
+async def test_workitem_html_stripped_from_field_values():
+    client = _client()
+    item = {
+        "id": 99,
+        "fields": {
+            "System.Title": "Bug: login fails",
+            "System.State": "Active",
+            "System.WorkItemType": "Bug",
+            "System.Description": "<div><p>Steps to reproduce:<br/>1. Open app&nbsp;2. Click login</p></div>",
+            "Microsoft.VSTS.Common.AcceptanceCriteria": "<ul><li>User can log in</li><li>Token is valid</li></ul>",
+        },
+    }
+    client.run_work_item_query = AsyncMock(return_value=[item])
+    docs = await AdoWorkItemQuerySource(_source(), client).fetch_documents()
+    assert len(docs) == 1
+    assert "<" not in docs[0].text
+    assert "Steps to reproduce" in docs[0].text
+    assert "User can log in" in docs[0].text
+
+
+async def test_workitem_html_entity_stripped_from_field_values():
+    client = _client()
+    item = {
+        "id": 5,
+        "fields": {
+            "System.Title": "Task",
+            "System.State": "New",
+            "System.WorkItemType": "Task",
+            "System.Description": "Do A&nbsp;and B&lt;C",
+        },
+    }
+    client.run_work_item_query = AsyncMock(return_value=[item])
+    docs = await AdoWorkItemQuerySource(_source(), client).fetch_documents()
+    assert "&nbsp;" not in docs[0].text
+    assert "&lt;" not in docs[0].text
 
 
 # ── AdoTestCaseSource ─────────────────────────────────────────────────────────

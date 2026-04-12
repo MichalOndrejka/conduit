@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 from app.ado.client import AdoClient, AdoConnection
 from app.models import SourceDefinition, SourceDocument, SyncProgress, ConfigKeys
 from app.sources.base import Source, ProgressCallback
+
+
+def _strip_html(value: str) -> str:
+    """Remove HTML/XML tags and normalize whitespace."""
+    text = re.sub(r"<[^>]+>", " ", value)
+    text = re.sub(r"&[a-zA-Z]+;", " ", text)  # HTML entities like &nbsp;
+    return re.sub(r"\s+", " ", text).strip()
 
 
 _DEFAULT_ITEM_TYPES = ["Bug", "Task", "User Story", "Feature", "Epic"]
@@ -64,7 +72,9 @@ class AdoWorkItemQuerySource(Source):
             text_parts = [f"Work Item {item_id}: {title}"]
             for k, v in fields_data.items():
                 if v and str(v).strip():
-                    text_parts.append(f"{k}: {v}")
+                    clean = _strip_html(str(v))
+                    if clean:
+                        text_parts.append(f"{k}: {clean}")
 
             docs.append(SourceDocument(
                 id=f"{self._source.id}_wi_{item_id}",
