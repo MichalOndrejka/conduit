@@ -37,17 +37,29 @@ class SyncService:
 
         self._progress_store.set(source_id, SyncProgress(phase="fetching"))
 
-        try:
-            impl = self._factory.create(source)
-            collection = collection_for(source)
+        impl = self._factory.create(source)
+        collection = collection_for(source)
 
+        # ── Phase 1: fetch ────────────────────────────────────────────────────
+        try:
             def on_fetch_progress(p: SyncProgress) -> None:
                 self._progress_store.set(source_id, p)
 
             docs = await impl.fetch_documents(progress_cb=on_fetch_progress)
+        except Exception as exc:
+            logger.exception("Fetch failed for source %s", source_id)
+            source.sync_status = "failed"
+            source.sync_error = str(exc)
+            source.sync_error_phase = "fetch"
+            self._progress_store.clear(source_id)
+            await self._config_store.save(source)
+            return
 
-            logger.info("Indexing %d documents for source %s", len(docs), source_id)
+        logger.info("Indexing %d documents for source %s", len(docs), source_id)
+        self._progress_store.set(source_id, SyncProgress(phase="indexing", total=len(docs)))
 
+        # ── Phase 2: embed & index ────────────────────────────────────────────
+        try:
             def on_embed_progress(current: int, total: int) -> None:
                 self._progress_store.set(source_id, SyncProgress(
                     phase="indexing",
@@ -60,10 +72,12 @@ class SyncService:
             source.sync_status = "completed"
             source.last_synced_at = datetime.now(timezone.utc)
             source.sync_error = None
+            source.sync_error_phase = None
         except Exception as exc:
-            logger.exception("Sync failed for source %s", source_id)
+            logger.exception("Embed/index failed for source %s", source_id)
             source.sync_status = "failed"
             source.sync_error = str(exc)
+            source.sync_error_phase = "embed"
         finally:
             self._progress_store.clear(source_id)
             await self._config_store.save(source)

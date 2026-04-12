@@ -81,6 +81,7 @@ class ConfigKeys:
     TITLE_FIELD     = "TitleField"
     CONTENT_FIELDS  = "ContentFields"
     MANUAL_TYPE     = "ManualType"
+    VERIFY_SSL      = "VerifySSL"
 
 
 # ── Core domain models ────────────────────────────────────────────────────────
@@ -92,6 +93,7 @@ class SourceDefinition(BaseModel):
     last_synced_at: Optional[datetime] = None
     sync_status: str = "idle"   # idle | syncing | completed | failed | needs-reindex
     sync_error: Optional[str] = None
+    sync_error_phase: Optional[str] = None   # fetch | embed
     config: dict[str, str] = Field(default_factory=dict)
 
     model_config = {"populate_by_name": True}

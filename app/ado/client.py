@@ -22,9 +22,18 @@ class AdoConnection:
     domain: str = ""
     api_key_header: str = ""
     api_key_value: str = ""              # env var name holding the API key value
+    verify_ssl: bool | str = True        # True | False | path to CA bundle
 
     @classmethod
     def from_config(cls, cfg: dict[str, str]) -> "AdoConnection":
+        raw_verify = cfg.get("VerifySSL", "true").strip()
+        if raw_verify.lower() == "false":
+            verify_ssl: bool | str = False
+        elif raw_verify.lower() in ("true", ""):
+            verify_ssl = True
+        else:
+            verify_ssl = raw_verify   # treat as path to CA bundle
+
         return cls(
             base_url=cfg.get("BaseUrl", "").rstrip("/"),
             auth_type=cfg.get("AuthType", "none"),
@@ -36,6 +45,7 @@ class AdoConnection:
             domain=cfg.get("Domain", ""),
             api_key_header=cfg.get("ApiKeyHeader", ""),
             api_key_value=cfg.get("ApiKeyValue", ""),
+            verify_ssl=verify_ssl,
         )
 
     def _resolve_env(self, var_name: str) -> str:
@@ -45,6 +55,7 @@ class AdoConnection:
 
     def _make_session(self) -> requests.Session:
         session = requests.Session()
+        session.verify = self.verify_ssl
         auth_type = self.auth_type.lower()
 
         if auth_type == "pat":

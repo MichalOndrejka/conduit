@@ -13,6 +13,10 @@
         <label class="field-label">API Version</label>
         <input name="ConfigApiVersion" value="{{ cfg.get('ApiVersion', '7.1') }}" class="field-input font-mono" placeholder="7.1" />
     </div>
+    <div class="col-span-2 sm:col-span-1" style="grid-column: span 2 / span 2;">
+        <label class="field-label">SSL Verification<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">true to verify (default), false to skip (self-signed certs), or a path to a CA bundle file</span></span></label>
+        <input name="ConfigVerifySSL" value="{{ cfg.get('VerifySSL', 'true') }}" class="field-input font-mono" placeholder="true" />
+    </div>
     <div>
         <label class="field-label">Authentication</label>
         <select id="authTypeSelect" name="ConfigAuthType" class="field-input" onchange="updateAuthFields()">

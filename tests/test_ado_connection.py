@@ -160,3 +160,48 @@ def test_resolve_env_falls_back_to_literal_when_var_not_set(monkeypatch):
 def test_resolve_env_empty_string_returns_empty_string():
     conn = AdoConnection(base_url="http://x")
     assert conn._resolve_env("") == ""
+
+
+# ── verify_ssl / SSL config ───────────────────────────────────────────────────
+
+def test_from_config_default_verify_ssl_is_true():
+    conn = AdoConnection.from_config({})
+    assert conn.verify_ssl is True
+
+
+def test_from_config_verify_ssl_true_string():
+    conn = AdoConnection.from_config({"VerifySSL": "true"})
+    assert conn.verify_ssl is True
+
+
+def test_from_config_verify_ssl_false_string():
+    conn = AdoConnection.from_config({"VerifySSL": "false"})
+    assert conn.verify_ssl is False
+
+
+def test_from_config_verify_ssl_false_case_insensitive():
+    conn = AdoConnection.from_config({"VerifySSL": "False"})
+    assert conn.verify_ssl is False
+
+
+def test_from_config_verify_ssl_ca_bundle_path():
+    conn = AdoConnection.from_config({"VerifySSL": "/etc/ssl/corp-ca.crt"})
+    assert conn.verify_ssl == "/etc/ssl/corp-ca.crt"
+
+
+def test_make_session_verify_true_by_default():
+    conn = AdoConnection(base_url="http://x")
+    session = conn._make_session()
+    assert session.verify is True
+
+
+def test_make_session_verify_false_when_configured():
+    conn = AdoConnection(base_url="http://x", verify_ssl=False)
+    session = conn._make_session()
+    assert session.verify is False
+
+
+def test_make_session_verify_ca_bundle_path():
+    conn = AdoConnection(base_url="http://x", verify_ssl="/etc/ssl/corp-ca.crt")
+    session = conn._make_session()
+    assert session.verify == "/etc/ssl/corp-ca.crt"

@@ -82,6 +82,7 @@ async def status():
             "syncCurrent": p.current if p else None,
             "syncTotal": p.total if p else None,
             "syncMessage": p.message if p else None,
+            "syncErrorPhase": s.sync_error_phase,
         })
     return JSONResponse(result)
 
