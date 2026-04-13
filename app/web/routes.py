@@ -67,6 +67,15 @@ async def sync_source(source_id: str, background_tasks: BackgroundTasks):
     return RedirectResponse("/", status_code=303)
 
 
+@router.post("/sync-all")
+async def sync_all_sources(background_tasks: BackgroundTasks):
+    sources = await container.config_store.get_all()
+    for source in sources:
+        if source.sync_status != "syncing":
+            background_tasks.add_task(container.sync_service.sync, source.id)
+    return RedirectResponse("/", status_code=303)
+
+
 @router.get("/status")
 async def status():
     sources = await container.config_store.get_all()

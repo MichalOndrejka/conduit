@@ -67,7 +67,7 @@ class AdoCodeRepoSource(Source):
     ) -> list[SourceDocument]:
         conn = AdoConnection.from_config(self._source.config)
         repository = self._source.get_config(ConfigKeys.REPOSITORY)
-        branch = self._source.get_config(ConfigKeys.BRANCH) or "main"
+        branch = self._source.get_config(ConfigKeys.BRANCH)
         patterns_raw = self._source.get_config(ConfigKeys.GLOB_PATTERNS) or _DEFAULT_PATTERNS
         patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
 
@@ -115,7 +115,7 @@ class AdoCodeRepoSource(Source):
 
         conn = AdoConnection.from_config(self._source.config)
         repository = self._source.get_config(ConfigKeys.REPOSITORY)
-        branch = self._source.get_config(ConfigKeys.BRANCH) or "main"
+        branch = self._source.get_config(ConfigKeys.BRANCH)
         patterns_raw = self._source.get_config(ConfigKeys.GLOB_PATTERNS) or _DEFAULT_PATTERNS
         patterns = [p.strip() for p in patterns_raw.split(",") if p.strip()]
 

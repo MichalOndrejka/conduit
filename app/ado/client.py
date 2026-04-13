@@ -196,13 +196,11 @@ class AdoClient:
     def _sync_get_file_tree(
         self, conn: AdoConnection, repository: str, branch: str, scope_path: str
     ) -> list[dict]:
-        data = conn._get(
-            f"_apis/git/repositories/{repository}/items",
-            scopePath=scope_path,
-            recursionLevel="Full",
-            versionDescriptor_version=branch,
-            versionDescriptor_versionType="branch",
-        )
+        params: dict[str, Any] = {"scopePath": scope_path, "recursionLevel": "Full"}
+        if branch:
+            params["versionDescriptor_version"] = branch
+            params["versionDescriptor_versionType"] = "branch"
+        data = conn._get(f"_apis/git/repositories/{repository}/items", **params)
         return [i for i in data.get("value", []) if not i.get("isFolder", False)]
 
     async def get_repo_zip(
@@ -216,15 +214,16 @@ class AdoClient:
     def _sync_get_repo_zip(
         self, conn: AdoConnection, repository: str, branch: str, scope_path: str
     ) -> bytes:
-        return conn._get_bytes(
-            f"_apis/git/repositories/{repository}/items",
-            scopePath=scope_path,
-            recursionLevel="Full",
-            versionDescriptor_version=branch,
-            versionDescriptor_versionType="branch",
-            download="true",
-            **{"$format": "zip"},
-        )
+        params: dict[str, Any] = {
+            "scopePath": scope_path,
+            "recursionLevel": "Full",
+            "download": "true",
+            "$format": "zip",
+        }
+        if branch:
+            params["versionDescriptor_version"] = branch
+            params["versionDescriptor_versionType"] = "branch"
+        return conn._get_bytes(f"_apis/git/repositories/{repository}/items", **params)
 
     async def get_file_content(
         self, conn: AdoConnection, repository: str, branch: str, path: str
