@@ -20,7 +20,7 @@ class QdrantHealth:
         self.error: str | None = None
 
 
-async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHealth, config_store=None) -> None:
+async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHealth, config_store=None, embedding=None) -> None:
     """Verify Qdrant connectivity, detect embedding model changes, create collections."""
     max_retries = 30
 
@@ -36,6 +36,22 @@ async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHea
                 return
             logger.warning("Qdrant not ready (attempt %d/%d): %s", attempt, max_retries, exc)
             await asyncio.sleep(2)
+
+    # Probe the model to get its actual output dimension — configured dimensions
+    # may not match what the model really returns (e.g. Ollama models have a
+    # fixed output size that the API cannot override).
+    if embedding is not None:
+        try:
+            probe = await embedding.embed("dimension probe")
+            actual_dims = len(probe)
+            if actual_dims != store._dimensions:
+                logger.warning(
+                    "Configured dimensions=%d but model outputs %d — using actual model output size",
+                    store._dimensions, actual_dims,
+                )
+                store._dimensions = actual_dims
+        except Exception as exc:
+            logger.warning("Could not probe embedding dimensions at startup: %s", exc)
 
     ec = cfg.embedding
     fingerprint = {

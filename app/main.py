@@ -62,7 +62,7 @@ async def lifespan(app: FastAPI):
 
     # Bootstrap Qdrant in the background so the UI is immediately available
     # even when Qdrant is offline or still starting up.
-    asyncio.create_task(bootstrap_qdrant(cfg, vector_store, health, config_store))
+    asyncio.create_task(bootstrap_qdrant(cfg, vector_store, health, config_store, embedding))
 
     # Run the FastMCP session manager so its task group is initialized.
     # streamable_http_app() is called at mount time (below), which lazily

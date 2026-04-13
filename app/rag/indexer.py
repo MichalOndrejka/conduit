@@ -45,12 +45,12 @@ class DocumentIndexer:
         docs: list[SourceDocument],
         progress_cb: Optional[Callable[[int, int], None]] = None,
     ) -> None:
-        if not await self._store.collection_exists(collection):
-            await self._store.create_collection(collection)
-
         now_ms = int(time.time() * 1000)
 
         # ── Phase 1: embed everything ──────────────────────────────────────────
+        # Collection creation is deferred until after the first embed so we can
+        # use the model's *actual* output dimension rather than the configured
+        # one (e.g. Ollama models have a fixed output size the API cannot override).
         # No Qdrant writes happen here. If any embed call fails the exception
         # propagates immediately and nothing has been written, so no cleanup
         # is needed.
@@ -83,6 +83,11 @@ class DocumentIndexer:
 
         if not points:
             return
+
+        # Create the collection now that we know the actual vector size.
+        if not await self._store.collection_exists(collection):
+            actual_dims = len(points[0].vector)
+            await self._store.create_collection(collection, dimensions=actual_dims)
 
         # ── Phase 2: write to Qdrant with rollback on partial failure ──────────
         # Track every ID that was successfully committed so we can delete them

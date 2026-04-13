@@ -31,10 +31,11 @@ class VectorStore:
         except Exception:
             return False
 
-    async def create_collection(self, name: str) -> None:
+    async def create_collection(self, name: str, dimensions: int | None = None) -> None:
+        size = dimensions if dimensions is not None else self._dimensions
         await self._client.create_collection(
             collection_name=name,
-            vectors_config=VectorParams(size=self._dimensions, distance=Distance.COSINE),
+            vectors_config=VectorParams(size=size, distance=Distance.COSINE),
         )
 
     async def delete_collection(self, name: str) -> None:
