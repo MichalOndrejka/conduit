@@ -22,6 +22,7 @@ class EmbeddingConfig(BaseModel):
     base_url: str = ""
     dimensions: int = 768
     max_input_chars: int = 8000       # Hard cap on chars sent to the API (≈2 000 tokens for dense code)
+    verify_ssl: str = "true"          # "true" | "false" | path to CA bundle
 
 
 class QdrantConfig(BaseModel):

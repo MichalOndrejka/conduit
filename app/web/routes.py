@@ -173,6 +173,7 @@ async def settings_save_embedding(
     base_url: str = Form(""),
     dimensions: int = Form(1536),
     max_input_chars: int = Form(8000),
+    verify_ssl: str = Form("true"),
 ):
     from app.config import AppConfig, EmbeddingConfig, get_config, save_config
     from app.models import CollectionNames
@@ -185,6 +186,7 @@ async def settings_save_embedding(
         base_url=base_url,
         dimensions=dimensions,
         max_input_chars=max_input_chars,
+        verify_ssl=verify_ssl,
     )
     new_cfg = AppConfig(
         embedding=new_embedding,
@@ -259,6 +261,7 @@ async def settings_verify_embedding(
     base_url: str = Form(""),
     dimensions: int = Form(1536),
     max_input_chars: int = Form(8000),
+    verify_ssl: str = Form("true"),
 ):
     try:
         from app.config import AppConfig, EmbeddingConfig, get_config
@@ -272,6 +275,7 @@ async def settings_verify_embedding(
                 base_url=base_url,
                 dimensions=dimensions,
                 max_input_chars=max_input_chars,
+                verify_ssl=verify_ssl,
             ),
             qdrant=cfg.qdrant,
             chunking=cfg.chunking,

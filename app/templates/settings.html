@@ -108,6 +108,10 @@
                     <label class="field-label">Max Input Chars<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Hard cap on text sent per embedding call. Protects against token-limit errors on long code. 0 = unlimited.</span></span></label>
                     <input name="max_input_chars" value="{{ cfg.embedding.max_input_chars }}" type="number" class="field-input" placeholder="8000" />
                 </div>
+                <div>
+                    <label class="field-label">SSL Verification<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">true to verify (default), false to skip (corporate/self-signed certs), or a path to a CA bundle file</span></span></label>
+                    <input name="verify_ssl" value="{{ cfg.embedding.verify_ssl }}" class="field-input font-mono" placeholder="true" />
+                </div>
             </div>
 
             <div id="verify-embedding-result" class="hidden mt-3 text-xs px-3 py-2 rounded-md"></div>
