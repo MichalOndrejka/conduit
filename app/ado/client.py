@@ -135,6 +135,13 @@ class AdoConnection:
         resp.raise_for_status()
         return resp.text
 
+    def _get_bytes(self, api_path: str, **params: Any) -> bytes:
+        session = self._make_session()
+        url = self._url(api_path, **params)
+        resp = session.get(url, timeout=120)
+        resp.raise_for_status()
+        return resp.content
+
 
 def _check_html_auth_redirect(resp, url: str, method: str) -> None:
     """Raise a clear error when ADO returns an HTML sign-in page (HTTP 203 or text/html)."""
@@ -197,6 +204,27 @@ class AdoClient:
             versionDescriptor_versionType="branch",
         )
         return [i for i in data.get("value", []) if not i.get("isFolder", False)]
+
+    async def get_repo_zip(
+        self, conn: AdoConnection, repository: str, branch: str, scope_path: str = "/"
+    ) -> bytes:
+        """Download a repo folder as a zip archive (single HTTP call)."""
+        return await asyncio.to_thread(
+            self._sync_get_repo_zip, conn, repository, branch, scope_path
+        )
+
+    def _sync_get_repo_zip(
+        self, conn: AdoConnection, repository: str, branch: str, scope_path: str
+    ) -> bytes:
+        return conn._get_bytes(
+            f"_apis/git/repositories/{repository}/items",
+            scopePath=scope_path,
+            recursionLevel="Full",
+            versionDescriptor_version=branch,
+            versionDescriptor_versionType="branch",
+            download="true",
+            **{"$format": "zip"},
+        )
 
     async def get_file_content(
         self, conn: AdoConnection, repository: str, branch: str, path: str
