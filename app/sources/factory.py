@@ -15,6 +15,7 @@ from app.sources.manual import ManualDocumentSource
 from app.sources.ado_pullrequest import AdoPullRequestSource
 from app.sources.ado_testresults import AdoTestResultsSource
 from app.sources.ado_commits import AdoGitCommitsSource
+from app.sources.ado_repo_doc import AdoRepoDocSource
 from app.sources.custom_api import CustomApiSource
 
 
@@ -91,8 +92,11 @@ class SourceFactory:
         if t == SourceTypes.PIPELINE_BUILD:
             return AdoPipelineBuildSource(source, self._ado)
         if t == SourceTypes.DOCUMENTATION:
-            if source.get_config(ConfigKeys.DOC_TYPE) == "upload":
+            doc_type = source.get_config(ConfigKeys.DOC_TYPE)
+            if doc_type == "upload":
                 return ManualDocumentSource(source)
+            if doc_type == "repo":
+                return AdoRepoDocSource(source, self._ado, self._registry)
             return AdoWikiSource(source, self._ado)
         if t == SourceTypes.PULL_REQUEST:
             return AdoPullRequestSource(source, self._ado)
