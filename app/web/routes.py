@@ -838,7 +838,7 @@ def _build_source_from_form(form) -> SourceDefinition:
         _set(ConfigKeys.API_KEY_HEADER, "ConfigApiKeyHeader")
         _set(ConfigKeys.API_KEY_VALUE, "ConfigApiKeyValue")
 
-    if source_type == SourceTypes.WORK_ITEM_QUERY:
+    if source_type in (SourceTypes.WORK_ITEM_QUERY, SourceTypes.REQUIREMENTS):
         item_types = form.getlist("ConfigItemTypes")
         if item_types:
             config[ConfigKeys.ITEM_TYPES] = ",".join(item_types)
@@ -868,10 +868,6 @@ def _build_source_from_form(form) -> SourceDefinition:
             _set(ConfigKeys.BRANCH, "ConfigBranch")
             _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.md")
 
-    if source_type == SourceTypes.PULL_REQUEST:
-        _set(ConfigKeys.REPOSITORY, "ConfigRepository")
-        _set(ConfigKeys.STATUS_FILTER, "ConfigStatusFilter", default="all")
-        _set(ConfigKeys.TOP, "ConfigTop", default="200")
 
     if source_type == SourceTypes.TEST_RESULTS:
         _set(ConfigKeys.LAST_N_RUNS, "ConfigLastNRuns", default="10")

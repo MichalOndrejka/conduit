@@ -24,16 +24,7 @@
         {% set doc_type = cfg.get('DocType', 'wiki') %}
         {% set current_provider = cfg.get('Provider', 'ado') %}
 
-        {# ── Source system tab (ADO vs Custom API) ── #}
         <input type="hidden" name="ConfigProvider" id="ConfigProvider" value="{{ current_provider }}" />
-        <div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
-            <button type="button" id="sys-tab-ado"    onclick="sysTab('ado')"
-                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Azure DevOps</button>
-            <button type="button" id="sys-tab-custom" onclick="sysTab('custom')"
-                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Custom API</button>
-            <button type="button" id="sys-tab-manual" onclick="sysTab('manual')"
-                    class="px-4 py-1.5 transition-colors">Manual</button>
-        </div>
 
         <div class="mb-5">
             <label class="field-label">Name <span class="text-red-400">*</span></label>
@@ -42,311 +33,335 @@
 
         <div class="border-t border-surface-border my-5"></div>
 
-        {# ── Documentation tab switcher (above connection fields) ── #}
-        {% if source.type == "documentation" %}
-        <div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
-            <button type="button" id="doc-tab-wiki" onclick="docTab('wiki')"
-                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">ADO Wiki</button>
-            <button type="button" id="doc-tab-repo" onclick="docTab('repo')"
-                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Repo Files</button>
-            <button type="button" id="doc-tab-upload" onclick="docTab('upload')"
-                    class="px-4 py-1.5 transition-colors">File Upload</button>
+        {# ── Provider card-tab strip ── #}
+        <div class="flex items-end gap-0.5 border-b border-[var(--border)]">
+            <button type="button" id="sys-tab-ado"    onclick="sysTab('ado')"    class="tab-off">Azure DevOps</button>
+            <button type="button" id="sys-tab-custom" onclick="sysTab('custom')" class="tab-off">Custom API</button>
+            <button type="button" id="sys-tab-manual" onclick="sysTab('manual')" class="tab-off">Manual</button>
         </div>
-        <input type="hidden" name="ConfigDocType" id="ConfigDocType" value="{{ doc_type }}" />
-        {% endif %}
+        <div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-5 mb-5">
 
-        {% if source.type in ("workitem-query", "test-case", "code", "pipeline-build", "documentation", "pull-request", "test-results", "git-commits") %}
-        <div id="ado-connection-block" {% if current_provider != 'ado' %}class="hidden"{% endif %}>
-        {% include "sources/_ado_connection.html" %}
-        </div>
-        {% endif %}
+            {# ── ADO provider content ── #}
+            <div id="ado-provider-content" {% if current_provider != 'ado' %}class="hidden"{% endif %}>
 
-        {# ── Custom API connection ── #}
-        <div id="custom-api-block" {% if current_provider != 'custom' %}class="hidden"{% endif %}>
-        {% include "sources/_custom_api_connection.html" %}
-        </div>
-
-        {# ── Manual input ── #}
-        <div id="manual-block" {% if current_provider != 'manual' %}class="hidden"{% endif %}>
-        {% include "sources/_manual_connection.html" %}
-        </div>
-
-        {# ── ADO source-type-specific panels (hidden when Custom API tab is active) ── #}
-        <div id="ado-type-panels" {% if current_provider != 'ado' %}class="hidden"{% endif %}>
-
-        {# ── Work Items ── #}
-        {% if source.type == "workitem-query" %}
-        {% set saved_types = cfg.get('ItemTypes', 'Bug,Task,User Story').split(',') %}
-        <div class="border-t border-surface-border my-5"></div>
-
-        <div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
-            <button type="button" id="wi-tab-filters" onclick="wiTab('filters')"
-                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Filters</button>
-            <button type="button" id="wi-tab-custom" onclick="wiTab('custom')"
-                    class="px-4 py-1.5 transition-colors">Custom WIQL</button>
-        </div>
-
-        <div id="wi-panel-filters">
-            <div class="mb-4">
-                <label class="field-label">Item Types<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Leave all unchecked to include every work item type</span></span></label>
-                <div class="flex flex-wrap gap-2 mt-1.5">
-                    {% for t in ["Bug", "Task", "User Story", "Feature", "Epic"] %}
-                    <label class="cursor-pointer select-none">
-                        <input type="checkbox" name="ConfigItemTypes" value="{{ t }}" class="sr-only peer"
-                               {% if t in saved_types %}checked{% endif %} />
-                        <span class="inline-block px-3 py-1 rounded-md text-xs font-medium border transition-colors
-                                     border-slate-700 text-slate-500
-                                     peer-checked:border-violet-500 peer-checked:text-violet-300 peer-checked:bg-violet-500/10
-                                     hover:border-slate-500 hover:text-slate-400">{{ t }}</span>
-                    </label>
-                    {% endfor %}
+                {% if source.type in ("workitem-query", "requirements", "test-case", "code", "pipeline-build", "documentation", "test-results", "git-commits") %}
+                <div id="ado-connection-block" {% if current_provider == 'ado' and source.type == 'documentation' and doc_type == 'upload' %}class="hidden"{% endif %}>
+                {% include "sources/_ado_connection.html" %}
                 </div>
-            </div>
-            <div class="mb-4">
-                <label class="field-label">Area Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this area path</span></span></label>
-                <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" placeholder="MyProject\Team A" />
-            </div>
-        </div>
+                {% endif %}
 
-        <div id="wi-panel-custom" class="hidden">
-            <div class="mb-4">
-                <label class="field-label">WIQL Query</label>
-                <textarea name="ConfigQuery" rows="4" class="field-input font-mono text-xs">{{ cfg.get('Query', '') }}</textarea>
-            </div>
-            <div class="mb-4">
-                <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
-                <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" placeholder="System.Title,System.Description,System.State" />
-            </div>
-        </div>
+                {# ── ADO source-type-specific panels ── #}
+                <div id="ado-type-panels">
 
-        <script>
-        function wiTab(name) {
-            var f = name === 'filters';
-            document.getElementById('wi-panel-filters').classList.toggle('hidden', !f);
-            document.getElementById('wi-panel-custom').classList.toggle('hidden', f);
-            document.querySelectorAll('#wi-panel-filters input,#wi-panel-filters textarea').forEach(function(el){ el.disabled = !f; });
-            document.querySelectorAll('#wi-panel-custom input,#wi-panel-custom textarea').forEach(function(el){ el.disabled = f; });
-            var on = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
-            var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
-            document.getElementById('wi-tab-filters').className = (f ? on : off) + ' border-r border-slate-700';
-            document.getElementById('wi-tab-custom').className = f ? off : on;
-        }
-        wiTab('{{ "custom" if cfg.get("Query") else "filters" }}');
-        </script>
-        {% endif %}
-
-        {# ── Test Cases ── #}
-        {% if source.type == "test-case" %}
-        <div class="border-t border-surface-border my-5"></div>
-
-        <div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
-            <button type="button" id="tc-tab-default" onclick="tcTab('default')"
-                    class="px-4 py-1.5 border-r border-slate-700 transition-colors">Default</button>
-            <button type="button" id="tc-tab-custom" onclick="tcTab('custom')"
-                    class="px-4 py-1.5 transition-colors">Custom WIQL</button>
-        </div>
-
-        <div id="tc-panel-default">
-            <div class="mb-4 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
-                Indexes all <strong class="text-slate-300">Test Case</strong> work items in the project. Steps are extracted and XML formatting is stripped automatically.
-            </div>
-        </div>
-
-        <div id="tc-panel-custom" class="hidden">
-            <div class="mb-4">
-                <label class="field-label">WIQL Query</label>
-                <textarea name="ConfigQuery" rows="3" class="field-input font-mono text-xs">{{ cfg.get('Query', '') }}</textarea>
-            </div>
-        </div>
-
-        <script>
-        function tcTab(name) {
-            var d = name === 'default';
-            document.getElementById('tc-panel-default').classList.toggle('hidden', !d);
-            document.getElementById('tc-panel-custom').classList.toggle('hidden', d);
-            document.querySelectorAll('#tc-panel-custom textarea').forEach(function(el){ el.disabled = d; });
-            var on = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
-            var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
-            document.getElementById('tc-tab-default').className = (d ? on : off) + ' border-r border-slate-700';
-            document.getElementById('tc-tab-custom').className = d ? off : on;
-        }
-        tcTab('{{ "custom" if cfg.get("Query") else "default" }}');
-        </script>
-        {% endif %}
-
-        {# ── Pull Requests ── #}
-        {% if source.type == "pull-request" %}
-        <div class="border-t border-surface-border my-5"></div>
-        <div class="mb-4">
-            <label class="field-label">Repository <span class="text-red-400">*</span></label>
-            <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input" required />
-        </div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="field-label">Status</label>
-                <select name="ConfigStatusFilter" class="field-input">
-                    {% for val, lbl in [("all","All"),("active","Active"),("completed","Completed"),("abandoned","Abandoned")] %}
-                    <option value="{{ val }}" {% if cfg.get('StatusFilter','all') == val %}selected{% endif %}>{{ lbl }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div>
-                <label class="field-label">Max PRs</label>
-                <input name="ConfigTop" value="{{ cfg.get('Top', '200') }}" class="field-input" type="number" min="1" max="1000" />
-            </div>
-        </div>
-        {% endif %}
-
-        {# ── Test Results ── #}
-        {% if source.type == "test-results" %}
-        <div class="border-t border-surface-border my-5"></div>
-        <div class="mb-4 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
-            Fetches recent test run results — pass/fail outcomes, error messages and stack traces.
-        </div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="field-label">Last N Runs</label>
-                <input name="ConfigLastNRuns" value="{{ cfg.get('LastNRuns', '10') }}" class="field-input" type="number" min="1" max="100" />
-            </div>
-            <div>
-                <label class="field-label">Results per Run</label>
-                <input name="ConfigResultsPerRun" value="{{ cfg.get('ResultsPerRun', '200') }}" class="field-input" type="number" min="1" max="1000" />
-            </div>
-        </div>
-        {% endif %}
-
-        {# ── Git Commits ── #}
-        {% if source.type == "git-commits" %}
-        <div class="border-t border-surface-border my-5"></div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="field-label">Repository <span class="text-red-400">*</span></label>
-                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input" required />
-            </div>
-            <div>
-                <label class="field-label">Branch</label>
-                <input name="ConfigBranch" value="{{ cfg.get('Branch', 'Main') }}" class="field-input" />
-            </div>
-        </div>
-        <div class="mb-4">
-            <label class="field-label">Last N Commits</label>
-            <input name="ConfigLastNCommits" value="{{ cfg.get('LastNCommits', '100') }}" class="field-input" type="number" min="1" max="2000" />
-        </div>
-        {% endif %}
-
-        {% if source.type == "code" %}
-        <div class="border-t border-surface-border my-5"></div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="field-label">Repository <span class="text-red-400">*</span></label>
-                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input" required />
-            </div>
-            <div>
-                <label class="field-label">Branch</label>
-                <input name="ConfigBranch" value="{{ cfg.get('Branch', 'Main') }}" class="field-input" />
-            </div>
-        </div>
-        <div class="mb-4">
-            <label class="field-label">Glob Patterns</label>
-            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.cs') }}" class="field-input font-mono" />
-        </div>
-        {% endif %}
-
-        {% if source.type == "pipeline-build" %}
-        <div class="border-t border-surface-border my-5"></div>
-        <div class="grid grid-cols-2 gap-4 mb-4">
-            <div>
-                <label class="field-label">Pipeline ID <span class="text-red-400">*</span></label>
-                <input name="ConfigPipelineId" value="{{ cfg.get('PipelineId', '') }}" class="field-input" type="number" required />
-            </div>
-            <div>
-                <label class="field-label">Recent Builds</label>
-                <input name="ConfigLastNBuilds" value="{{ cfg.get('LastNBuilds', '5') }}" class="field-input" type="number" min="1" max="50" />
-            </div>
-        </div>
-        {% endif %}
-
-        {% if source.type == "documentation" %}
-        <div class="border-t border-surface-border my-5"></div>
-
-        <div id="doc-panel-wiki" {% if doc_type != 'wiki' %}class="hidden"{% endif %}>
-            <div class="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                    <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span></label>
-                    <input name="ConfigWikiName" value="{{ cfg.get('WikiName', '') }}" class="field-input" placeholder="MyProject.wiki" />
+                {# ── Work Items ── #}
+                {% if source.type == "workitem-query" %}
+                {% set saved_types = cfg.get('ItemTypes', 'Bug,Task,User Story').split(',') %}
+                <div class="border-t border-[var(--border)] my-5"></div>
+                <div class="flex items-end gap-0.5 border-b border-[var(--border)]">
+                    <button type="button" id="wi-tab-filters" onclick="wiTab('filters')" class="tab-off">Filters</button>
+                    <button type="button" id="wi-tab-custom"  onclick="wiTab('custom')"  class="tab-off">Custom WIQL</button>
                 </div>
-                <div>
-                    <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span></label>
-                    <input name="ConfigPathFilter" value="{{ cfg.get('PathFilter', '') }}" class="field-input" placeholder="/Architecture" />
+                <div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-4">
+                    <div id="wi-panel-filters">
+                        <div class="mb-4">
+                            <label class="field-label">Item Types<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Leave all unchecked to include every work item type</span></span></label>
+                            <div class="flex flex-wrap gap-2 mt-1.5">
+                                {% for t in ["Bug", "Task", "User Story", "Feature", "Epic"] %}
+                                <label class="cursor-pointer select-none">
+                                    <input type="checkbox" name="ConfigItemTypes" value="{{ t }}" class="sr-only peer"
+                                           {% if t in saved_types %}checked{% endif %} />
+                                    <span class="inline-block px-3 py-1 rounded-md text-xs font-medium border transition-colors
+                                                 border-slate-700 text-slate-500
+                                                 peer-checked:border-violet-500 peer-checked:text-violet-300 peer-checked:bg-violet-500/10
+                                                 hover:border-slate-500 hover:text-slate-400">{{ t }}</span>
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="field-label">Area Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this area path</span></span></label>
+                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" placeholder="MyProject\Team A" />
+                        </div>
+                    </div>
+                    <div id="wi-panel-custom" class="hidden">
+                        <div class="mb-4">
+                            <label class="field-label">WIQL Query</label>
+                            <textarea name="ConfigQuery" rows="4" class="field-input font-mono text-xs">{{ cfg.get('Query', '') }}</textarea>
+                        </div>
+                        <div class="mb-4">
+                            <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
+                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" placeholder="System.Title,System.Description,System.State" />
+                        </div>
+                    </div>
                 </div>
-            </div>
-        </div>
+                <script>
+                function wiTab(name) {
+                    var f = name === 'filters';
+                    document.getElementById('wi-panel-filters').classList.toggle('hidden', !f);
+                    document.getElementById('wi-panel-custom').classList.toggle('hidden', f);
+                    document.querySelectorAll('#wi-panel-filters input,#wi-panel-filters textarea').forEach(function(el){ el.disabled = !f; });
+                    document.querySelectorAll('#wi-panel-custom input,#wi-panel-custom textarea').forEach(function(el){ el.disabled = f; });
+                    document.getElementById('wi-tab-filters').className = f ? 'tab-on' : 'tab-off';
+                    document.getElementById('wi-tab-custom').className  = f ? 'tab-off' : 'tab-on';
+                }
+                wiTab('{{ "custom" if cfg.get("Query") else "filters" }}');
+                </script>
+                {% endif %}
 
-        <div id="doc-panel-repo" {% if doc_type != 'repo' %}class="hidden"{% endif %}>
-            <div class="grid grid-cols-2 gap-4 mb-4">
-                <div>
-                    <label class="field-label">Repository</label>
-                    <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" placeholder="MyRepo" />
+                {# ── Requirements ── #}
+                {% if source.type == "requirements" %}
+                {% set saved_types = cfg.get('ItemTypes', 'Feature,User Story,Epic,Requirement').split(',') %}
+                <div class="border-t border-[var(--border)] my-5"></div>
+                <div class="flex items-end gap-0.5 border-b border-[var(--border)]">
+                    <button type="button" id="wi-tab-filters" onclick="wiTab('filters')" class="tab-off">Filters</button>
+                    <button type="button" id="wi-tab-custom"  onclick="wiTab('custom')"  class="tab-off">Custom WIQL</button>
                 </div>
-                <div>
-                    <label class="field-label">Branch <span class="text-slate-600">(optional)</span></label>
-                    <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" placeholder="main" />
+                <div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-4">
+                    <div id="wi-panel-filters">
+                        <div class="mb-4">
+                            <label class="field-label">Item Types<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Leave all unchecked to include every work item type</span></span></label>
+                            <div class="flex flex-wrap gap-2 mt-1.5">
+                                {% for t in ["Feature", "User Story", "Epic", "Requirement", "Bug", "Task"] %}
+                                <label class="cursor-pointer select-none">
+                                    <input type="checkbox" name="ConfigItemTypes" value="{{ t }}" class="sr-only peer"
+                                           {% if t in saved_types %}checked{% endif %} />
+                                    <span class="inline-block px-3 py-1 rounded-md text-xs font-medium border transition-colors
+                                                 border-slate-700 text-slate-500
+                                                 peer-checked:border-violet-500 peer-checked:text-violet-300 peer-checked:bg-violet-500/10
+                                                 hover:border-slate-500 hover:text-slate-400">{{ t }}</span>
+                                </label>
+                                {% endfor %}
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="field-label">Area Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this area path</span></span></label>
+                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" placeholder="MyProject\Team A" />
+                        </div>
+                    </div>
+                    <div id="wi-panel-custom" class="hidden">
+                        <div class="mb-4">
+                            <label class="field-label">WIQL Query</label>
+                            <textarea name="ConfigQuery" rows="4" class="field-input font-mono text-xs">{{ cfg.get('Query', '') }}</textarea>
+                        </div>
+                        <div class="mb-4">
+                            <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
+                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" placeholder="System.Title,System.Description,System.State" />
+                        </div>
+                    </div>
                 </div>
-            </div>
-            <div>
-                <label class="field-label">Glob Patterns<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Comma-separated glob patterns, e.g. **/*.md,docs/**/*.txt</span></span></label>
-                <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" placeholder="**/*.md" />
-            </div>
-        </div>
+                <script>
+                function wiTab(name) {
+                    var f = name === 'filters';
+                    document.getElementById('wi-panel-filters').classList.toggle('hidden', !f);
+                    document.getElementById('wi-panel-custom').classList.toggle('hidden', f);
+                    document.querySelectorAll('#wi-panel-filters input,#wi-panel-filters textarea').forEach(function(el){ el.disabled = !f; });
+                    document.querySelectorAll('#wi-panel-custom input,#wi-panel-custom textarea').forEach(function(el){ el.disabled = f; });
+                    document.getElementById('wi-tab-filters').className = f ? 'tab-on' : 'tab-off';
+                    document.getElementById('wi-tab-custom').className  = f ? 'tab-off' : 'tab-on';
+                }
+                wiTab('{{ "custom" if cfg.get("Query") else "filters" }}');
+                </script>
+                {% endif %}
 
-        <div id="doc-panel-upload" {% if doc_type != 'upload' %}class="hidden"{% endif %}>
-            {% if cfg.get('Title') %}
-            <div class="mb-3 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
-                Current file: <span class="text-slate-300 font-medium">{{ cfg.get('Title') }}</span>. Upload a new file to replace it.
-            </div>
-            {% else %}
-            <div class="mb-3 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
-                Upload a PDF. Text is extracted and indexed — the file itself is not stored.
-            </div>
-            {% endif %}
-            <div class="mb-4">
-                <label class="field-label">PDF File{% if not cfg.get('Title') %} <span class="text-red-400">*</span>{% endif %}</label>
-                <label class="flex items-center gap-3 cursor-pointer group">
-                    <input type="file" name="doc_file" accept=".pdf" class="sr-only"
-                           onchange="document.getElementById('doc-file-name-edit').textContent = this.files[0]?.name || 'No file chosen'" />
-                    <span class="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium group-hover:border-violet-400 group-hover:text-violet-300">
-                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-                        </svg>
-                        Choose PDF
-                    </span>
-                    <span id="doc-file-name-edit" class="text-xs text-slate-500">No file chosen</span>
-                </label>
-            </div>
-        </div>
+                {# ── Test Cases ── #}
+                {% if source.type == "test-case" %}
+                <div class="border-t border-[var(--border)] my-5"></div>
+                <div class="flex items-end gap-0.5 border-b border-[var(--border)]">
+                    <button type="button" id="tc-tab-default" onclick="tcTab('default')" class="tab-off">Default</button>
+                    <button type="button" id="tc-tab-custom"  onclick="tcTab('custom')"  class="tab-off">Custom WIQL</button>
+                </div>
+                <div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-4">
+                    <div id="tc-panel-default">
+                        <div class="mb-4 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
+                            Indexes all <strong class="text-slate-300">Test Case</strong> work items in the project. Steps are extracted and XML formatting is stripped automatically.
+                        </div>
+                    </div>
+                    <div id="tc-panel-custom" class="hidden">
+                        <div class="mb-4">
+                            <label class="field-label">WIQL Query</label>
+                            <textarea name="ConfigQuery" rows="3" class="field-input font-mono text-xs">{{ cfg.get('Query', '') }}</textarea>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                function tcTab(name) {
+                    var d = name === 'default';
+                    document.getElementById('tc-panel-default').classList.toggle('hidden', !d);
+                    document.getElementById('tc-panel-custom').classList.toggle('hidden', d);
+                    document.querySelectorAll('#tc-panel-custom textarea').forEach(function(el){ el.disabled = d; });
+                    document.getElementById('tc-tab-default').className = d ? 'tab-on' : 'tab-off';
+                    document.getElementById('tc-tab-custom').className  = d ? 'tab-off' : 'tab-on';
+                }
+                tcTab('{{ "custom" if cfg.get("Query") else "default" }}');
+                </script>
+                {% endif %}
 
-        <script>
-        function docTab(name) {
-            var isWiki = name === 'wiki';
-            var isRepo = name === 'repo';
-            var isUpload = name === 'upload';
-            document.getElementById('doc-panel-wiki').classList.toggle('hidden', !isWiki);
-            document.getElementById('doc-panel-repo').classList.toggle('hidden', !isRepo);
-            document.getElementById('doc-panel-upload').classList.toggle('hidden', !isUpload);
-            document.getElementById('ConfigDocType').value = name;
-            var adoBlock = document.getElementById('ado-connection-block');
-            if (adoBlock) adoBlock.classList.toggle('hidden', isUpload);
-            var on = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
-            var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
-            document.getElementById('doc-tab-wiki').className = (isWiki ? on : off) + ' border-r border-slate-700';
-            document.getElementById('doc-tab-repo').className = (isRepo ? on : off) + ' border-r border-slate-700';
-            document.getElementById('doc-tab-upload').className = isUpload ? on : off;
-        }
-        docTab('{{ doc_type }}');
-        </script>
-        {% endif %}
+                {# ── Test Results ── #}
+                {% if source.type == "test-results" %}
+                <div class="border-t border-surface-border my-5"></div>
+                <div class="mb-4 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
+                    Fetches recent test run results — pass/fail outcomes, error messages and stack traces.
+                </div>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="field-label">Last N Runs</label>
+                        <input name="ConfigLastNRuns" value="{{ cfg.get('LastNRuns', '10') }}" class="field-input" type="number" min="1" max="100" />
+                    </div>
+                    <div>
+                        <label class="field-label">Results per Run</label>
+                        <input name="ConfigResultsPerRun" value="{{ cfg.get('ResultsPerRun', '200') }}" class="field-input" type="number" min="1" max="1000" />
+                    </div>
+                </div>
+                {% endif %}
 
-        </div>{# /ado-type-panels #}
+                {# ── Git Commits ── #}
+                {% if source.type == "git-commits" %}
+                <div class="border-t border-surface-border my-5"></div>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="field-label">Repository <span class="text-red-400">*</span></label>
+                        <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input" required />
+                    </div>
+                    <div>
+                        <label class="field-label">Branch</label>
+                        <input name="ConfigBranch" value="{{ cfg.get('Branch', 'Main') }}" class="field-input" />
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="field-label">Last N Commits</label>
+                    <input name="ConfigLastNCommits" value="{{ cfg.get('LastNCommits', '100') }}" class="field-input" type="number" min="1" max="2000" />
+                </div>
+                {% endif %}
+
+                {% if source.type == "code" %}
+                <div class="border-t border-surface-border my-5"></div>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="field-label">Repository <span class="text-red-400">*</span></label>
+                        <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input" required />
+                    </div>
+                    <div>
+                        <label class="field-label">Branch</label>
+                        <input name="ConfigBranch" value="{{ cfg.get('Branch', 'Main') }}" class="field-input" />
+                    </div>
+                </div>
+                <div class="mb-4">
+                    <label class="field-label">Glob Patterns</label>
+                    <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.cs') }}" class="field-input font-mono" />
+                </div>
+                {% endif %}
+
+                {% if source.type == "pipeline-build" %}
+                <div class="border-t border-surface-border my-5"></div>
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="field-label">Pipeline ID <span class="text-red-400">*</span></label>
+                        <input name="ConfigPipelineId" value="{{ cfg.get('PipelineId', '') }}" class="field-input" type="number" required />
+                    </div>
+                    <div>
+                        <label class="field-label">Recent Builds</label>
+                        <input name="ConfigLastNBuilds" value="{{ cfg.get('LastNBuilds', '5') }}" class="field-input" type="number" min="1" max="50" />
+                    </div>
+                </div>
+                {% endif %}
+
+                {# ── Documentation sub-tabs ── #}
+                {% if source.type == "documentation" %}
+                <input type="hidden" name="ConfigDocType" id="ConfigDocType" value="{{ doc_type }}" />
+                <div class="border-t border-[var(--border)] my-5"></div>
+                <div class="flex items-end gap-0.5 border-b border-[var(--border)]">
+                    <button type="button" id="doc-tab-wiki"   onclick="docTab('wiki')"   class="tab-off">ADO Wiki</button>
+                    <button type="button" id="doc-tab-repo"   onclick="docTab('repo')"   class="tab-off">Repo Files</button>
+                    <button type="button" id="doc-tab-upload" onclick="docTab('upload')" class="tab-off">File Upload</button>
+                </div>
+                <div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-4">
+                    <div id="doc-panel-wiki" {% if doc_type != 'wiki' %}class="hidden"{% endif %}>
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span></label>
+                                <input name="ConfigWikiName" value="{{ cfg.get('WikiName', '') }}" class="field-input" placeholder="MyProject.wiki" />
+                            </div>
+                            <div>
+                                <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span></label>
+                                <input name="ConfigPathFilter" value="{{ cfg.get('PathFilter', '') }}" class="field-input" placeholder="/Architecture" />
+                            </div>
+                        </div>
+                    </div>
+                    <div id="doc-panel-repo" {% if doc_type != 'repo' %}class="hidden"{% endif %}>
+                        <div class="grid grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="field-label">Repository</label>
+                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" placeholder="MyRepo" />
+                            </div>
+                            <div>
+                                <label class="field-label">Branch <span class="text-slate-600">(optional)</span></label>
+                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" placeholder="main" />
+                            </div>
+                        </div>
+                        <div>
+                            <label class="field-label">Glob Patterns<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Comma-separated glob patterns, e.g. **/*.md,docs/**/*.txt</span></span></label>
+                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" placeholder="**/*.md" />
+                        </div>
+                    </div>
+                    <div id="doc-panel-upload" {% if doc_type != 'upload' %}class="hidden"{% endif %}>
+                        {% if cfg.get('Title') %}
+                        <div class="mb-3 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
+                            Current file: <span class="text-slate-300 font-medium">{{ cfg.get('Title') }}</span>. Upload a new file to replace it.
+                        </div>
+                        {% else %}
+                        <div class="mb-3 rounded-lg px-4 py-3 text-xs text-slate-400" style="background:rgba(139,92,246,0.05);border:1px solid rgba(139,92,246,0.15);">
+                            Upload a PDF. Text is extracted and indexed — the file itself is not stored.
+                        </div>
+                        {% endif %}
+                        <div class="mb-4">
+                            <label class="field-label">PDF File{% if not cfg.get('Title') %} <span class="text-red-400">*</span>{% endif %}</label>
+                            <label class="flex items-center gap-3 cursor-pointer group">
+                                <input type="file" name="doc_file" accept=".pdf" class="sr-only"
+                                       onchange="document.getElementById('doc-file-name-edit').textContent = this.files[0]?.name || 'No file chosen'" />
+                                <span class="btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium group-hover:border-violet-400 group-hover:text-violet-300">
+                                    <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
+                                    </svg>
+                                    Choose PDF
+                                </span>
+                                <span id="doc-file-name-edit" class="text-xs text-slate-500">No file chosen</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                function docTab(name) {
+                    var isWiki = name === 'wiki';
+                    var isRepo = name === 'repo';
+                    var isUpload = name === 'upload';
+                    document.getElementById('doc-panel-wiki').classList.toggle('hidden', !isWiki);
+                    document.getElementById('doc-panel-repo').classList.toggle('hidden', !isRepo);
+                    document.getElementById('doc-panel-upload').classList.toggle('hidden', !isUpload);
+                    document.getElementById('ConfigDocType').value = name;
+                    var adoBlock = document.getElementById('ado-connection-block');
+                    if (adoBlock) adoBlock.classList.toggle('hidden', isUpload);
+                    document.getElementById('doc-tab-wiki').className   = isWiki   ? 'tab-on' : 'tab-off';
+                    document.getElementById('doc-tab-repo').className   = isRepo   ? 'tab-on' : 'tab-off';
+                    document.getElementById('doc-tab-upload').className = isUpload ? 'tab-on' : 'tab-off';
+                }
+                docTab('{{ doc_type }}');
+                </script>
+                {% endif %}
+
+                </div>{# /ado-type-panels #}
+            </div>{# /ado-provider-content #}
+
+            {# ── Custom API connection ── #}
+            <div id="custom-api-block" {% if current_provider != 'custom' %}class="hidden"{% endif %}>
+            {% include "sources/_custom_api_connection.html" %}
+            </div>
+
+            {# ── Manual input ── #}
+            <div id="manual-block" {% if current_provider != 'manual' %}class="hidden"{% endif %}>
+            {% include "sources/_manual_connection.html" %}
+            </div>
+
+        </div>{# /panel #}
 
         <script>
         function sysTab(name) {
@@ -354,19 +369,15 @@
             var isCustom = name === 'custom';
             var isManual = name === 'manual';
             document.getElementById('ConfigProvider').value = name;
-            var adoBlock    = document.getElementById('ado-connection-block');
+            var adoContent  = document.getElementById('ado-provider-content');
             var customBlock = document.getElementById('custom-api-block');
             var manualBlock = document.getElementById('manual-block');
-            if (adoBlock)    { adoBlock.classList.toggle('hidden', !isAdo);    adoBlock.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isAdo; }); }
+            if (adoContent)  { adoContent.classList.toggle('hidden', !isAdo);    adoContent.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isAdo; }); }
             if (customBlock) { customBlock.classList.toggle('hidden', !isCustom); customBlock.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isCustom; }); }
             if (manualBlock) { manualBlock.classList.toggle('hidden', !isManual); manualBlock.querySelectorAll('input,select,textarea').forEach(function(el){ el.disabled = !isManual; }); }
-            var adoPanels = document.getElementById('ado-type-panels');
-            if (adoPanels) adoPanels.classList.toggle('hidden', !isAdo);
-            var on  = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
-            var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
-            document.getElementById('sys-tab-ado').className    = (isAdo    ? on : off) + ' border-r border-slate-700';
-            document.getElementById('sys-tab-custom').className = (isCustom ? on : off) + ' border-r border-slate-700';
-            document.getElementById('sys-tab-manual').className = isManual  ? on : off;
+            document.getElementById('sys-tab-ado').className    = isAdo    ? 'tab-on' : 'tab-off';
+            document.getElementById('sys-tab-custom').className = isCustom ? 'tab-on' : 'tab-off';
+            document.getElementById('sys-tab-manual').className = isManual ? 'tab-on' : 'tab-off';
         }
         sysTab('{{ current_provider }}');
         </script>

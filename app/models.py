@@ -10,20 +10,20 @@ import uuid
 # ── Collection names ────────────────────────────────────────────────────────
 
 class CollectionNames:
-    MANUAL_DOCUMENTS = "conduit_manual_documents"
+    MANUAL_DOCUMENTS = "conduit_manual_documents"  # kept for reference/migration only
     WORK_ITEMS       = "conduit_workitems"
+    REQUIREMENTS     = "conduit_requirements"
     CODE             = "conduit_code"
     BUILDS           = "conduit_builds"
     TEST_CASES       = "conduit_testcases"
     DOCUMENTATION    = "conduit_documentation"
-    PULL_REQUESTS    = "conduit_pullrequests"
     TEST_RESULTS     = "conduit_test_results"
     COMMITS          = "conduit_commits"
     EXPERIENCE       = "conduit_experience"
 
     ALL: list[str] = [
-        MANUAL_DOCUMENTS, WORK_ITEMS, CODE, BUILDS,
-        TEST_CASES, DOCUMENTATION, PULL_REQUESTS, TEST_RESULTS, COMMITS,
+        WORK_ITEMS, REQUIREMENTS, CODE, BUILDS,
+        TEST_CASES, DOCUMENTATION, TEST_RESULTS, COMMITS,
         EXPERIENCE,
     ]
 
@@ -32,11 +32,11 @@ class CollectionNames:
 
 class SourceTypes:
     WORK_ITEM_QUERY = "workitem-query"
+    REQUIREMENTS    = "requirements"
     TEST_CASE       = "test-case"
     CODE_REPO       = "code"
     PIPELINE_BUILD  = "pipeline-build"
     DOCUMENTATION   = "documentation"
-    PULL_REQUEST    = "pull-request"
     TEST_RESULTS    = "test-results"
     GIT_COMMITS     = "git-commits"
 

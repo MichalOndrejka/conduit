@@ -12,7 +12,6 @@ from app.sources.ado_code import AdoCodeRepoSource
 from app.sources.ado_build import AdoPipelineBuildSource
 from app.sources.ado_wiki import AdoWikiSource
 from app.sources.manual import ManualDocumentSource
-from app.sources.ado_pullrequest import AdoPullRequestSource
 from app.sources.ado_testresults import AdoTestResultsSource
 from app.sources.ado_commits import AdoGitCommitsSource
 from app.sources.ado_repo_doc import AdoRepoDocSource
@@ -46,28 +45,31 @@ PROVIDERS: dict[str, dict] = {
 # ── Source type registry ───────────────────────────────────────────────────────
 
 SOURCE_TYPE_META: list[SourceTypeMeta] = [
-    SourceTypeMeta(SourceTypes.WORK_ITEM_QUERY, "Work Items",     "Bugs, tasks, user stories, features and epics. Filter by type or supply a custom WIQL query.", "ado"),
+    SourceTypeMeta(SourceTypes.WORK_ITEM_QUERY, "Work Items",     "Bugs, tasks and defects. Filter by type or supply a custom WIQL query.", "ado"),
+    SourceTypeMeta(SourceTypes.REQUIREMENTS,    "Requirements",   "Features, user stories and epics. Filter by type or supply a custom WIQL query.", "ado"),
     SourceTypeMeta(SourceTypes.TEST_CASE,       "Test Cases",     "Test case definitions with steps and automation status.", "ado"),
     SourceTypeMeta(SourceTypes.TEST_RESULTS,    "Test Results",   "Runtime test execution results — pass/fail outcomes, error messages and stack traces.", "ado"),
-    SourceTypeMeta(SourceTypes.PULL_REQUEST,    "Pull Requests",  "PR titles, descriptions, reviewers and branch context.", "ado"),
     SourceTypeMeta(SourceTypes.GIT_COMMITS,     "Git Commits",    "Commit history with messages, authors and change counts.", "ado"),
     SourceTypeMeta(SourceTypes.CODE_REPO,       "Source Code",    "Source files from a git repository, filtered by glob patterns.", "ado"),
-    SourceTypeMeta(SourceTypes.DOCUMENTATION,   "Documentation",  "Pages from an Azure DevOps wiki, with optional path filter.", "ado"),
+    SourceTypeMeta(SourceTypes.DOCUMENTATION,   "Documentation",  "Wiki pages, repo markdown files and uploaded documents.", "ado"),
     SourceTypeMeta(SourceTypes.PIPELINE_BUILD,  "Build Results",  "Recent CI/CD build logs and failure details for a pipeline.", "ado"),
 ]
 
 
 def collection_for(source: SourceDefinition) -> str:
+    # Manual provider sources always land in documentation
+    if source.get_config(ConfigKeys.PROVIDER) == "manual":
+        return CollectionNames.DOCUMENTATION
     return {
         SourceTypes.WORK_ITEM_QUERY: CollectionNames.WORK_ITEMS,
+        SourceTypes.REQUIREMENTS:    CollectionNames.REQUIREMENTS,
         SourceTypes.TEST_CASE:       CollectionNames.TEST_CASES,
         SourceTypes.TEST_RESULTS:    CollectionNames.TEST_RESULTS,
-        SourceTypes.PULL_REQUEST:    CollectionNames.PULL_REQUESTS,
         SourceTypes.GIT_COMMITS:     CollectionNames.COMMITS,
         SourceTypes.CODE_REPO:       CollectionNames.CODE,
         SourceTypes.PIPELINE_BUILD:  CollectionNames.BUILDS,
         SourceTypes.DOCUMENTATION:   CollectionNames.DOCUMENTATION,
-    }.get(source.type, CollectionNames.WORK_ITEMS)
+    }.get(source.type, CollectionNames.DOCUMENTATION)
 
 
 class SourceFactory:
@@ -85,6 +87,8 @@ class SourceFactory:
         t = source.type
         if t == SourceTypes.WORK_ITEM_QUERY:
             return AdoWorkItemQuerySource(source, self._ado)
+        if t == SourceTypes.REQUIREMENTS:
+            return AdoWorkItemQuerySource(source, self._ado)
         if t == SourceTypes.TEST_CASE:
             return AdoTestCaseSource(source, self._ado)
         if t == SourceTypes.CODE_REPO:
@@ -98,8 +102,6 @@ class SourceFactory:
             if doc_type == "repo":
                 return AdoRepoDocSource(source, self._ado, self._registry)
             return AdoWikiSource(source, self._ado)
-        if t == SourceTypes.PULL_REQUEST:
-            return AdoPullRequestSource(source, self._ado)
         if t == SourceTypes.TEST_RESULTS:
             return AdoTestResultsSource(source, self._ado)
         if t == SourceTypes.GIT_COMMITS:

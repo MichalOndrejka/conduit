@@ -26,15 +26,15 @@ def register_tools(mcp: FastMCP, search_service, memory_service) -> None:
         return _tool
 
     _make_search_tool(
-        CollectionNames.MANUAL_DOCUMENTS,
-        "search_documents",
-        "Semantic search over manually uploaded documents and text. "
-        "Returns the most relevant passages for the given query.",
-    )
-    _make_search_tool(
         CollectionNames.WORK_ITEMS,
         "search_workitems",
-        "Semantic search over work items (bugs, tasks, user stories, features). "
+        "Semantic search over work items (bugs, tasks, defects). "
+        "Optionally filter by source_name to target a specific source.",
+    )
+    _make_search_tool(
+        CollectionNames.REQUIREMENTS,
+        "search_requirements",
+        "Semantic search over requirements (features, user stories, epics). "
         "Optionally filter by source_name to target a specific source.",
     )
     _make_search_tool(
@@ -56,12 +56,7 @@ def register_tools(mcp: FastMCP, search_service, memory_service) -> None:
     _make_search_tool(
         CollectionNames.DOCUMENTATION,
         "search_documentation",
-        "Semantic search over wiki pages and documentation sections.",
-    )
-    _make_search_tool(
-        CollectionNames.PULL_REQUESTS,
-        "search_pullrequests",
-        "Semantic search over pull requests — titles, descriptions, reviewers and branch context.",
+        "Semantic search over wiki pages, repo documentation and uploaded documents.",
     )
     _make_search_tool(
         CollectionNames.TEST_RESULTS,

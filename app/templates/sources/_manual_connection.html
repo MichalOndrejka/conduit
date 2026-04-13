@@ -2,17 +2,17 @@
 {% set cfg = source.config %}
 {% set manual_type = cfg.get('ManualType', 'text') %}
 
-<div class="flex mb-5 rounded-lg border border-slate-700 overflow-hidden w-fit text-xs font-medium">
-    <button type="button" id="manual-tab-text"   onclick="manualTab('text')"
-            class="px-4 py-1.5 border-r border-slate-700 transition-colors">Text</button>
-    <button type="button" id="manual-tab-upload" onclick="manualTab('upload')"
-            class="px-4 py-1.5 transition-colors">File Upload</button>
-</div>
 <input type="hidden" name="ConfigManualType" id="ConfigManualType" value="{{ manual_type }}" />
 {# Carry existing content so preview works without re-uploading on edit #}
 {% if manual_type == 'upload' and cfg.get('Content') %}
 <input type="hidden" name="ConfigManualExistingContent" value="{{ cfg.get('Content') | e }}" />
 {% endif %}
+
+<div class="flex items-end gap-0.5 border-b border-[var(--border)]">
+    <button type="button" id="manual-tab-text"   onclick="manualTab('text')"   class="tab-off">Text</button>
+    <button type="button" id="manual-tab-upload" onclick="manualTab('upload')" class="tab-off">File Upload</button>
+</div>
+<div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-4">
 
 <div id="manual-panel-text" {% if manual_type != 'text' %}class="hidden"{% endif %}>
     <div class="mb-4">
@@ -47,6 +47,8 @@
     </label>
 </div>
 
+</div>{# /manual panel #}
+
 <script>
 function manualTab(name) {
     var isText = name === 'text';
@@ -55,10 +57,8 @@ function manualTab(name) {
     document.getElementById('ConfigManualType').value = name;
     document.querySelectorAll('#manual-panel-text input,#manual-panel-text textarea').forEach(function(el){ el.disabled = !isText; });
     document.querySelectorAll('#manual-panel-upload input').forEach(function(el){ el.disabled = isText; });
-    var on  = 'px-4 py-1.5 transition-colors text-violet-300 bg-violet-500/10';
-    var off = 'px-4 py-1.5 transition-colors text-slate-500 hover:text-slate-400';
-    document.getElementById('manual-tab-text').className   = (isText ? on : off) + ' border-r border-slate-700';
-    document.getElementById('manual-tab-upload').className = isText ? off : on;
+    document.getElementById('manual-tab-text').className   = isText ? 'tab-on' : 'tab-off';
+    document.getElementById('manual-tab-upload').className = isText ? 'tab-off' : 'tab-on';
 }
 manualTab('{{ manual_type }}');
 
