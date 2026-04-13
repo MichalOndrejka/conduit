@@ -851,7 +851,7 @@ def _build_source_from_form(form) -> SourceDefinition:
 
     if source_type == SourceTypes.CODE_REPO:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
-        _set(ConfigKeys.BRANCH, "ConfigBranch", default="Main")
+        _set(ConfigKeys.BRANCH, "ConfigBranch")
         _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.cs")
 
     if source_type == SourceTypes.PIPELINE_BUILD:
@@ -863,6 +863,10 @@ def _build_source_from_form(form) -> SourceDefinition:
         if config.get(ConfigKeys.DOC_TYPE) == "wiki":
             _set(ConfigKeys.WIKI_NAME, "ConfigWikiName")
             _set(ConfigKeys.PATH_FILTER, "ConfigPathFilter")
+        elif config.get(ConfigKeys.DOC_TYPE) == "repo":
+            _set(ConfigKeys.REPOSITORY, "ConfigRepository")
+            _set(ConfigKeys.BRANCH, "ConfigBranch")
+            _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.md")
 
     if source_type == SourceTypes.PULL_REQUEST:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
@@ -875,7 +879,7 @@ def _build_source_from_form(form) -> SourceDefinition:
 
     if source_type == SourceTypes.GIT_COMMITS:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
-        _set(ConfigKeys.BRANCH, "ConfigBranch", default="Main")
+        _set(ConfigKeys.BRANCH, "ConfigBranch")
         _set(ConfigKeys.LAST_N_COMMITS, "ConfigLastNCommits", default="100")
 
     if config.get(ConfigKeys.PROVIDER, "ado") == "custom":
