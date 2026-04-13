@@ -10,6 +10,7 @@ from app.sources.ado_workitem import AdoWorkItemQuerySource
 from app.sources.ado_testcase import AdoTestCaseSource
 from app.sources.ado_code import AdoCodeRepoSource
 from app.sources.ado_build import AdoPipelineBuildSource
+from app.sources.ado_release import AdoReleaseSource
 from app.sources.ado_wiki import AdoWikiSource
 from app.sources.manual import ManualDocumentSource
 from app.sources.ado_testresults import AdoTestResultsSource
@@ -88,12 +89,21 @@ class SourceFactory:
         if t == SourceTypes.WORK_ITEM_QUERY:
             return AdoWorkItemQuerySource(source, self._ado)
         if t == SourceTypes.REQUIREMENTS:
+            req_type = source.get_config(ConfigKeys.REQ_TYPE, "filters")
+            if req_type == "repo":
+                return AdoRepoDocSource(source, self._ado, self._registry)
             return AdoWorkItemQuerySource(source, self._ado)
         if t == SourceTypes.TEST_CASE:
+            tc_type = source.get_config(ConfigKeys.TC_TYPE, "filters")
+            if tc_type == "repo":
+                return AdoRepoDocSource(source, self._ado, self._registry)
             return AdoTestCaseSource(source, self._ado)
         if t == SourceTypes.CODE_REPO:
             return AdoCodeRepoSource(source, self._ado, self._registry)
         if t == SourceTypes.PIPELINE_BUILD:
+            build_type = source.get_config(ConfigKeys.BUILD_TYPE, "build")
+            if build_type == "release":
+                return AdoReleaseSource(source, self._ado)
             return AdoPipelineBuildSource(source, self._ado)
         if t == SourceTypes.DOCUMENTATION:
             doc_type = source.get_config(ConfigKeys.DOC_TYPE)

@@ -341,6 +341,20 @@ class AdoClient:
         )
         return data.get("value", [])
 
+    async def get_releases(
+        self, conn: AdoConnection, definition_id: int, last_n: int = 5
+    ) -> list[dict]:
+        return await asyncio.to_thread(self._sync_get_releases, conn, definition_id, last_n)
+
+    def _sync_get_releases(
+        self, conn: AdoConnection, definition_id: int, last_n: int
+    ) -> list[dict]:
+        params: dict[str, Any] = {"$top": str(last_n)}
+        if definition_id:
+            params["definitionId"] = str(definition_id)
+        data = conn._get("_apis/release/releases", **params)
+        return data.get("value", [])
+
     async def get_commits(
         self, conn: AdoConnection, repository: str, branch: str = "", top: int = 100
     ) -> list[dict]:

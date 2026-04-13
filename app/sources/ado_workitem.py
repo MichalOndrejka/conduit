@@ -17,16 +17,17 @@ def _strip_html(value: str) -> str:
 _DEFAULT_ITEM_TYPES = ["Bug", "Task", "User Story", "Feature", "Epic"]
 
 
-def _build_wiql(item_types: list[str], area_path: str) -> str:
-    """Generate a WIQL query from item type filter and optional area path."""
-    conditions = []
+def _build_wiql(item_types: list[str], area_path: str, iteration_path: str = "") -> str:
+    """Generate a WIQL query from item type filter and optional area/iteration paths."""
+    conditions = ["[System.TeamProject] = @project"]
     if item_types:
         types_str = ", ".join(f"'{t}'" for t in item_types)
         conditions.append(f"[System.WorkItemType] IN ({types_str})")
     if area_path:
         conditions.append(f"[System.AreaPath] UNDER '{area_path}'")
-    where = " AND ".join(conditions) if conditions else "[System.TeamProject] = @project"
-    return f"SELECT [System.Id] FROM WorkItems WHERE {where} ORDER BY [System.ChangedDate] DESC"
+    if iteration_path:
+        conditions.append(f"[System.IterationPath] UNDER '{iteration_path}'")
+    return f"SELECT [System.Id] FROM WorkItems WHERE {' AND '.join(conditions)} ORDER BY [System.ChangedDate] DESC"
 
 
 class AdoWorkItemQuerySource(Source):
@@ -47,7 +48,8 @@ class AdoWorkItemQuerySource(Source):
             raw_types = self._source.get_config(ConfigKeys.ITEM_TYPES)
             item_types = [t.strip() for t in raw_types.split(",") if t.strip()] if raw_types else _DEFAULT_ITEM_TYPES
             area_path = self._source.get_config(ConfigKeys.AREA_PATH)
-            wiql = _build_wiql(item_types, area_path)
+            iteration_path = self._source.get_config(ConfigKeys.ITERATION_PATH)
+            wiql = _build_wiql(item_types, area_path, iteration_path)
 
         fields_raw = self._source.get_config(ConfigKeys.FIELDS)
         fields = [f.strip() for f in fields_raw.split(",") if f.strip()]

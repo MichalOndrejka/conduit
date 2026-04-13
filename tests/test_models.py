@@ -16,13 +16,13 @@ def test_tag_empty_key():
 # ── SourceDefinition ──────────────────────────────────────────────────────────
 
 def test_id_auto_generated_as_uuid():
-    s = SourceDefinition(type="workitem-query", name="x")
+    s = SourceDefinition(type="workitem", name="x")
     assert len(s.id) == 36
     assert s.id.count("-") == 4
 
 def test_two_instances_have_different_ids():
-    a = SourceDefinition(type="workitem-query", name="x")
-    b = SourceDefinition(type="workitem-query", name="x")
+    a = SourceDefinition(type="workitem", name="x")
+    b = SourceDefinition(type="workitem", name="x")
     assert a.id != b.id
 
 def test_get_config_returns_value():

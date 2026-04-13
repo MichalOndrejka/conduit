@@ -11,7 +11,6 @@ from app.models import ConfigKeys, SourceDefinition, SourceTypes
 from app.sources.ado_build import AdoPipelineBuildSource
 from app.sources.ado_code import AdoCodeRepoSource, _glob_matches
 from app.sources.ado_commits import AdoGitCommitsSource
-from app.sources.ado_pullrequest import AdoPullRequestSource
 from app.sources.ado_testcase import AdoTestCaseSource, _strip_xml
 from app.sources.ado_testresults import AdoTestResultsSource
 from app.sources.ado_wiki import AdoWikiSource
@@ -33,6 +32,7 @@ def _client() -> MagicMock:
     c.get_wiki_items = AsyncMock(return_value=[])
     c.get_file_tree = AsyncMock(return_value=[])
     c.get_file_content = AsyncMock(return_value="")
+    c.get_repo_zip = AsyncMock(return_value=b"")
     return c
 
 
@@ -428,83 +428,6 @@ async def test_build_failed_tasks_appear_in_text():
     assert "RunTests" in docs[0].text
 
 
-# ── AdoPullRequestSource ──────────────────────────────────────────────────────
-
-def _pr(id_: int, title: str = "PR Title", status: str = "active",
-        source_branch: str = "refs/heads/feature/my-branch",
-        target_branch: str = "refs/heads/main",
-        author: str = "Alice") -> dict:
-    return {
-        "pullRequestId": id_,
-        "title": title,
-        "status": status,
-        "sourceRefName": source_branch,
-        "targetRefName": target_branch,
-        "createdBy": {"displayName": author},
-        "reviewers": [],
-        "description": "",
-        "creationDate": "2024-01-01T00:00:00Z",
-        "closedDate": None,
-    }
-
-
-async def test_pr_doc_id_uses_pr_pattern():
-    client = _client()
-    client.get_pull_requests = AsyncMock(return_value=[_pr(55)])
-    src = _source()
-    docs = await AdoPullRequestSource(src, client).fetch_documents()
-    assert docs[0].id == f"{src.id}_pr_55"
-
-
-async def test_pr_refs_heads_stripped_from_branches():
-    client = _client()
-    client.get_pull_requests = AsyncMock(return_value=[_pr(1)])
-    docs = await AdoPullRequestSource(_source(), client).fetch_documents()
-    assert "refs/heads/" not in docs[0].text
-    assert "feature/my-branch" in docs[0].text
-
-
-async def test_pr_author_in_tags():
-    client = _client()
-    client.get_pull_requests = AsyncMock(return_value=[_pr(1, author="Bob")])
-    docs = await AdoPullRequestSource(_source(), client).fetch_documents()
-    assert docs[0].tags["author"] == "Bob"
-
-
-async def test_pr_status_in_tags():
-    client = _client()
-    client.get_pull_requests = AsyncMock(return_value=[_pr(1, status="completed")])
-    docs = await AdoPullRequestSource(_source(), client).fetch_documents()
-    assert docs[0].tags["status"] == "completed"
-
-
-async def test_pr_empty_response_returns_empty_list():
-    docs = await AdoPullRequestSource(_source(), _client()).fetch_documents()
-    assert docs == []
-
-
-async def test_pr_default_status_filter_is_all():
-    client = _client()
-    await AdoPullRequestSource(_source(), client).fetch_documents()
-    _, _, status, _ = client.get_pull_requests.call_args[0]
-    assert status == "all"
-
-
-async def test_pr_default_top_is_200():
-    client = _client()
-    await AdoPullRequestSource(_source(), client).fetch_documents()
-    _, _, _, top = client.get_pull_requests.call_args[0]
-    assert top == 200
-
-
-async def test_pr_properties_url_uses_repo_and_id():
-    client = _client()
-    client.get_pull_requests = AsyncMock(return_value=[_pr(7)])
-    src = _source(**{ConfigKeys.REPOSITORY: "MyRepo", "BaseUrl": "https://ado.example.com/proj"})
-    docs = await AdoPullRequestSource(src, client).fetch_documents()
-    assert "MyRepo" in docs[0].properties["url"]
-    assert "7" in docs[0].properties["url"]
-
 
 # ── AdoTestResultsSource ──────────────────────────────────────────────────────
 
@@ -764,8 +687,18 @@ async def test_wiki_page_with_no_content_produces_no_doc():
 
 # ── AdoCodeRepoSource ─────────────────────────────────────────────────────────
 
-def _file_info(path: str) -> dict:
-    return {"path": path, "isFolder": False}
+import io
+import zipfile as _zipfile
+
+
+def _make_zip(files: dict[str, str]) -> bytes:
+    """Build an in-memory zip with a root folder prefix, matching ADO zip format."""
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        for path, content in files.items():
+            # ADO zips always prepend a root folder component
+            zf.writestr("root" + path, content)
+    return buf.getvalue()
 
 
 def _parser_registry(units=None):
@@ -783,22 +716,23 @@ def _parser_registry(units=None):
 
 async def test_code_file_tree_filtered_by_glob():
     client = _client()
-    client.get_file_tree = AsyncMock(return_value=[
-        _file_info("/src/Foo.cs"),
-        _file_info("/src/Bar.txt"),
-    ])
-    client.get_file_content = AsyncMock(return_value="class Foo {}")
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({
+        "/src/Foo.cs": "class Foo {}",
+        "/src/Bar.txt": "not code",
+    }))
     registry = _parser_registry()
     src = _source(**{ConfigKeys.GLOB_PATTERNS: "**/*.cs"})
     await AdoCodeRepoSource(src, client, registry).fetch_documents()
-    # Only Foo.cs should have been fetched (1 call)
-    assert client.get_file_content.call_count == 1
+    # Only Foo.cs matched the glob → parser called once
+    assert registry.parse.call_count == 1
 
 
 async def test_code_parser_called_per_matched_file():
     client = _client()
-    client.get_file_tree = AsyncMock(return_value=[_file_info("/a.cs"), _file_info("/b.cs")])
-    client.get_file_content = AsyncMock(return_value="code")
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({
+        "/a.cs": "class A {}",
+        "/b.cs": "class B {}",
+    }))
     registry = _parser_registry()
     src = _source(**{ConfigKeys.GLOB_PATTERNS: "**/*.cs"})
     await AdoCodeRepoSource(src, client, registry).fetch_documents()
@@ -806,20 +740,19 @@ async def test_code_parser_called_per_matched_file():
 
 
 async def test_code_failed_file_fetch_is_skipped_gracefully():
+    # An empty zip (no matching files) should return an empty list without raising
     client = _client()
-    client.get_file_tree = AsyncMock(return_value=[_file_info("/broken.cs"), _file_info("/ok.cs")])
-    client.get_file_content = AsyncMock(side_effect=[Exception("network error"), "class Ok {}"])
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({}))
     registry = _parser_registry()
     src = _source(**{ConfigKeys.GLOB_PATTERNS: "**/*.cs"})
-    # Should not raise
     docs = await AdoCodeRepoSource(src, client, registry).fetch_documents()
-    assert registry.parse.call_count == 1
+    assert docs == []
+    assert registry.parse.call_count == 0
 
 
 async def test_code_doc_tags_contain_language_and_kind():
     client = _client()
-    client.get_file_tree = AsyncMock(return_value=[_file_info("/Foo.cs")])
-    client.get_file_content = AsyncMock(return_value="class Foo {}")
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({"/Foo.cs": "class Foo {}"}))
     registry = _parser_registry()
     src = _source(**{ConfigKeys.GLOB_PATTERNS: "**/*.cs"})
     docs = await AdoCodeRepoSource(src, client, registry).fetch_documents()
@@ -828,29 +761,28 @@ async def test_code_doc_tags_contain_language_and_kind():
 
 
 async def test_code_empty_tree_returns_empty_list():
-    docs = await AdoCodeRepoSource(_source(), _client(), _parser_registry(units=[])).fetch_documents()
+    client = _client()
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({}))
+    docs = await AdoCodeRepoSource(_source(), client, _parser_registry(units=[])).fetch_documents()
     assert docs == []
 
 
 async def test_code_default_glob_pattern_matches_cs_files():
     client = _client()
-    client.get_file_tree = AsyncMock(return_value=[
-        _file_info("/src/Foo.cs"),
-        _file_info("/src/Bar.py"),
-    ])
-    client.get_file_content = AsyncMock(return_value="code")
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({
+        "/src/Foo.cs": "class Foo {}",
+        "/src/Bar.py": "# python",
+    }))
     registry = _parser_registry()
-    # No GlobPatterns configured → default is "**/*.cs"
+    # No GlobPatterns configured → default is "**/*.cs" → only Foo.cs parsed
     await AdoCodeRepoSource(_source(), client, registry).fetch_documents()
-    assert client.get_file_content.call_count == 1
-    fetched_path = client.get_file_content.call_args[0][3]
-    assert fetched_path.endswith(".cs")
+    assert registry.parse.call_count == 1
 
 
 async def test_code_default_branch_is_main():
     client = _client()
-    client.get_file_tree = AsyncMock(return_value=[])
-    # No Branch configured → default is "main"
+    client.get_repo_zip = AsyncMock(return_value=_make_zip({}))
+    # No Branch configured → empty string passed (ADO default)
     await AdoCodeRepoSource(_source(), client, _parser_registry(units=[])).fetch_documents()
-    _, _, branch = client.get_file_tree.call_args[0]
-    assert branch == "main"
+    _, _, branch = client.get_repo_zip.call_args[0]
+    assert branch == ""

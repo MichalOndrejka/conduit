@@ -31,7 +31,7 @@ class CollectionNames:
 # ── Source types ─────────────────────────────────────────────────────────────
 
 class SourceTypes:
-    WORK_ITEM_QUERY = "workitem-query"
+    WORK_ITEM_QUERY = "workitem"
     REQUIREMENTS    = "requirements"
     TEST_CASE       = "test-case"
     CODE_REPO       = "code"
@@ -60,6 +60,7 @@ class ConfigKeys:
     FIELDS          = "Fields"
     ITEM_TYPES      = "ItemTypes"
     AREA_PATH       = "AreaPath"
+    ITERATION_PATH  = "IterationPath"
     REPOSITORY      = "Repository"
     BRANCH          = "Branch"
     GLOB_PATTERNS   = "GlobPatterns"
@@ -82,6 +83,11 @@ class ConfigKeys:
     CONTENT_FIELDS  = "ContentFields"
     MANUAL_TYPE     = "ManualType"
     VERIFY_SSL      = "VerifySSL"
+    REQ_TYPE        = "ReqType"            # "wiql" | "repo" | "wiki"
+    TC_TYPE         = "TcType"             # "wiql" | "repo"
+    BUILD_TYPE      = "BuildType"          # "build" | "release"
+    RELEASE_DEFINITION_ID = "ReleaseDefinitionId"
+    LAST_N_RELEASES = "LastNReleases"
 
 
 # ── Core domain models ────────────────────────────────────────────────────────
@@ -91,7 +97,7 @@ class SourceDefinition(BaseModel):
     type: str
     name: str
     last_synced_at: Optional[datetime] = None
-    sync_status: str = "idle"   # idle | syncing | completed | failed | needs-reindex
+    sync_status: str = "idle"   # idle | syncing | completed | failed
     sync_error: Optional[str] = None
     sync_error_phase: Optional[str] = None   # fetch | embed
     config: dict[str, str] = Field(default_factory=dict)

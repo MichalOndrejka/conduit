@@ -67,7 +67,7 @@
     <!-- Rows -->
     {% for source in sources %}
     {% set st = source.sync_status %}
-    {% set status_order = {'error': 0, 'failed': 0, 'needs-reindex': 1, 'syncing': 2, 'idle': 3, 'completed': 4} %}
+    {% set status_order = {'failed': 0, 'syncing': 1, 'idle': 2, 'needs-reindex': 2, 'completed': 3} %}
     <div class="table-row grid grid-cols-12 gap-4 px-5 py-3.5 items-center" id="row-{{ source.id }}"
          data-name="{{ source.name | lower }}"
          data-type="{{ source.type | lower }}"
@@ -88,27 +88,25 @@
         <!-- Status -->
         <div class="col-span-3" id="status-{{ source.id }}">
             {% if st == 'syncing' %}
-            <span class="badge badge-syncing"><span class="spinner"></span>Syncing</span>
+            <span class="badge badge-syncing"><span class="spinner"></span>Fetching…</span>
             {% elif st == 'completed' %}
             <span class="badge badge-done">
                 <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 Indexed
             </span>
-            {% elif st == 'error' or st == 'failed' %}
+            {% elif st == 'failed' %}
             <div>
                 <span class="badge badge-error">
                     <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
-                    {% if source.sync_error_phase == 'fetch' %}Fetch error{% elif source.sync_error_phase == 'embed' %}Embed error{% else %}Error{% endif %}
+                    Failed
                 </span>
                 {% if source.sync_error %}
                 <button type="button" data-error="{{ source.sync_error | e }}" onclick="showError(this.dataset.error)"
                         class="block text-xs text-red-400/70 hover:text-red-300 mt-1 text-left transition-colors" style="max-width:18rem;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">{{ source.sync_error }}</button>
                 {% endif %}
             </div>
-            {% elif st == 'needs-reindex' %}
-            <span class="badge badge-warn">Needs reindex</span>
             {% else %}
-            <span class="badge badge-idle">Idle</span>
+            <span class="badge badge-idle">Not Indexed</span>
             {% endif %}
         </div>
 
@@ -190,25 +188,26 @@
                 var badge = '';
                 if (s.syncStatus === 'syncing') {
                     stillSyncing = true;
-                    var msg = s.syncMessage || (s.syncPhase === 'indexing' ? 'Indexing…' : 'Fetching…');
-                    badge = '<span class="badge badge-syncing"><span class="spinner"></span>' + msg + '</span>';
-                    if (s.syncPhase === 'indexing' && s.syncTotal) {
-                        var pct = Math.round((s.syncCurrent / s.syncTotal) * 100);
+                    if (s.syncPhase === 'indexing') {
+                        var pct = s.syncTotal ? Math.round((s.syncCurrent / s.syncTotal) * 100) : 0;
+                        var countLabel = s.syncTotal ? s.syncCurrent + ' / ' + s.syncTotal : '';
+                        badge = '<span class="badge badge-syncing"><span class="spinner"></span>Embedding…' + (countLabel ? ' <span class="opacity-60 font-normal">' + countLabel + '</span>' : '') + '</span>';
                         badge += '<div class="progress-bar mt-1.5"><div class="progress-fill" style="width:' + pct + '%"></div></div>';
+                    } else {
+                        var msg = s.syncMessage || 'Fetching…';
+                        var countLabel = (s.syncCurrent && s.syncTotal) ? s.syncCurrent + ' / ' + s.syncTotal : (s.syncTotal ? '0 / ' + s.syncTotal : '');
+                        badge = '<span class="badge badge-syncing"><span class="spinner"></span>' + msg + (countLabel ? ' <span class="opacity-60 font-normal">' + countLabel + '</span>' : '') + '</span>';
                     }
                 } else if (s.syncStatus === 'completed') {
                     badge = '<span class="badge badge-done"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>Indexed</span>';
-                } else if (s.syncStatus === 'error' || s.syncStatus === 'failed') {
-                    var phaseLabel = s.syncErrorPhase === 'fetch' ? 'Fetch error' : s.syncErrorPhase === 'embed' ? 'Embed error' : 'Error';
-                    badge = '<span class="badge badge-error"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>' + phaseLabel + '</span>';
+                } else if (s.syncStatus === 'failed') {
+                    badge = '<span class="badge badge-error"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>Failed</span>';
                     if (s.syncError) {
                         var safeErr = s.syncError.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
                         badge += '<button type="button" data-error="' + safeErr + '" onclick="showError(this.dataset.error)" class="block text-xs text-red-400/70 hover:text-red-300 mt-1 text-left transition-colors" style="max-width:18rem;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">' + safeErr + '</button>';
                     }
-                } else if (s.syncStatus === 'needs-reindex') {
-                    badge = '<span class="badge badge-warn">Needs reindex</span>';
                 } else {
-                    badge = '<span class="badge badge-idle">Idle</span>';
+                    badge = '<span class="badge badge-idle">Not Indexed</span>';
                 }
                 statusEl.innerHTML = badge;
                 if (syncedEl && s.lastSyncedAt) syncedEl.textContent = s.lastSyncedAt;

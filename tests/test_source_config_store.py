@@ -116,7 +116,7 @@ def test_normalise_keys_converts_camel_case():
 
 
 def test_normalise_keys_preserves_unknown_keys():
-    raw = {"id": "abc", "type": "workitem-query", "name": "x"}
+    raw = {"id": "abc", "type": "workitem", "name": "x"}
     assert _normalise_keys(raw) == raw
 
 
@@ -132,7 +132,7 @@ async def test_legacy_camel_case_json_round_trip(tmp_path):
     path = tmp_path / "sources.json"
     path.write_text(json.dumps([{
         "id": "some-id",
-        "type": "workitem-query",
+        "type": "workitem",
         "name": "Legacy",
         "lastSyncedAt": None,
         "syncStatus": "completed",

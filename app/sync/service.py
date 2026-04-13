@@ -56,7 +56,7 @@ class SyncService:
             return
 
         logger.info("Indexing %d documents for source %s", len(docs), source_id)
-        self._progress_store.set(source_id, SyncProgress(phase="indexing", total=len(docs)))
+        self._progress_store.set(source_id, SyncProgress(phase="indexing", current=0, total=len(docs)))
 
         # ── Phase 2: embed & index ────────────────────────────────────────────
         try:

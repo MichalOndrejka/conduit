@@ -485,6 +485,7 @@ async def sources_edit_post(request: Request, source_id: str, background_tasks: 
     updated.last_synced_at = existing.last_synced_at
     updated.sync_status = "idle"
     updated.sync_error = None
+    updated.sync_error_phase = None
 
     if updated.get_config(ConfigKeys.DOC_TYPE) == "upload":
         doc_file = form.get("doc_file")
@@ -838,16 +839,48 @@ def _build_source_from_form(form) -> SourceDefinition:
         _set(ConfigKeys.API_KEY_HEADER, "ConfigApiKeyHeader")
         _set(ConfigKeys.API_KEY_VALUE, "ConfigApiKeyValue")
 
-    if source_type in (SourceTypes.WORK_ITEM_QUERY, SourceTypes.REQUIREMENTS):
+    if source_type == SourceTypes.WORK_ITEM_QUERY:
         item_types = form.getlist("ConfigItemTypes")
         if item_types:
             config[ConfigKeys.ITEM_TYPES] = ",".join(item_types)
         _set(ConfigKeys.AREA_PATH, "ConfigAreaPath")
+        _set(ConfigKeys.ITERATION_PATH, "ConfigIterationPath")
         _set(ConfigKeys.QUERY, "ConfigQuery")  # advanced override
         _set(ConfigKeys.FIELDS, "ConfigFields")
 
+    if source_type == SourceTypes.REQUIREMENTS:
+        _set(ConfigKeys.REQ_TYPE, "ConfigReqType", default="filters")
+        req_type = config.get(ConfigKeys.REQ_TYPE, "filters")
+        if req_type == "filters":
+            item_types = form.getlist("ConfigItemTypes")
+            if item_types:
+                config[ConfigKeys.ITEM_TYPES] = ",".join(item_types)
+            _set(ConfigKeys.AREA_PATH, "ConfigAreaPath")
+            _set(ConfigKeys.ITERATION_PATH, "ConfigIterationPath")
+        elif req_type == "custom":
+            _set(ConfigKeys.QUERY, "ConfigQuery")
+            _set(ConfigKeys.FIELDS, "ConfigFields")
+        elif req_type == "repo":
+            _set(ConfigKeys.REPOSITORY, "ConfigRepository")
+            _set(ConfigKeys.BRANCH, "ConfigBranch")
+            _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.md")
+
     if source_type == SourceTypes.TEST_CASE:
-        _set(ConfigKeys.QUERY, "ConfigQuery")  # advanced override only
+        _set(ConfigKeys.TC_TYPE, "ConfigTcType", default="filters")
+        tc_type = config.get(ConfigKeys.TC_TYPE, "filters")
+        if tc_type == "filters":
+            item_types = form.getlist("ConfigItemTypes")
+            if item_types:
+                config[ConfigKeys.ITEM_TYPES] = ",".join(item_types)
+            _set(ConfigKeys.AREA_PATH, "ConfigAreaPath")
+            _set(ConfigKeys.ITERATION_PATH, "ConfigIterationPath")
+        elif tc_type == "custom":
+            _set(ConfigKeys.QUERY, "ConfigQuery")
+            _set(ConfigKeys.FIELDS, "ConfigFields")
+        elif tc_type == "repo":
+            _set(ConfigKeys.REPOSITORY, "ConfigRepository")
+            _set(ConfigKeys.BRANCH, "ConfigBranch")
+            _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.md")
 
     if source_type == SourceTypes.CODE_REPO:
         _set(ConfigKeys.REPOSITORY, "ConfigRepository")
@@ -855,8 +888,14 @@ def _build_source_from_form(form) -> SourceDefinition:
         _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.cs")
 
     if source_type == SourceTypes.PIPELINE_BUILD:
-        _set(ConfigKeys.PIPELINE_ID, "ConfigPipelineId")
-        _set(ConfigKeys.LAST_N_BUILDS, "ConfigLastNBuilds", default="5")
+        _set(ConfigKeys.BUILD_TYPE, "ConfigBuildType", default="build")
+        build_type = config.get(ConfigKeys.BUILD_TYPE, "build")
+        if build_type == "build":
+            _set(ConfigKeys.PIPELINE_ID, "ConfigPipelineId")
+            _set(ConfigKeys.LAST_N_BUILDS, "ConfigLastNBuilds", default="5")
+        elif build_type == "release":
+            _set(ConfigKeys.RELEASE_DEFINITION_ID, "ConfigReleaseDefinitionId")
+            _set(ConfigKeys.LAST_N_RELEASES, "ConfigLastNReleases", default="5")
 
     if source_type == SourceTypes.DOCUMENTATION:
         _set(ConfigKeys.DOC_TYPE, "ConfigDocType", default="wiki")

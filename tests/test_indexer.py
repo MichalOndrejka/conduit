@@ -83,7 +83,7 @@ async def test_creates_collection_when_not_exists():
     store = _make_store()
     store.collection_exists = AsyncMock(return_value=False)
     await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch("new-col", [_doc()])
-    store.create_collection.assert_called_once_with("new-col")
+    store.create_collection.assert_called_once_with("new-col", dimensions=4)
 
 
 async def test_does_not_create_collection_when_exists():

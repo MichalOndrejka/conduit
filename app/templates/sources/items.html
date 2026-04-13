@@ -108,10 +108,8 @@
     </div>
     <h2 class="text-sm font-semibold text-slate-300 mb-1">No indexed items</h2>
     <p class="text-xs text-slate-500 mb-4">
-        {% if source.sync_status == 'error' or source.sync_status == 'failed' %}
+        {% if source.sync_status == 'failed' %}
             Last sync failed: <code class="text-red-400">{{ source.sync_error }}</code>
-        {% elif source.sync_status == 'needs-reindex' %}
-            Embedding model changed — re-index to restore this source.
         {% else %}
             Sync this source to start indexing content.
         {% endif %}

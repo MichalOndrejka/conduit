@@ -72,7 +72,7 @@ The extracted text is stored in `conduit-sources.json` so preview and re-sync wo
 
 ## Source types and their ADO data
 
-### Work Items (`workitem-query`)
+### Work Items (`workitem`)
 
 Fetches work items via WIQL query.
 
@@ -81,6 +81,7 @@ Fetches work items via WIQL query.
 | `Query` | Full WIQL query. If set, overrides all other filters. | — |
 | `ItemTypes` | Comma-separated work item types, e.g. `Bug, Task, User Story`. | `Bug, Task, User Story, Feature, Epic` |
 | `AreaPath` | Limit to items under this area path (UNDER clause). | — |
+| `IterationPath` | Limit to items under this iteration path, e.g. `MyProject\Sprint 1`. | — |
 | `Fields` | Comma-separated fields to fetch, e.g. `System.Title, System.State`. | All fields |
 
 Document shape:
@@ -91,16 +92,58 @@ Document shape:
 
 ---
 
-### Test Cases (`test-case`)
+### Requirements (`requirements`)
 
-Fetches test case work items. XML tags are stripped from test steps.
+Indexes requirement artefacts. Supports three sub-cards depending on where requirements are stored.
+
+**WIQL sub-card** — fetches requirement work items (Features, User Stories, Epics, etc.)
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
-| `Query` | Custom WIQL query. | Fetches all Test Case work items |
+| `ReqType` | Active sub-card: `wiql` \| `repo` \| `wiki` | `wiql` |
+| `Query` | Full WIQL override. If set, overrides item type filters. | — |
+| `ItemTypes` | Comma-separated work item types. | `Feature, User Story, Epic, Requirement` |
+| `AreaPath` | Limit to items under this area path. | — |
+| `IterationPath` | Limit to items under this iteration path. | — |
 | `Fields` | Comma-separated fields to fetch. | All fields |
 
-Document shape:
+**Repo Files sub-card** — fetches requirement documents from a git repository (markdown spec files, etc.)
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `Repository` | Repository name. | — |
+| `Branch` | Branch to fetch from. | — |
+| `GlobPatterns` | Glob patterns for requirement documents. | `**/*.md` |
+
+**Wiki sub-card** — fetches requirement pages from an ADO wiki
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `WikiName` | Wiki name. Falls back to first wiki if blank. | — |
+| `PathFilter` | Only index pages under this path, e.g. `/Requirements`. | — |
+
+---
+
+### Test Cases (`test-case`)
+
+Indexes test case artefacts. Supports two sub-cards.
+
+**WIQL sub-card** — fetches test case work items. XML tags are stripped from test steps.
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `TcType` | Active sub-card: `wiql` \| `repo` | `wiql` |
+| `Query` | Custom WIQL query. | Fetches all Test Case work items |
+
+**Repo Files sub-card** — fetches BDD / Gherkin feature files from a git repository.
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `Repository` | Repository name. | — |
+| `Branch` | Branch to fetch from. | — |
+| `GlobPatterns` | Glob patterns for spec files. | `**/*.feature` |
+
+Document shape (WIQL):
 - ID: `{source_id}_tc_{item_id}`
 - Text starts with `Test Case {id}: {title}`; steps follow with XML stripped
 - Tags: `automation_status`, `state`
@@ -120,24 +163,6 @@ Document shape:
 - ID: `{source_id}_tr_{run_id}_{result_id}`
 - Text includes test name, run name, outcome, error message (if any), stack trace (if any)
 - Tags: `outcome`, `run_name`
-
----
-
-### Pull Requests (`pull-request`)
-
-Fetches pull requests from a git repository.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `StatusFilter` | `active` \| `completed` \| `abandoned` \| `all` | `all` |
-| `Top` | Maximum number of PRs to fetch. | `200` |
-
-Document shape:
-- ID: `{source_id}_pr_{pr_id}`
-- Text includes title, description, author, branch (refs/heads/ prefix stripped), reviewers
-- Tags: `status`, `author`
-- Properties: `url` points to `{base_url}/_git/{repo}/pullrequest/{id}`
 
 ---
 
@@ -165,10 +190,10 @@ Fetches source files from a git repository and parses them into code units (clas
 | Config key | Description | Default |
 |-----------|-------------|---------|
 | `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch from. | `main` |
+| `Branch` | Branch to fetch from. | — |
 | `GlobPatterns` | Comma-separated glob patterns, e.g. `**/*.cs, **/*.ts`. | `**/*.cs` |
 
-Supported languages: C#, TypeScript, Go, PowerShell, Markdown. Unrecognised file types are indexed as plain text.
+Files are downloaded as a repository zip for efficiency. Supported languages: C#, TypeScript, Go, PowerShell, Markdown. Unrecognised file types are indexed as plain text.
 
 Document shape:
 - ID: `{source_id}_{file_path}_{slug}` where slug is derived from the code unit name
@@ -180,12 +205,13 @@ Document shape:
 
 ### Documentation (`documentation`)
 
-Fetches wiki pages from an ADO wiki, or accepts a file upload.
+Fetches documentation from multiple sources. Supports three sub-cards.
 
-**ADO Wiki sub-option**
+**ADO Wiki sub-card**
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
+| `DocType` | Active sub-card: `wiki` \| `repo` \| `upload` | `wiki` |
 | `WikiName` | Wiki name to target. Falls back to the first wiki if not found. | First wiki in project |
 | `PathFilter` | Fetch only pages under this path. | `/` (all pages) |
 
@@ -196,25 +222,48 @@ Document shape:
 - Text is the section's full text
 - Tags: `wiki_name`, `section`
 
-**Upload sub-option**
+**Repo Files sub-card**
 
-Equivalent to the Manual provider's file upload, indexed into the Documentation collection.
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `Repository` | Repository name. | — |
+| `Branch` | Branch to fetch from. | — |
+| `GlobPatterns` | Glob patterns for documentation files. | `**/*.md` |
+
+**Upload sub-card**
+
+Equivalent to the Manual provider's file upload, indexed into the Documentation collection. Does not require an ADO connection.
 
 ---
 
 ### Build Results (`pipeline-build`)
 
-Fetches recent builds of a pipeline definition. For failed or partially succeeded builds, the task timeline is also fetched to surface which tasks failed.
+Indexes CI/CD pipeline results. Supports two sub-cards.
+
+**Build Pipeline sub-card** — fetches recent CI builds. For failed or partially succeeded builds, the task timeline is fetched to surface which tasks failed.
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
-| `PipelineId` | Pipeline definition ID. | `0` (all pipelines) |
+| `BuildType` | Active sub-card: `build` \| `release` | `build` |
+| `PipelineId` | Build pipeline definition ID (numeric). | — |
 | `LastNBuilds` | Number of recent builds to fetch. | `5` |
 
 Document shape:
 - ID: `{source_id}_build_{build_id}`
-- Text includes build number, result, pipeline ID, finish time, and failed task names (for failed/partiallySucceeded builds)
+- Text includes build number, result, pipeline ID, finish time, and failed task names
 - Tags: `pipeline_id`, `build_result`, `status`
+
+**Release Pipeline sub-card** — fetches recent CD releases from the ADO Release API (`_apis/release/releases`).
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `ReleaseDefinitionId` | Release pipeline definition ID (numeric). | — |
+| `LastNReleases` | Number of recent releases to fetch. | `5` |
+
+Document shape:
+- ID: `{source_id}_release_{release_id}`
+- Text includes release name, status, created date, description, and environment outcomes
+- Tags: `definition_id`, `release_status`
 
 ---
 
