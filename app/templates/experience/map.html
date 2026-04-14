@@ -112,12 +112,63 @@ async function loadMap() {
             bgcolor: 'hsl(222,47%,11%)', bordercolor: 'hsl(217,33%,18%)',
             font: { color: 'hsl(210,40%,98%)', size: 12 },
         },
+        dragmode: false,
     };
 
     const config = { responsive: true, displayModeBar: false, scrollZoom: true };
 
     document.getElementById('loading').style.display = 'none';
     Plotly.newPlot('plot', traces, layout, config);
+
+    // Middle-mouse-button pan
+    const plotEl = document.getElementById('plot');
+    let midPan = null;
+    let rafPending = false;
+    let lastMouseX = 0, lastMouseY = 0;
+
+    document.addEventListener('mousedown', function(e) {
+        if (e.button !== 1) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const fl = plotEl._fullLayout;
+        const m  = fl.margin;
+        midPan = {
+            x0: e.clientX, y0: e.clientY,
+            xr: fl.xaxis.range.slice(),
+            yr: fl.yaxis.range.slice(),
+            xlen: fl.width  - m.l - m.r,
+            ylen: fl.height - m.t - m.b,
+        };
+        plotEl.style.cursor = 'grabbing';
+    }, true);
+
+    document.addEventListener('mousemove', function(e) {
+        if (!midPan) return;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        if (rafPending) return;
+        rafPending = true;
+        requestAnimationFrame(function() {
+            rafPending = false;
+            if (!midPan) return;
+            var dx = lastMouseX - midPan.x0;
+            var dy = lastMouseY - midPan.y0;
+            var xs = midPan.xr[1] - midPan.xr[0];
+            var ys = midPan.yr[1] - midPan.yr[0];
+            Plotly.relayout(plotEl, {
+                'xaxis.range': [midPan.xr[0] - dx/midPan.xlen*xs, midPan.xr[1] - dx/midPan.xlen*xs],
+                'yaxis.range': [midPan.yr[0] - dy/midPan.ylen*ys, midPan.yr[1] - dy/midPan.ylen*ys],
+            });
+        });
+    }, true);
+
+    document.addEventListener('mouseup', function(e) {
+        if (!midPan || e.button !== 1) return;
+        e.preventDefault();
+        midPan = null;
+        rafPending = false;
+        plotEl.style.cursor = '';
+    }, true);
 }
 
 loadMap();

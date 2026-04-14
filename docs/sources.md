@@ -79,7 +79,7 @@ Fetches work items via WIQL query.
 | Config key | Description | Default |
 |-----------|-------------|---------|
 | `Query` | Full WIQL query. If set, overrides all other filters. | — |
-| `ItemTypes` | Comma-separated work item types, e.g. `Bug, Task, User Story`. | `Bug, Task, User Story, Feature, Epic` |
+| `ItemTypes` | Comma-separated work item types, e.g. `Bug, Task, User Story`. | `Epic, Feature, User Story, Bug, Defect` |
 | `AreaPath` | Limit to items under this area path (UNDER clause). | — |
 | `IterationPath` | Limit to items under this iteration path, e.g. `MyProject\Sprint 1`. | — |
 | `Fields` | Comma-separated fields to fetch, e.g. `System.Title, System.State`. | All fields |
@@ -94,20 +94,25 @@ Document shape:
 
 ### Requirements (`requirements`)
 
-Indexes requirement artefacts. Supports three sub-cards depending on where requirements are stored.
+Indexes requirement artefacts. Supports three sub-tabs depending on where requirements are stored.
 
-**WIQL sub-card** — fetches requirement work items (Features, User Stories, Epics, etc.)
+**Filters sub-tab** — fetches requirement work items via auto-generated WIQL
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
-| `ReqType` | Active sub-card: `wiql` \| `repo` \| `wiki` | `wiql` |
-| `Query` | Full WIQL override. If set, overrides item type filters. | — |
-| `ItemTypes` | Comma-separated work item types. | `Feature, User Story, Epic, Requirement` |
+| `ReqType` | Active sub-tab: `filters` \| `custom` \| `repo` | `filters` |
+| `ItemTypes` | Comma-separated work item types. | `Product Requirement, Software Requirement, Risk` |
 | `AreaPath` | Limit to items under this area path. | — |
 | `IterationPath` | Limit to items under this iteration path. | — |
+
+**Custom WIQL sub-tab** — full WIQL query override
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `Query` | Full WIQL query. | — |
 | `Fields` | Comma-separated fields to fetch. | All fields |
 
-**Repo Files sub-card** — fetches requirement documents from a git repository (markdown spec files, etc.)
+**Repo Files sub-tab** — fetches requirement documents from a git repository (markdown spec files, etc.)
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
@@ -115,33 +120,35 @@ Indexes requirement artefacts. Supports three sub-cards depending on where requi
 | `Branch` | Branch to fetch from. | — |
 | `GlobPatterns` | Glob patterns for requirement documents. | `**/*.md` |
 
-**Wiki sub-card** — fetches requirement pages from an ADO wiki
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `WikiName` | Wiki name. Falls back to first wiki if blank. | — |
-| `PathFilter` | Only index pages under this path, e.g. `/Requirements`. | — |
-
 ---
 
 ### Test Cases (`test-case`)
 
-Indexes test case artefacts. Supports two sub-cards.
+Indexes test case artefacts. Supports three sub-tabs.
 
-**WIQL sub-card** — fetches test case work items. XML tags are stripped from test steps.
+**Filters sub-tab** — fetches test case work items via auto-generated WIQL. XML tags are stripped from test steps.
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
-| `TcType` | Active sub-card: `wiql` \| `repo` | `wiql` |
-| `Query` | Custom WIQL query. | Fetches all Test Case work items |
+| `TcType` | Active sub-tab: `filters` \| `custom` \| `repo` | `filters` |
+| `ItemTypes` | Comma-separated work item types. | `Test Case` |
+| `AreaPath` | Limit to items under this area path. | — |
+| `IterationPath` | Limit to items under this iteration path. | — |
 
-**Repo Files sub-card** — fetches BDD / Gherkin feature files from a git repository.
+**Custom WIQL sub-tab** — full WIQL query override
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `Query` | Custom WIQL query. | — |
+| `Fields` | Comma-separated fields to fetch. | All fields |
+
+**Repo Files sub-tab** — fetches spec/feature files from a git repository.
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
 | `Repository` | Repository name. | — |
 | `Branch` | Branch to fetch from. | — |
-| `GlobPatterns` | Glob patterns for spec files. | `**/*.feature` |
+| `GlobPatterns` | Glob patterns for spec files. | `**/*.md` |
 
 Document shape (WIQL):
 - ID: `{source_id}_tc_{item_id}`
@@ -207,11 +214,11 @@ Document shape:
 
 Fetches documentation from multiple sources. Supports three sub-cards.
 
-**ADO Wiki sub-card**
+**ADO Wiki sub-tab**
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
-| `DocType` | Active sub-card: `wiki` \| `repo` \| `upload` | `wiki` |
+| `DocType` | Active sub-tab: `wiki` \| `repo` | `wiki` |
 | `WikiName` | Wiki name to target. Falls back to the first wiki if not found. | First wiki in project |
 | `PathFilter` | Fetch only pages under this path. | `/` (all pages) |
 
@@ -222,17 +229,13 @@ Document shape:
 - Text is the section's full text
 - Tags: `wiki_name`, `section`
 
-**Repo Files sub-card**
+**Repo Files sub-tab**
 
 | Config key | Description | Default |
 |-----------|-------------|---------|
 | `Repository` | Repository name. | — |
 | `Branch` | Branch to fetch from. | — |
 | `GlobPatterns` | Glob patterns for documentation files. | `**/*.md` |
-
-**Upload sub-card**
-
-Equivalent to the Manual provider's file upload, indexed into the Documentation collection. Does not require an ADO connection.
 
 ---
 
