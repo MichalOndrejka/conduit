@@ -9,7 +9,7 @@ import pytest
 
 from app.models import ConfigKeys, SourceDefinition, SourceTypes
 from app.sources.ado_build import AdoPipelineBuildSource
-from app.sources.ado_code import AdoCodeRepoSource, _glob_matches
+from app.sources.ado_code import AdoCodeRepoSource, _extract_matched, _glob_matches, _zip_root_prefix
 from app.sources.ado_commits import AdoGitCommitsSource
 from app.sources.ado_testcase import AdoTestCaseSource, _strip_xml
 from app.sources.ado_testresults import AdoTestResultsSource
@@ -786,3 +786,81 @@ async def test_code_default_branch_is_main():
     await AdoCodeRepoSource(_source(), client, _parser_registry(units=[])).fetch_documents()
     _, _, branch = client.get_repo_zip.call_args[0]
     assert branch == ""
+
+
+# ── _zip_root_prefix ──────────────────────────────────────────────────────────
+
+def _make_flat_zip(files: dict[str, str]) -> bytes:
+    """Build a zip without a common root folder (flat ADO format)."""
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        for path, content in files.items():
+            zf.writestr(path.lstrip("/"), content)
+    return buf.getvalue()
+
+
+def _open_zip(zip_bytes: bytes) -> _zipfile.ZipFile:
+    return _zipfile.ZipFile(io.BytesIO(zip_bytes))
+
+
+def test_zip_root_prefix_detected_for_common_root():
+    zf = _open_zip(_make_zip({"/README.md": "r", "/doc/spec.md": "s"}))
+    assert _zip_root_prefix(zf) == "root/"
+
+
+def test_zip_root_prefix_empty_for_flat_zip():
+    zf = _open_zip(_make_flat_zip({"README.md": "r", "doc/spec.md": "s"}))
+    assert _zip_root_prefix(zf) == ""
+
+
+def test_zip_root_prefix_empty_for_all_root_files():
+    """Files only in root, no subdirs — cannot distinguish from flat zip, so no stripping."""
+    zf = _open_zip(_make_flat_zip({"README.md": "r", "hello.py": "x"}))
+    assert _zip_root_prefix(zf) == ""
+
+
+def test_zip_root_prefix_empty_for_empty_zip():
+    zf = _open_zip(_make_flat_zip({}))
+    assert _zip_root_prefix(zf) == ""
+
+
+# ── _extract_matched path correctness ─────────────────────────────────────────
+
+def test_extract_matched_preserves_subdir_in_flat_zip():
+    """Core regression: doc/requirements.md must not be extracted as /requirements.md."""
+    zip_bytes = _make_flat_zip({
+        "README.md": "readme",
+        "hello.py": "print('hi')",
+        "doc/requirements.md": "# Requirements",
+    })
+    result = _extract_matched(zip_bytes, ["**/*"])
+    assert "/doc/requirements.md" in result
+    assert "/requirements.md" not in result
+
+
+def test_extract_matched_root_files_correct_in_flat_zip():
+    zip_bytes = _make_flat_zip({"README.md": "readme", "doc/spec.md": "spec"})
+    result = _extract_matched(zip_bytes, ["**/*"])
+    assert "/README.md" in result
+    assert "/doc/spec.md" in result
+
+
+def test_extract_matched_strips_root_folder_from_ado_zip():
+    zip_bytes = _make_zip({"/README.md": "readme", "/doc/spec.md": "spec"})
+    result = _extract_matched(zip_bytes, ["**/*"])
+    assert "/README.md" in result
+    assert "/doc/spec.md" in result
+    # The root folder component must not appear in the key
+    assert not any("root" in k for k in result)
+
+
+def test_extract_matched_glob_filter_respects_subdir_path():
+    zip_bytes = _make_flat_zip({
+        "README.md": "readme",
+        "doc/requirements.md": "# Reqs",
+        "src/main.py": "code",
+    })
+    result = _extract_matched(zip_bytes, ["**/*.py"])
+    assert "/src/main.py" in result
+    assert "/doc/requirements.md" not in result
+    assert "/README.md" not in result

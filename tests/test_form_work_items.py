@@ -148,11 +148,9 @@ def test_wi_ado_api_version_stored():
     assert cfg[ConfigKeys.API_VERSION] == "6.0"
 
 
-def test_wi_verify_ssl_not_stored():
-    # ConfigVerifySSL is present in the ADO connection UI but is NOT parsed
-    # by _build_source_from_form → stored value is always absent.
+def test_wi_verify_ssl_stored():
     cfg = _wi_filters(ConfigVerifySSL="false", **{"ConfigItemTypes": ["Bug"]})
-    assert ConfigKeys.VERIFY_SSL not in cfg  # BUG: VerifySSL is silently dropped
+    assert cfg[ConfigKeys.VERIFY_SSL] == "false"
 
 
 # ── Auth type subcards (ADO connection) ───────────────────────────────────────

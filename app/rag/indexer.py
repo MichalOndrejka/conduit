@@ -5,7 +5,7 @@ import time
 import uuid
 from typing import Callable, Optional
 
-from qdrant_client.models import PointIdsList, PointStruct
+from qdrant_client.models import FieldCondition, Filter, MatchValue, PointIdsList, PointStruct
 
 from app.models import SourceDocument, PayloadKeys
 from app.rag.chunker import TextChunker
@@ -44,6 +44,7 @@ class DocumentIndexer:
         collection: str,
         docs: list[SourceDocument],
         progress_cb: Optional[Callable[[int, int], None]] = None,
+        replace_source_id: Optional[str] = None,
     ) -> None:
         now_ms = int(time.time() * 1000)
 
@@ -88,6 +89,19 @@ class DocumentIndexer:
         if not await self._store.collection_exists(collection):
             actual_dims = len(points[0].vector)
             await self._store.create_collection(collection, dimensions=actual_dims)
+
+        # ── Between phases: replace old vectors for this source ───────────────
+        # Deleting here (after all embeds succeed, before any writes) means:
+        # - embed failure → old vectors intact, nothing lost
+        # - write failure → rollback removes the partial new batch
+        if replace_source_id:
+            filt = Filter(must=[
+                FieldCondition(
+                    key=PayloadKeys.tag("source_id"),
+                    match=MatchValue(value=replace_source_id),
+                )
+            ])
+            await self._store.delete_by_filter(collection, filt)
 
         # ── Phase 2: write to Qdrant with rollback on partial failure ──────────
         # Track every ID that was successfully committed so we can delete them

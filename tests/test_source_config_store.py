@@ -82,26 +82,37 @@ async def test_reset_all_sync_status_updates_all_sources(store):
 
 
 # ── export_stripped ────────────────────────────────────────────────────────────
+# Pat/Token/Password/ApiKeyValue store *env var names*, not actual secrets.
+# export_stripped must preserve them so the config is usable on another system.
 
-async def test_export_stripped_blanks_pat(store, sample_source):
+async def test_export_stripped_preserves_pat_env_var_name(store, sample_source):
     await store.save(sample_source)
-    assert store.export_stripped()[0]["config"]["Pat"] == ""
+    assert store.export_stripped()[0]["config"]["Pat"] == "secret-pat"
 
 
-async def test_export_stripped_blanks_token_preserves_base_url(store):
-    src = SourceDefinition(type="t", name="n", config={"Token": "tok", "BaseUrl": "http://x"})
+async def test_export_stripped_preserves_token_and_base_url(store):
+    src = SourceDefinition(type="t", name="n", config={"Token": "MY_TOKEN_VAR", "BaseUrl": "http://x"})
     await store.save(src)
     exported = store.export_stripped()[0]["config"]
-    assert exported["Token"] == ""
+    assert exported["Token"] == "MY_TOKEN_VAR"
     assert exported["BaseUrl"] == "http://x"
 
 
-async def test_export_stripped_blanks_password_and_api_key_value(store):
-    src = SourceDefinition(type="t", name="n", config={"Password": "pw", "ApiKeyValue": "k"})
+async def test_export_stripped_preserves_password_and_api_key_value(store):
+    src = SourceDefinition(type="t", name="n", config={"Password": "MY_PW_VAR", "ApiKeyValue": "MY_KEY_VAR"})
     await store.save(src)
     exported = store.export_stripped()[0]["config"]
-    assert exported["Password"] == ""
-    assert exported["ApiKeyValue"] == ""
+    assert exported["Password"] == "MY_PW_VAR"
+    assert exported["ApiKeyValue"] == "MY_KEY_VAR"
+
+
+async def test_export_stripped_returns_all_config_keys(store):
+    src = SourceDefinition(type="t", name="n", config={
+        "Pat": "TFS_PAT", "BaseUrl": "https://x", "AuthType": "pat", "ApiVersion": "7.1"
+    })
+    await store.save(src)
+    exported = store.export_stripped()[0]["config"]
+    assert set(exported.keys()) == {"Pat", "BaseUrl", "AuthType", "ApiVersion"}
 
 
 # ── _normalise_keys ────────────────────────────────────────────────────────────

@@ -93,7 +93,7 @@ async def status():
             "syncMessage": p.message if p else None,
             "syncErrorPhase": s.sync_error_phase,
         })
-    return JSONResponse(result)
+    return JSONResponse({"qdrantReady": container.health.is_ready, "sources": result})
 
 
 @router.get("/export")
@@ -379,11 +379,16 @@ async def sources_preview(request: Request):
         impl = factory.create(source)
         docs = await asyncio.wait_for(impl.preview_documents(), timeout=30.0)
         sample = docs[:5]
+        # File-tree sources embed the true matched count on the first doc so
+        # the reported total reflects all matched files, not just the 5 whose
+        # content was fetched.
+        matched_total_str = docs[0].properties.pop("__matched_total__", None) if docs else None
+        reported_total = int(matched_total_str) if matched_total_str else len(docs)
         return JSONResponse({
-            "total": len(docs),
+            "total": reported_total,
             "docs": [
                 {
-                    "text": d.text[:600],
+                    "text": d.text[:500] if _is_text_displayable(d.text) else None,
                     "tags": d.tags,
                     "properties": d.properties,
                 }
@@ -509,6 +514,16 @@ async def sources_edit_post(request: Request, source_id: str, background_tasks: 
             if not updated.get_config(ConfigKeys.TITLE):
                 updated.config[ConfigKeys.TITLE] = existing.get_config(ConfigKeys.TITLE)
 
+    if existing.config != updated.config:
+        collection = collection_for(updated)
+        try:
+            filt = Filter(must=[
+                FieldCondition(key=PayloadKeys.tag("source_id"), match=MatchValue(value=source_id))
+            ])
+            await container.vector_store.delete_by_filter(collection, filt)
+        except Exception:
+            pass  # Qdrant may be offline; config save proceeds regardless
+
     await container.config_store.save(updated)
     return RedirectResponse("/", status_code=303)
 
@@ -574,8 +589,8 @@ async def sources_items_get(
                 "title": payload.get("prop_title", ""),
                 "url": payload.get("prop_url", ""),
                 "text": payload.get(PayloadKeys.TEXT, ""),
-                "chunk_index": payload.get(PayloadKeys.CHUNK_INDEX),
-                "total_chunks": payload.get(PayloadKeys.TOTAL_CHUNKS),
+                "chunk_index": int(payload[PayloadKeys.CHUNK_INDEX]) if payload.get(PayloadKeys.CHUNK_INDEX) is not None else None,
+                "total_chunks": int(payload[PayloadKeys.TOTAL_CHUNKS]) if payload.get(PayloadKeys.TOTAL_CHUNKS) is not None else None,
                 "indexed_at": indexed_at.strftime("%Y-%m-%d %H:%M") if indexed_at else None,
             })
     except Exception:
@@ -795,6 +810,17 @@ async def experience_map_data():
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
+def _is_text_displayable(text: str) -> bool:
+    """Return False for binary or mostly non-printable content."""
+    if not text:
+        return False
+    if '\x00' in text:
+        return False
+    sample = text[:200]
+    non_printable = sum(1 for c in sample if ord(c) < 32 and c not in '\n\r\t')
+    return non_printable / len(sample) < 0.1
+
+
 def _get_form_str(form, *keys: str) -> str:
     """Return first non-None form value; treats empty string as a valid value only for the first key."""
     for k in keys:
@@ -825,6 +851,7 @@ def _build_source_from_form(form) -> SourceDefinition:
     _set(ConfigKeys.BASE_URL, "ConfigBaseUrl")
     _set(ConfigKeys.AUTH_TYPE, "ConfigAuthType")
     _set(ConfigKeys.API_VERSION, "ConfigApiVersion")
+    _set(ConfigKeys.VERIFY_SSL, "ConfigVerifySSL")
 
     auth_type = config.get(ConfigKeys.AUTH_TYPE, "none")
     if auth_type == "pat":

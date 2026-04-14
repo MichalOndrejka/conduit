@@ -30,17 +30,31 @@ def _glob_matches(path: str, patterns: list[str]) -> bool:
     return False
 
 
+def _zip_root_prefix(zf: zipfile.ZipFile) -> str:
+    """Return the common root folder prefix to strip from zip entry paths, or '' if none."""
+    names = [e.filename for e in zf.infolist() if not e.is_dir()]
+    if not names:
+        return ""
+    roots = {n.split("/")[0] for n in names}
+    # A common root exists when every entry shares one first path component AND
+    # at least one entry actually lives inside a folder (has a "/" in the name).
+    if len(roots) == 1 and any("/" in n for n in names):
+        return roots.pop() + "/"
+    return ""
+
+
 def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> dict[str, str]:
     """Extract files matching patterns from a zip archive. Returns {path: content}."""
     result: dict[str, str] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        prefix = _zip_root_prefix(zf)
         for entry in zf.infolist():
             if entry.is_dir():
                 continue
-            # ADO zips prepend a root folder; strip the first path component
             name = entry.filename
-            parts = name.split("/", 1)
-            path = "/" + (parts[1] if len(parts) > 1 else parts[0])
+            # Strip the common root folder if present (ADO often prepends one)
+            relative = name[len(prefix):] if prefix and name.startswith(prefix) else name
+            path = "/" + relative
             if not _glob_matches(path, patterns):
                 continue
             try:
@@ -125,12 +139,21 @@ class AdoCodeRepoSource(Source):
         matched = [f for f in tree if _glob_matches(f.get("path", ""), patterns)]
         sample = matched[:_PREVIEW_LIMIT]
 
-        async def fetch_one(file_info: dict) -> Optional[SourceDocument]:
+        matched_total = len(matched)
+
+        async def fetch_one(file_info: dict, is_first: bool) -> Optional[SourceDocument]:
             path = file_info.get("path", "")
             try:
                 content = await self._client.get_file_content(conn, repository, branch, path)
             except Exception:
                 return None
+            props = {
+                "title": _os.path.basename(path),
+                "file_path": path,
+                "repository": repository,
+            }
+            if is_first:
+                props["__matched_total__"] = str(matched_total)
             return SourceDocument(
                 id=f"{self._source.id}_{path}",
                 text=content[:2000],
@@ -138,13 +161,8 @@ class AdoCodeRepoSource(Source):
                     "source_id": self._source.id,
                     "source_name": self._source.name,
                 },
-                properties={
-                    "title": _os.path.basename(path),
-                    "file_path": path,
-                    "repository": repository,
-                    "preview_note": f"Showing {len(sample)} of {len(matched)} matched files",
-                },
+                properties=props,
             )
 
-        results = await asyncio.gather(*[fetch_one(f) for f in sample])
+        results = await asyncio.gather(*[fetch_one(f, i == 0) for i, f in enumerate(sample)])
         return [doc for doc in results if doc is not None]

@@ -261,9 +261,9 @@ def test_req_ado_api_version_stored():
     assert cfg[ConfigKeys.API_VERSION] == "7.1"
 
 
-def test_req_verify_ssl_not_stored():
+def test_req_verify_ssl_stored():
     cfg = _req_filters(ConfigVerifySSL="false", **{"ConfigItemTypes": ["Risk"]})
-    assert ConfigKeys.VERIFY_SSL not in cfg  # BUG: VerifySSL is silently dropped
+    assert cfg[ConfigKeys.VERIFY_SSL] == "false"
 
 
 # ── Auth type subcards (ADO connection) ───────────────────────────────────────

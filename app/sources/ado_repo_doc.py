@@ -99,12 +99,21 @@ class AdoRepoDocSource(Source):
         matched = [f for f in tree if _glob_matches(f.get("path", ""), patterns)]
         sample = matched[:_PREVIEW_LIMIT]
 
-        async def fetch_one(file_info: dict) -> Optional[SourceDocument]:
+        matched_total = len(matched)
+
+        async def fetch_one(file_info: dict, is_first: bool) -> Optional[SourceDocument]:
             path = file_info.get("path", "")
             try:
                 content = await self._client.get_file_content(conn, repository, branch, path)
             except Exception:
                 return None
+            props = {
+                "title": _os.path.basename(path),
+                "file_path": path,
+                "repository": repository,
+            }
+            if is_first:
+                props["__matched_total__"] = str(matched_total)
             return SourceDocument(
                 id=f"{self._source.id}_{path}",
                 text=content[:2000],
@@ -112,13 +121,8 @@ class AdoRepoDocSource(Source):
                     "source_id": self._source.id,
                     "source_name": self._source.name,
                 },
-                properties={
-                    "title": _os.path.basename(path),
-                    "file_path": path,
-                    "repository": repository,
-                    "preview_note": f"Showing {len(sample)} of {len(matched)} matched files",
-                },
+                properties=props,
             )
 
-        results = await asyncio.gather(*[fetch_one(f) for f in sample])
+        results = await asyncio.gather(*[fetch_one(f, i == 0) for i, f in enumerate(sample)])
         return [doc for doc in results if doc is not None]

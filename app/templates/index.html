@@ -180,7 +180,7 @@
     function pollStatus() {
         fetch('/status').then(r => r.json()).then(data => {
             var stillSyncing = false;
-            data.forEach(function(s) {
+            data.sources.forEach(function(s) {
                 var statusEl = document.getElementById('status-' + s.id);
                 var syncedEl = document.getElementById('synced-' + s.id);
                 if (!statusEl) return;

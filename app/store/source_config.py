@@ -7,9 +7,6 @@ from typing import Optional
 
 from app.models import SourceDefinition
 
-_SECRET_KEYS = {"Pat", "Token", "ApiKeyValue", "Password"}
-
-
 class SourceConfigStore:
     def __init__(self, file_path: str) -> None:
         self._path = Path(file_path)
@@ -71,16 +68,9 @@ class SourceConfigStore:
         )
 
     def export_stripped(self) -> list[dict]:
-        """Return sources with secret config values blanked out."""
+        """Return all sources serialised for export."""
         sources = self._read()
-        result = []
-        for s in sources:
-            d = s.model_dump(mode="json")
-            for key in list(d.get("config", {}).keys()):
-                if key in _SECRET_KEYS:
-                    d["config"][key] = ""
-            result.append(d)
-        return result
+        return [s.model_dump(mode="json") for s in sources]
 
 
 def _normalise_keys(d: dict) -> dict:

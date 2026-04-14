@@ -67,7 +67,7 @@ class SyncService:
                     total=total,
                 ))
 
-            await self._indexer.index_batch(collection, docs, progress_cb=on_embed_progress)
+            await self._indexer.index_batch(collection, docs, progress_cb=on_embed_progress, replace_source_id=source.id)
 
             source.sync_status = "completed"
             source.last_synced_at = datetime.now(timezone.utc)

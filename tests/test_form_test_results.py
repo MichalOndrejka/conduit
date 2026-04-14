@@ -107,9 +107,9 @@ def test_tr_ado_api_version_stored():
     assert cfg[ConfigKeys.API_VERSION] == "7.1"
 
 
-def test_tr_verify_ssl_not_stored():
+def test_tr_verify_ssl_stored():
     cfg = _tr(ConfigVerifySSL="false", ConfigLastNRuns="10")
-    assert ConfigKeys.VERIFY_SSL not in cfg  # BUG: VerifySSL is silently dropped
+    assert cfg[ConfigKeys.VERIFY_SSL] == "false"
 
 
 # ── Auth type subcards (ADO connection) ───────────────────────────────────────

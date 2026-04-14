@@ -39,11 +39,6 @@
             {% endif %}
         </div>
 
-        <div class="flex items-center gap-2 px-3 py-2.5 rounded-lg mb-5 text-xs text-amber-400" style="background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.25);">
-            <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            Indexed vectors in Qdrant are not removed automatically.
-        </div>
-
         <form method="post" action="/sources/{{ source.id }}/delete">
             <div class="flex items-center gap-3">
                 <button type="submit" class="btn-danger inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">

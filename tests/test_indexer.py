@@ -15,6 +15,7 @@ def _make_store(upsert_side_effect=None):
     store.collection_exists = AsyncMock(return_value=True)
     store.create_collection = AsyncMock()
     store.upsert = AsyncMock(side_effect=upsert_side_effect)
+    store.delete_by_filter = AsyncMock()
     store.client = MagicMock()
     store.client.delete = AsyncMock()
     return store
@@ -172,3 +173,51 @@ async def test_no_rollback_when_first_batch_fails():
         await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch("col", [_doc()])
 
     store.client.delete.assert_not_called()
+
+
+# ── replace_source_id (clear before re-index) ──────────────────────────────────
+
+async def test_replace_source_id_calls_delete_by_filter():
+    store = _make_store()
+    await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch(
+        "col", [_doc()], replace_source_id="src-1"
+    )
+    store.delete_by_filter.assert_called_once()
+    call_args = store.delete_by_filter.call_args
+    assert call_args[0][0] == "col"
+
+
+async def test_replace_source_id_deletes_before_upsert():
+    """delete_by_filter must be called before any upsert so a failed write doesn't leave orphans."""
+    call_order: list[str] = []
+
+    async def track_delete(collection, filter):
+        call_order.append("delete")
+
+    async def track_upsert(collection, points):
+        call_order.append("upsert")
+
+    store = _make_store()
+    store.delete_by_filter = AsyncMock(side_effect=track_delete)
+    store.upsert = AsyncMock(side_effect=track_upsert)
+
+    await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch(
+        "col", [_doc()], replace_source_id="src-1"
+    )
+    assert call_order == ["delete", "upsert"]
+
+
+async def test_no_replace_source_id_does_not_call_delete_by_filter():
+    store = _make_store()
+    await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch("col", [_doc()])
+    store.delete_by_filter.assert_not_called()
+
+
+async def test_replace_source_id_skipped_for_empty_doc_list():
+    """Nothing to index means no delete either — avoids wiping data for a failed fetch."""
+    store = _make_store()
+    await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch(
+        "col", [], replace_source_id="src-1"
+    )
+    store.delete_by_filter.assert_not_called()
+    store.upsert.assert_not_called()

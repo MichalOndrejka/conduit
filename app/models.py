@@ -17,7 +17,7 @@ class CollectionNames:
     BUILDS           = "conduit_builds"
     TEST_CASES       = "conduit_testcases"
     DOCUMENTATION    = "conduit_documentation"
-    TEST_RESULTS     = "conduit_test_results"
+    TEST_RESULTS     = "conduit_testresults"
     COMMITS          = "conduit_commits"
     EXPERIENCE       = "conduit_experience"
 

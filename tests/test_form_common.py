@@ -63,6 +63,16 @@ def test_ado_connection_api_version():
     assert cfg[ConfigKeys.API_VERSION] == "7.1"
 
 
+def test_ado_connection_verify_ssl_stored():
+    cfg = _cfg(SourceTypes.TEST_RESULTS, ConfigVerifySSL="false")
+    assert cfg[ConfigKeys.VERIFY_SSL] == "false"
+
+
+def test_ado_connection_verify_ssl_custom_bundle():
+    cfg = _cfg(SourceTypes.TEST_RESULTS, ConfigVerifySSL="/etc/ssl/certs/ca.pem")
+    assert cfg[ConfigKeys.VERIFY_SSL] == "/etc/ssl/certs/ca.pem"
+
+
 # ── Auth type subcards ────────────────────────────────────────────────────────
 
 def test_auth_pat_stores_pat():
