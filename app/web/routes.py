@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -692,7 +693,7 @@ async def sources_map(request: Request):
 
 
 @router.get("/api/map-data")
-async def sources_map_data():
+async def sources_map_data(method: str = "pca"):
     try:
         import numpy as np
         from sklearn.decomposition import PCA
@@ -753,22 +754,50 @@ async def sources_map_data():
         return JSONResponse({"points": [], "sources": [], "total": len(all_vectors),
                              "note": f"Need at least 2 indexed documents (have {len(all_vectors)})."})
 
-    try:
-        vectors = np.array(all_vectors, dtype=float)
+    vectors = np.array(all_vectors, dtype=float)
+
+    if method == "umap":
+        try:
+            import umap as umap_lib
+        except ImportError:
+            return JSONResponse({"error": "umap-learn not installed. Run: uv pip install umap-learn"}, status_code=500)
+        if len(all_vectors) < 4:
+            return JSONResponse({"error": "UMAP needs at least 4 points.", "points": []}, status_code=400)
+        n_neighbors = min(15, len(all_vectors) - 1)
+        def _run_umap():
+            return umap_lib.UMAP(
+                n_components=2, n_neighbors=n_neighbors, min_dist=0.1,
+                random_state=42, low_memory=False, n_epochs=200,
+            ).fit_transform(vectors)
+        try:
+            coords = await asyncio.get_event_loop().run_in_executor(None, _run_umap)
+        except Exception as exc:
+            return JSONResponse({"error": f"UMAP failed: {exc}", "points": []}, status_code=500)
+        axis_labels = ("UMAP 1", "UMAP 2")
+    else:
         n = min(2, len(all_vectors), vectors.shape[1])
-        coords = PCA(n_components=n).fit_transform(vectors)
-    except Exception as exc:
-        return JSONResponse({"error": f"PCA failed: {exc}", "points": []}, status_code=500)
+        def _run_pca():
+            return PCA(n_components=n).fit_transform(vectors)
+        try:
+            coords = await asyncio.get_event_loop().run_in_executor(None, _run_pca)
+        except Exception as exc:
+            return JSONResponse({"error": f"PCA failed: {exc}", "points": []}, status_code=500)
+        axis_labels = ("PC 1", "PC 2")
 
     points = []
     for i, meta in enumerate(all_meta):
         points.append({
             **meta,
             "x": float(coords[i, 0]),
-            "y": float(coords[i, 1]) if n >= 2 else 0.0,
+            "y": float(coords[i, 1]) if coords.shape[1] >= 2 else 0.0,
         })
 
-    return JSONResponse({"points": points, "sources": source_stats, "total": len(points)})
+    return JSONResponse({
+        "points": points,
+        "sources": source_stats,
+        "total": len(points),
+        "axis_labels": list(axis_labels),
+    })
 
 
 @router.get("/api/experience/map-data")

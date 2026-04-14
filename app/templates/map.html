@@ -25,7 +25,13 @@
     </div>
     {% else %}
 
-    <p class="text-xs text-slate-600">Click a source in the legend to toggle it. Scroll to zoom, drag to pan.</p>
+    <div class="flex items-center justify-between">
+        <p class="text-xs text-slate-600">Click a source in the legend to toggle it. Scroll to zoom, drag to pan.</p>
+        <div class="flex gap-1 rounded-lg p-1" style="background:hsl(222,47%,8%);border:1px solid hsl(217,33%,14%)">
+            <button id="btn-pca"  onclick="switchMethod('pca')"  class="method-btn active px-3 py-1 rounded-md text-xs font-medium transition-colors">PCA</button>
+            <button id="btn-umap" onclick="switchMethod('umap')" class="method-btn px-3 py-1 rounded-md text-xs font-medium transition-colors">UMAP</button>
+        </div>
+    </div>
 
     <div class="card p-0 overflow-hidden" style="height: 600px; position: relative;">
         <div id="loading" class="absolute inset-0 flex items-center justify-center z-10">
@@ -42,6 +48,11 @@
 
 {% block scripts %}
 {% if total >= 1 %}
+<style>
+.method-btn { color: hsl(215,20%,45%); }
+.method-btn:hover { color: hsl(215,20%,70%); }
+.method-btn.active { background: hsl(217,33%,18%); color: hsl(210,40%,98%); }
+</style>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
 const COLORS = [
@@ -50,10 +61,28 @@ const COLORS = [
     '#6366f1','#14b8a6','#eab308','#f43f5e','#a855f7',
 ];
 
-async function loadMap() {
+let currentMethod = 'pca';
+
+function switchMethod(m) {
+    if (m === currentMethod) return;
+    currentMethod = m;
+    document.querySelectorAll('.method-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-' + m).classList.add('active');
+    showLoading();
+    loadMap(m);
+}
+
+function showLoading() {
+    const el = document.getElementById('loading');
+    el.innerHTML = '<span class="spinner" style="width:1.2rem;height:1.2rem;border-width:2px;color:#7c3aed"></span>';
+    el.style.display = 'flex';
+}
+
+async function loadMap(method) {
+    method = method || currentMethod;
     let data;
     try {
-        const resp = await fetch('/api/map-data');
+        const resp = await fetch('/api/map-data?method=' + method);
         data = await resp.json();
     } catch (e) {
         document.getElementById('loading').innerHTML = '<p class="text-red-400 text-sm">Failed to fetch map data.</p>';
@@ -71,6 +100,8 @@ async function loadMap() {
             `<p class="text-slate-500 text-sm">${data.note || 'Not enough data to render map.'}</p>`;
         return;
     }
+
+    const axisLabels = data.axis_labels || ['PC 1', 'PC 2'];
 
     // Group points by source
     const bySource = {};
@@ -104,11 +135,11 @@ async function loadMap() {
         margin: { t: 20, r: 20, b: 40, l: 50 },
         xaxis: {
             gridcolor: 'hsl(217,33%,12%)', zerolinecolor: 'hsl(217,33%,18%)',
-            tickfont: { size: 10 }, title: { text: 'PC 1', font: { size: 11 } },
+            tickfont: { size: 10 }, title: { text: axisLabels[0], font: { size: 11 } },
         },
         yaxis: {
             gridcolor: 'hsl(217,33%,12%)', zerolinecolor: 'hsl(217,33%,18%)',
-            tickfont: { size: 10 }, title: { text: 'PC 2', font: { size: 11 } },
+            tickfont: { size: 10 }, title: { text: axisLabels[1], font: { size: 11 } },
         },
         legend: {
             bgcolor: 'hsla(222,47%,8%,0.95)', bordercolor: 'hsl(217,33%,18%)', borderwidth: 1,
@@ -118,9 +149,10 @@ async function loadMap() {
             bgcolor: 'hsl(222,47%,11%)', bordercolor: 'hsl(217,33%,18%)',
             font: { color: 'hsl(210,40%,98%)', size: 12 }, align: 'left',
         },
+        dragmode: 'pan',
     };
 
-    const config = { responsive: true, displayModeBar: false, scrollZoom: true };
+    const config = { responsive: true, displayModeBar: false, scrollZoom: true, showTips: false };
 
     document.getElementById('loading').style.display = 'none';
     Plotly.newPlot('plot', traces, layout, config);
@@ -132,7 +164,7 @@ async function loadMap() {
     footer.classList.remove('hidden');
 }
 
-loadMap();
+loadMap('pca');
 </script>
 {% endif %}
 {% endblock %}
