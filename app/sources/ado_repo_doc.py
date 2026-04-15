@@ -9,19 +9,24 @@ from app.ado.client import AdoClient, AdoConnection
 from app.models import SourceDefinition, SourceDocument, SyncProgress, ConfigKeys
 from app.parsing.registry import ParserRegistry
 from app.sources.base import Source, ProgressCallback
-from app.sources.ado_code import _glob_matches
+from app.sources.ado_code import _glob_matches, _zip_root_prefix
 
 _DEFAULT_PATTERNS = "**/*.md"
 
 
-def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> dict[str, str]:
+def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> tuple[dict[str, str], int, str]:
+    """Extract files matching patterns from a zip archive.
+
+    Returns (matched_files, total_zip_files, detected_prefix).
+    """
     result: dict[str, str] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        for entry in zf.infolist():
-            if entry.is_dir():
-                continue
-            parts = entry.filename.split("/", 1)
-            path = "/" + (parts[1] if len(parts) > 1 else parts[0])
+        prefix = _zip_root_prefix(zf, patterns)
+        all_entries = [e for e in zf.infolist() if not e.is_dir()]
+        for entry in all_entries:
+            name = entry.filename
+            relative = name[len(prefix):] if prefix and name.startswith(prefix) else name
+            path = "/" + relative
             if not _glob_matches(path, patterns):
                 continue
             try:
@@ -29,7 +34,7 @@ def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> dict[str, str]:
             except Exception:
                 continue
             result[path] = content
-    return result
+    return result, len(all_entries), prefix
 
 
 class AdoRepoDocSource(Source):
@@ -60,10 +65,14 @@ class AdoRepoDocSource(Source):
         if progress_cb:
             progress_cb(SyncProgress(phase="fetching", message="Extracting matched files…"))
 
-        files = _extract_matched(zip_bytes, patterns)
+        files, zip_total, zip_prefix = _extract_matched(zip_bytes, patterns)
 
         if progress_cb:
-            progress_cb(SyncProgress(phase="fetching", message=f"Parsing {len(files)} matched files…"))
+            prefix_info = f", prefix stripped: '{zip_prefix}'" if zip_prefix else ""
+            progress_cb(SyncProgress(
+                phase="fetching",
+                message=f"Matched {len(files)}/{zip_total} files (patterns: {', '.join(patterns)}{prefix_info})…",
+            ))
 
         docs: list[SourceDocument] = []
         for path, content in files.items():
