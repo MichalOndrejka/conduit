@@ -30,8 +30,15 @@ def _glob_matches(path: str, patterns: list[str]) -> bool:
     return False
 
 
-def _zip_root_prefix(zf: zipfile.ZipFile) -> str:
-    """Return the common root folder prefix to strip from zip entry paths, or '' if none."""
+def _zip_root_prefix(zf: zipfile.ZipFile, patterns: list[str] | None = None) -> str:
+    """Return the common root folder prefix to strip from zip entry paths, or '' if none.
+
+    ADO sometimes wraps zip contents in a top-level folder named after the repo.
+    We detect that folder and strip it so paths stay consistent with the file-tree API.
+    However, we must NOT strip a folder that the user's glob patterns explicitly reference
+    (e.g. pattern "SDN/**/*.md" means the user wants to match files under SDN/, so we
+    should not treat SDN/ as a synthetic wrapper to discard).
+    """
     names = [e.filename for e in zf.infolist() if not e.is_dir()]
     if not names:
         return ""
@@ -39,7 +46,14 @@ def _zip_root_prefix(zf: zipfile.ZipFile) -> str:
     # A common root exists when every entry shares one first path component AND
     # at least one entry actually lives inside a folder (has a "/" in the name).
     if len(roots) == 1 and any("/" in n for n in names):
-        return roots.pop() + "/"
+        candidate = roots.pop()
+        # Don't strip if any glob pattern explicitly names this directory as its first component.
+        if patterns:
+            for p in patterns:
+                first = p.strip().lstrip("/").lstrip("\\").replace("\\", "/").split("/")[0]
+                if first == candidate:
+                    return ""
+        return candidate + "/"
     return ""
 
 
@@ -47,7 +61,7 @@ def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> dict[str, str]:
     """Extract files matching patterns from a zip archive. Returns {path: content}."""
     result: dict[str, str] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-        prefix = _zip_root_prefix(zf)
+        prefix = _zip_root_prefix(zf, patterns)
         for entry in zf.infolist():
             if entry.is_dir():
                 continue
