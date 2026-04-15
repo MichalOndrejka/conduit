@@ -112,7 +112,9 @@ async def export_sources():
 async def import_sources(request: Request, file: UploadFile):
     try:
         raw = await file.read()
-        items = json.loads(raw)
+        parsed = json.loads(raw)
+        # Support both flat array (legacy) and new {"sources": [...]} format
+        items = parsed.get("sources", parsed) if isinstance(parsed, dict) else parsed
         existing = await container.config_store.get_all()
         existing_ids = {s.id for s in existing}
 
@@ -129,15 +131,13 @@ async def import_sources(request: Request, file: UploadFile):
 
         sources = await container.config_store.get_all()
         return templates.TemplateResponse(request, "index.html", _ctx(
-            request,
-            sources=sources,
+            request, sources=sources,
             import_message=f"Imported {imported} source(s). Fill in credentials before syncing.",
         ))
     except Exception as exc:
         sources = await container.config_store.get_all()
         return templates.TemplateResponse(request, "index.html", _ctx(
-            request,
-            sources=sources,
+            request, sources=sources,
             import_error=f"Import failed: {exc}",
         ))
 
@@ -835,6 +835,33 @@ async def experience_map_data():
             "created_at": e["created_at"],
         })
     return JSONResponse({"points": points})
+
+
+@router.post("/sources/{source_id}/copy")
+async def sources_copy(source_id: str):
+    source = await container.config_store.get_by_id(source_id)
+    if not source:
+        return RedirectResponse("/", status_code=303)
+    copy = source.model_copy(update={
+        "id": str(uuid.uuid4()),
+        "name": source.name + " Copy",
+        "sync_status": "idle",
+        "sync_error": None,
+        "sync_error_phase": None,
+        "last_synced_at": None,
+    })
+    await container.config_store.save(copy)
+    return RedirectResponse("/", status_code=303)
+
+
+@router.post("/sources/reorder")
+async def sources_reorder(request: Request):
+    data = await request.json()
+    ids = data.get("ids", [])
+    if not isinstance(ids, list):
+        return JSONResponse({"error": "ids must be a list"}, status_code=400)
+    await container.config_store.reorder(ids)
+    return JSONResponse({"ok": True})
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
