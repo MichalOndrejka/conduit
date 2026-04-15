@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import fnmatch
 import io
+import logging
 import os as _os
 import re
 import zipfile
@@ -11,6 +12,8 @@ from app.ado.client import AdoClient, AdoConnection
 from app.models import SourceDefinition, SourceDocument, SyncProgress, ConfigKeys
 from app.parsing.registry import ParserRegistry
 from app.sources.base import Source, ProgressCallback
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_PATTERNS = "**/*.cs"
 
@@ -62,9 +65,12 @@ def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
         prefix = _zip_root_prefix(zf, patterns)
-        for entry in zf.infolist():
-            if entry.is_dir():
-                continue
+        all_entries = [e for e in zf.infolist() if not e.is_dir()]
+        logger.debug(
+            "Zip contains %d files; detected root prefix=%r; patterns=%r",
+            len(all_entries), prefix, patterns,
+        )
+        for entry in all_entries:
             name = entry.filename
             # Strip the common root folder if present (ADO often prepends one)
             relative = name[len(prefix):] if prefix and name.startswith(prefix) else name
@@ -76,6 +82,7 @@ def _extract_matched(zip_bytes: bytes, patterns: list[str]) -> dict[str, str]:
             except Exception:
                 continue
             result[path] = content
+    logger.debug("Matched %d files from zip", len(result))
     return result
 
 
