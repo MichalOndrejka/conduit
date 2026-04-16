@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.models import SourceDefinition
 
+
 class SourceConfigStore:
     def __init__(self, file_path: str) -> None:
         self._path = Path(file_path)
@@ -32,8 +33,7 @@ class SourceConfigStore:
 
     async def delete(self, source_id: str) -> None:
         async with self._lock:
-            sources = [s for s in self._read() if s.id != source_id]
-            self._write(sources)
+            self._write([s for s in self._read() if s.id != source_id])
 
     async def reset_all_sync_status(self, status: str) -> None:
         async with self._lock:
@@ -43,12 +43,26 @@ class SourceConfigStore:
                 s.sync_error = None
             self._write(sources)
 
+    async def reorder(self, ids: list[str]) -> None:
+        async with self._lock:
+            sources = self._read()
+            id_map = {s.id: s for s in sources}
+            ordered = [id_map[i] for i in ids if i in id_map]
+            mentioned = set(ids)
+            tail = [s for s in sources if s.id not in mentioned]
+            self._write(ordered + tail)
+
+    def export_stripped(self) -> list[dict]:
+        return [s.model_dump(mode="json") for s in self._read()]
+
     def _read(self) -> list[SourceDefinition]:
         if not self._path.exists():
             return []
         try:
             data = json.loads(self._path.read_text(encoding="utf-8"))
-            # Support both camelCase (legacy C# export) and snake_case
+            # Support new {"sources": [...]} format (migration back to flat)
+            if isinstance(data, dict):
+                data = data.get("sources", [])
             result = []
             for item in data:
                 item = _normalise_keys(item)
@@ -67,11 +81,6 @@ class SourceConfigStore:
             encoding="utf-8",
         )
 
-    def export_stripped(self) -> list[dict]:
-        """Return all sources serialised for export."""
-        sources = self._read()
-        return [s.model_dump(mode="json") for s in sources]
-
 
 def _normalise_keys(d: dict) -> dict:
     """Accept camelCase keys from C# exports and convert to snake_case."""
@@ -79,5 +88,6 @@ def _normalise_keys(d: dict) -> dict:
         "lastSyncedAt": "last_synced_at",
         "syncStatus": "sync_status",
         "syncError": "sync_error",
+        "syncErrorPhase": "sync_error_phase",
     }
     return {mapping.get(k, k): v for k, v in d.items()}
