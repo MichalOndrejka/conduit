@@ -55,11 +55,12 @@
 </style>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
-const COLORS = [
-    '#7c3aed','#0ea5e9','#10b981','#f59e0b','#ef4444',
-    '#8b5cf6','#06b6d4','#84cc16','#f97316','#ec4899',
-    '#6366f1','#14b8a6','#eab308','#f43f5e','#a855f7',
-];
+function sourceColor(i, total) {
+    const hue = (i * 360 / total) % 360;
+    // shift slightly so index 0 starts at a pleasant purple-blue rather than red
+    const h = (hue + 260) % 360;
+    return `hsl(${h},72%,58%)`;
+}
 
 let currentMethod = 'pca';
 
@@ -127,8 +128,9 @@ async function loadMap(method) {
         bySource[p.source_id].pts.push(p);
     }
 
+    const sourceCount = Object.keys(bySource).length;
     const traces = Object.entries(bySource).map(([sid, s], i) => {
-        const color = COLORS[i % COLORS.length];
+        const color = sourceColor(i, sourceCount);
         return {
             type: 'scatter',
             mode: 'markers',
