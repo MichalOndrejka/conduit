@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.memory.service import MemoryService
     from app.rag.bootstrap import QdrantHealth
+    from app.rag.preprocessor import DocumentPreprocessor
     from app.rag.search import SearchService
     from app.rag.vector_store import VectorStore
     from app.store.source_config import SourceConfigStore
@@ -20,3 +21,4 @@ progress_store: "SyncProgressStore"
 vector_store: "VectorStore"
 search_service: "SearchService"
 memory_service: "MemoryService"
+preprocessor: "DocumentPreprocessor"

@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}Sources Map{% endblock %}
 
 {% block content %}
@@ -27,7 +27,7 @@
 
     <div class="flex items-center justify-between">
         <p class="text-xs text-slate-600">Click a source in the legend to toggle it. Scroll to zoom, drag to pan.</p>
-        <div class="flex gap-1 rounded-lg p-1" style="background:hsl(222,47%,8%);border:1px solid hsl(217,33%,14%)">
+        <div class="flex gap-1 rounded-lg p-1" style="background:var(--card);border:1px solid var(--border)">
             <button id="btn-pca"  onclick="switchMethod('pca')"  class="method-btn active px-3 py-1 rounded-md text-xs font-medium transition-colors">PCA</button>
             <button id="btn-umap" onclick="switchMethod('umap')" class="method-btn px-3 py-1 rounded-md text-xs font-medium transition-colors">UMAP</button>
         </div>
@@ -49,9 +49,9 @@
 {% block scripts %}
 {% if total >= 1 %}
 <style>
-.method-btn { color: hsl(215,20%,45%); }
-.method-btn:hover { color: hsl(215,20%,70%); }
-.method-btn.active { background: hsl(217,33%,18%); color: hsl(210,40%,98%); }
+.method-btn { color: var(--muted); }
+.method-btn:hover { color: var(--fg); }
+.method-btn.active { background: var(--border); color: var(--fg); }
 </style>
 <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
 <script>
@@ -62,6 +62,23 @@ const COLORS = [
 ];
 
 let currentMethod = 'pca';
+
+function _plotColors() {
+    var light = document.documentElement.getAttribute('data-theme') === 'light';
+    return light ? {
+        paper: 'hsl(210,40%,98%)', plot: 'hsl(0,0%,100%)',
+        grid: 'hsl(214,32%,90%)', zeroline: 'hsl(214,32%,84%)',
+        font: 'hsl(215,20%,45%)',
+        legendBg: 'hsla(0,0%,100%,0.95)', legendBorder: 'hsl(214,32%,84%)',
+        hoverBg: 'hsl(210,40%,96%)', hoverBorder: 'hsl(214,32%,84%)', hoverFont: 'hsl(222,47%,11%)',
+    } : {
+        paper: 'hsl(222,47%,6%)', plot: 'hsl(222,47%,8%)',
+        grid: 'hsl(217,33%,12%)', zeroline: 'hsl(217,33%,18%)',
+        font: 'hsl(215,20%,55%)',
+        legendBg: 'hsla(222,47%,8%,0.95)', legendBorder: 'hsl(217,33%,18%)',
+        hoverBg: 'hsl(222,47%,11%)', hoverBorder: 'hsl(217,33%,18%)', hoverFont: 'hsl(210,40%,98%)',
+    };
+}
 
 function switchMethod(m) {
     if (m === currentMethod) return;
@@ -128,26 +145,27 @@ async function loadMap(method) {
         };
     });
 
+    const c = _plotColors();
     const layout = {
-        paper_bgcolor: 'hsl(222,47%,6%)',
-        plot_bgcolor:  'hsl(222,47%,8%)',
-        font: { color: 'hsl(215,20%,55%)', family: 'Inter, system-ui, sans-serif', size: 11 },
+        paper_bgcolor: c.paper,
+        plot_bgcolor:  c.plot,
+        font: { color: c.font, family: 'Inter, system-ui, sans-serif', size: 11 },
         margin: { t: 20, r: 20, b: 40, l: 50 },
         xaxis: {
-            gridcolor: 'hsl(217,33%,12%)', zerolinecolor: 'hsl(217,33%,18%)',
+            gridcolor: c.grid, zerolinecolor: c.zeroline,
             tickfont: { size: 10 }, title: { text: axisLabels[0], font: { size: 11 } },
         },
         yaxis: {
-            gridcolor: 'hsl(217,33%,12%)', zerolinecolor: 'hsl(217,33%,18%)',
+            gridcolor: c.grid, zerolinecolor: c.zeroline,
             tickfont: { size: 10 }, title: { text: axisLabels[1], font: { size: 11 } },
         },
         legend: {
-            bgcolor: 'hsla(222,47%,8%,0.95)', bordercolor: 'hsl(217,33%,18%)', borderwidth: 1,
+            bgcolor: c.legendBg, bordercolor: c.legendBorder, borderwidth: 1,
             font: { size: 11 }, orientation: 'v', x: 1.01, y: 1,
         },
         hoverlabel: {
-            bgcolor: 'hsl(222,47%,11%)', bordercolor: 'hsl(217,33%,18%)',
-            font: { color: 'hsl(210,40%,98%)', size: 12 }, align: 'left',
+            bgcolor: c.hoverBg, bordercolor: c.hoverBorder,
+            font: { color: c.hoverFont, size: 12 }, align: 'left',
         },
         dragmode: 'pan',
     };
@@ -165,6 +183,7 @@ async function loadMap(method) {
 }
 
 loadMap('pca');
+document.addEventListener('themechange', function() { loadMap(); });
 </script>
 {% endif %}
 {% endblock %}

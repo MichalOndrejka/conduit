@@ -55,7 +55,6 @@ async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHea
 
     ec = cfg.embedding
     fingerprint = {
-        "provider": ec.provider,
         "model": ec.model,
         "base_url": ec.base_url,
         "dimensions": ec.dimensions,

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.models import SyncProgress
 from app.rag.indexer import DocumentIndexer
+from app.rag.preprocessor import DocumentPreprocessor
 from app.sources.factory import SourceFactory, collection_for
 from app.store.source_config import SourceConfigStore
 from app.store.sync_progress import SyncProgressStore
@@ -19,11 +20,13 @@ class SyncService:
         source_factory: SourceFactory,
         indexer: DocumentIndexer,
         progress_store: SyncProgressStore,
+        preprocessor: DocumentPreprocessor,
     ) -> None:
         self._config_store = config_store
         self._factory = source_factory
         self._indexer = indexer
         self._progress_store = progress_store
+        self._preprocessor = preprocessor
 
     async def sync(self, source_id: str) -> None:
         source = await self._config_store.get_by_id(source_id)
@@ -54,6 +57,25 @@ class SyncService:
             self._progress_store.clear(source_id)
             await self._config_store.save(source)
             return
+
+        # ── Phase 1.5: preprocess (optional LLM summarization) ───────────────
+        if self._preprocessor.enabled_for_type(source.type):
+            self._progress_store.set(source_id, SyncProgress(phase="preprocessing", current=0, total=len(docs)))
+            try:
+                def on_preprocess_progress(current: int, total: int) -> None:
+                    self._progress_store.set(source_id, SyncProgress(
+                        phase="preprocessing", current=current, total=total,
+                    ))
+
+                docs = await self._preprocessor.preprocess_documents(docs, source_type=source.type, progress_cb=on_preprocess_progress)
+            except Exception as exc:
+                logger.exception("Preprocessing failed for source %s", source_id)
+                source.sync_status = "failed"
+                source.sync_error = str(exc)
+                source.sync_error_phase = "preprocessing"
+                self._progress_store.clear(source_id)
+                await self._config_store.save(source)
+                return
 
         logger.info("Indexing %d documents for source %s", len(docs), source_id)
         self._progress_store.set(source_id, SyncProgress(phase="indexing", current=0, total=len(docs)))

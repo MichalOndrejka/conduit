@@ -163,6 +163,13 @@ def _reload_embedding_services(cfg) -> None:
     container.sync_service._indexer = new_indexer
 
 
+def _reload_preprocessing_service(cfg) -> None:
+    from app.rag.preprocessor import DocumentPreprocessor
+    new_preprocessor = DocumentPreprocessor(cfg)
+    container.preprocessor = new_preprocessor
+    container.sync_service._preprocessor = new_preprocessor
+
+
 @router.get("/settings")
 async def settings_get(request: Request, notice: str = ""):
     from app.config import get_config, get_config_path
@@ -177,38 +184,32 @@ async def settings_get(request: Request, notice: str = ""):
 
 @router.post("/settings/embedding")
 async def settings_save_embedding(
-    provider: str = Form(...),
     model: str = Form(...),
-    api_key_env_var: str = Form(""),
     base_url: str = Form(""),
-    dimensions: int = Form(1536),
+    dimensions: int = Form(768),
     max_input_chars: int = Form(8000),
-    verify_ssl: str = Form("true"),
 ):
     from app.config import AppConfig, EmbeddingConfig, get_config, save_config
     from app.models import CollectionNames
 
     old_cfg = get_config()
     new_embedding = EmbeddingConfig(
-        provider=provider,
         model=model,
-        api_key_env_var=api_key_env_var,
         base_url=base_url,
         dimensions=dimensions,
         max_input_chars=max_input_chars,
-        verify_ssl=verify_ssl,
     )
     new_cfg = AppConfig(
         embedding=new_embedding,
         qdrant=old_cfg.qdrant,
         chunking=old_cfg.chunking,
+        preprocessing=old_cfg.preprocessing,
         sources_file_path=old_cfg.sources_file_path,
     )
 
     embedding_changed = (
         old_cfg.embedding.model != model
         or old_cfg.embedding.dimensions != dimensions
-        or old_cfg.embedding.provider != provider
         or old_cfg.embedding.base_url != base_url
     )
 
@@ -241,6 +242,7 @@ async def settings_save_qdrant(
         embedding=old_cfg.embedding,
         qdrant=QdrantConfig(host=qdrant_host, port=qdrant_port),
         chunking=old_cfg.chunking,
+        preprocessing=old_cfg.preprocessing,
         sources_file_path=old_cfg.sources_file_path,
     )
     save_config(new_cfg)
@@ -265,13 +267,10 @@ async def settings_verify_qdrant(
 
 @router.post("/settings/verify/embedding")
 async def settings_verify_embedding(
-    provider: str = Form(...),
     model: str = Form(...),
-    api_key_env_var: str = Form(""),
     base_url: str = Form(""),
-    dimensions: int = Form(1536),
+    dimensions: int = Form(768),
     max_input_chars: int = Form(8000),
-    verify_ssl: str = Form("true"),
 ):
     try:
         from app.config import AppConfig, EmbeddingConfig, get_config
@@ -279,13 +278,10 @@ async def settings_verify_embedding(
         cfg = get_config()
         test_cfg = AppConfig(
             embedding=EmbeddingConfig(
-                provider=provider,
                 model=model,
-                api_key_env_var=api_key_env_var,
                 base_url=base_url,
                 dimensions=dimensions,
                 max_input_chars=max_input_chars,
-                verify_ssl=verify_ssl,
             ),
             qdrant=cfg.qdrant,
             chunking=cfg.chunking,
@@ -294,6 +290,75 @@ async def settings_verify_embedding(
         svc = EmbeddingService(test_cfg)
         vector = await svc.embed("connection test")
         return JSONResponse({"ok": True, "message": f"OK — model returned {len(vector)}-dim vector"})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "message": str(exc)})
+
+
+@router.post("/settings/preprocessing")
+async def settings_save_preprocessing(request: Request):
+    from app.config import AppConfig, PreprocessingConfig, get_config, save_config, _PREPROCESS_SOURCE_TYPE_DEFAULTS
+
+    form = await request.form()
+    enabled = form.get("enabled", "")
+    base_url = form.get("base_url", "")
+    model = form.get("model", "")
+    system_prompt = form.get("system_prompt", "")
+
+    source_types: dict[str, bool] = {}
+    for key in _PREPROCESS_SOURCE_TYPE_DEFAULTS:
+        source_types[key] = form.get(f"source_type_{key.replace('-', '_')}", "") == "on"
+
+    old_cfg = get_config()
+    new_cfg = AppConfig(
+        embedding=old_cfg.embedding,
+        qdrant=old_cfg.qdrant,
+        chunking=old_cfg.chunking,
+        preprocessing=PreprocessingConfig(
+            enabled=enabled == "on",
+            base_url=base_url,
+            model=model,
+            system_prompt=system_prompt,
+            source_types=source_types,
+        ),
+        sources_file_path=old_cfg.sources_file_path,
+    )
+    save_config(new_cfg)
+    _reload_preprocessing_service(new_cfg)
+    return RedirectResponse("/settings?notice=preprocessing_saved", status_code=303)
+
+
+@router.post("/settings/verify/preprocessing")
+async def settings_verify_preprocessing(
+    base_url: str = Form(""),
+    model: str = Form(""),
+    system_prompt: str = Form(""),
+):
+    try:
+        from app.config import AppConfig, PreprocessingConfig, get_config
+        from app.models import SourceDocument
+        from app.rag.preprocessor import DocumentPreprocessor
+
+        cfg = get_config()
+        test_cfg = AppConfig(
+            embedding=cfg.embedding,
+            qdrant=cfg.qdrant,
+            chunking=cfg.chunking,
+            preprocessing=PreprocessingConfig(
+                enabled=True,
+                base_url=base_url,
+                model=model,
+                system_prompt=system_prompt,
+            ),
+            sources_file_path=cfg.sources_file_path,
+        )
+        preprocessor = DocumentPreprocessor(test_cfg)
+        test_doc = SourceDocument(
+            id="verify-test",
+            text="This is a connectivity test. Please respond with a brief acknowledgement.",
+        )
+        result = await preprocessor.preprocess_documents([test_doc])
+        summary = result[0].text
+        return JSONResponse({"ok": True, "message": f"OK — model responded ({len(summary)} chars)"})
     except Exception as exc:
         return JSONResponse({"ok": False, "message": str(exc)})
 

@@ -7,22 +7,11 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-# Per-provider defaults shown in the UI when the user switches provider
-PROVIDER_DEFAULTS: dict[str, dict] = {
-    "openai":             {"model": "text-embedding-3-small", "dimensions": 1536},
-    "ollama":             {"model": "nomic-embed-text-v2-moe", "dimensions": 768},
-    "openai-compatible":  {"model": "",                        "dimensions": 1536},
-}
-
-
 class EmbeddingConfig(BaseModel):
-    provider: str = "ollama"          # openai | ollama | openai-compatible
     model: str = "nomic-embed-text-v2-moe"
-    api_key_env_var: str = ""
-    base_url: str = ""
+    base_url: str = ""                # Ollama base URL; defaults to http://localhost:11434/v1
     dimensions: int = 768
-    max_input_chars: int = 8000       # Hard cap on chars sent to the API (≈2 000 tokens for dense code)
-    verify_ssl: str = "true"          # "true" | "false" | path to CA bundle
+    max_input_chars: int = 8000       # Hard cap on chars sent per embedding call (≈2 000 tokens)
 
 
 class QdrantConfig(BaseModel):
@@ -35,10 +24,31 @@ class ChunkingConfig(BaseModel):
     overlap: int = 200
 
 
+_PREPROCESS_SOURCE_TYPE_DEFAULTS: dict[str, bool] = {
+    "workitem":      True,
+    "requirements":  True,
+    "test-case":     True,
+    "test-results":  True,
+    "git-commits":   False,
+    "code":          False,
+    "pipeline-build": True,
+    "documentation": True,
+}
+
+
+class PreprocessingConfig(BaseModel):
+    enabled: bool = False
+    base_url: str = ""          # Ollama base URL; defaults to http://localhost:11434/v1
+    model: str = ""
+    system_prompt: str = ""     # empty = built-in summarization prompt
+    source_types: dict[str, bool] = _PREPROCESS_SOURCE_TYPE_DEFAULTS.copy()
+
+
 class AppConfig(BaseModel):
     embedding: EmbeddingConfig = EmbeddingConfig()
     qdrant: QdrantConfig = QdrantConfig()
     chunking: ChunkingConfig = ChunkingConfig()
+    preprocessing: PreprocessingConfig = PreprocessingConfig()
     sources_file_path: str = "conduit-sources.json"
 
 

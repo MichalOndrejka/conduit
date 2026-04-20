@@ -17,6 +17,7 @@ from app.parsing.registry import ParserRegistry
 from app.rag.bootstrap import QdrantHealth, bootstrap_qdrant
 from app.rag.chunker import TextChunker
 from app.rag.embedding import EmbeddingService
+from app.rag.preprocessor import DocumentPreprocessor
 from app.rag.indexer import DocumentIndexer
 from app.rag.search import SearchService
 from app.rag.vector_store import VectorStore
@@ -39,13 +40,14 @@ async def lifespan(app: FastAPI):
     chunker = TextChunker(cfg)
     vector_store = VectorStore(cfg)
     indexer = DocumentIndexer(vector_store, embedding, chunker)
+    preprocessor = DocumentPreprocessor(cfg)
     search_service = SearchService(vector_store, embedding)
     config_store = SourceConfigStore(cfg.sources_file_path)
     progress_store = SyncProgressStore()
     ado_client = AdoClient()
     parser_registry = ParserRegistry()
     source_factory = SourceFactory(ado_client, parser_registry)
-    sync_service = SyncService(config_store, source_factory, indexer, progress_store)
+    sync_service = SyncService(config_store, source_factory, indexer, progress_store, preprocessor)
     health = QdrantHealth()
     memory_service = MemoryService(vector_store, embedding)
 
@@ -57,6 +59,7 @@ async def lifespan(app: FastAPI):
     container.vector_store = vector_store
     container.search_service = search_service
     container.memory_service = memory_service
+    container.preprocessor = preprocessor
 
     register_tools(mcp, search_service, memory_service)
 

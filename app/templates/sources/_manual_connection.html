@@ -1,4 +1,4 @@
-{# Manual input partial — text paste or file upload with drag-and-drop. #}
+﻿{# Manual input partial — text paste or file upload with drag-and-drop. #}
 {% set cfg = source.config %}
 {% set manual_type = cfg.get('ManualType', 'text') %}
 
@@ -17,11 +17,11 @@
 <div id="manual-panel-text" {% if manual_type != 'text' %}class="hidden"{% endif %}>
     <div class="mb-4">
         <label class="field-label">Title <span class="text-slate-600">(optional)</span></label>
-        <input name="ConfigManualTitle" value="{{ cfg.get('Title', '') }}" class="field-input" placeholder="e.g. Architecture Notes" />
+        <input name="ConfigManualTitle" value="{{ cfg.get('Title', '') }}" class="field-input" />
     </div>
     <div class="mb-4">
         <label class="field-label">Content <span class="text-red-400">*</span></label>
-        <textarea name="ConfigManualText" rows="10" class="field-input font-mono text-xs" placeholder="Paste or type your content here…">{{ cfg.get('Content', '') }}</textarea>
+        <textarea name="ConfigManualText" rows="10" class="field-input font-mono text-xs">{{ cfg.get('Content', '') }}</textarea>
     </div>
 </div>
 

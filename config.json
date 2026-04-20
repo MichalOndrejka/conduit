@@ -4,7 +4,9 @@
     "model": "text-embedding-3-small",
     "api_key_env_var": "OPENAI_API_KEY",
     "base_url": "",
-    "dimensions": 1536
+    "dimensions": 1536,
+    "max_input_chars": 8000,
+    "verify_ssl": "true"
   },
   "qdrant": {
     "host": "localhost",
@@ -13,6 +15,12 @@
   "chunking": {
     "max_chunk_size": 2000,
     "overlap": 200
+  },
+  "preprocessing": {
+    "enabled": true,
+    "base_url": "http://localhost:11434/v1",
+    "model": "mistral",
+    "system_prompt": ""
   },
   "sources_file_path": "conduit-sources.json"
 }

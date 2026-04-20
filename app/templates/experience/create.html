@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}Add Experience{% endblock %}
 
 {% block content %}
@@ -19,14 +19,12 @@
         <div class="mb-5">
             <label class="field-label">Situation <span class="text-red-400">*</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Describe the trigger — what kind of task or context should surface this rule</span></span></label>
             <textarea name="situation" rows="3" class="field-input resize-none"
-                placeholder="e.g. writing integration tests that touch the database"
                 required></textarea>
         </div>
 
         <div class="mb-6">
             <label class="field-label">Guidance <span class="text-red-400">*</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">The exact instruction to follow — what to do, avoid, or apply</span></span></label>
             <textarea name="guidance" rows="4" class="field-input resize-none"
-                placeholder="e.g. Never mock the database. Use real DB connections — mocked tests passed but prod migrations failed."
                 required></textarea>
         </div>
 

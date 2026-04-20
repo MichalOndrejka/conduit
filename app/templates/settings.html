@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}Settings{% endblock %}
 
 {% block content %}
@@ -44,6 +44,11 @@
     <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
     Vector store settings saved.
 </div>
+{% elif notice == 'preprocessing_saved' %}
+<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
+    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+    Preprocessing settings saved.
+</div>
 {% endif %}
 
 <!-- MCP Connection -->
@@ -56,7 +61,7 @@
     </h2>
     <p class="text-xs text-slate-500 mb-3">Add this to your MCP client config:</p>
     <div class="relative">
-        <pre id="mcp-config" class="text-xs font-mono text-slate-300 rounded-lg p-4 pr-20 leading-relaxed" style="background:rgba(0,0,0,0.3);border:1px solid var(--border);"></pre>
+        <pre id="mcp-config" class="text-xs font-mono rounded-lg p-4 pr-20 leading-relaxed" style="background:var(--secondary);border:1px solid var(--border);color:var(--fg);"></pre>
         <button type="button" onclick="copyMcpConfig()" id="copy-btn"
                 class="absolute top-3 right-3 btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium">
             <svg id="copy-icon" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -81,36 +86,20 @@
 
             <div class="space-y-4">
                 <div>
-                    <label class="field-label">Provider</label>
-                    <select name="provider" id="embProvider" class="field-input" onchange="updateEmbeddingFields(true)">
-                        <option value="openai" {% if cfg.embedding.provider == 'openai' %}selected{% endif %}>OpenAI</option>
-                        <option value="ollama" {% if cfg.embedding.provider == 'ollama' %}selected{% endif %}>Ollama (local)</option>
-                        <option value="openai-compatible" {% if cfg.embedding.provider == 'openai-compatible' %}selected{% endif %}>OpenAI-compatible API</option>
-                    </select>
+                    <label class="field-label">Ollama Base URL</label>
+                    <input name="base_url" value="{{ cfg.embedding.base_url }}" class="field-input font-mono" />
                 </div>
                 <div>
                     <label class="field-label">Model</label>
-                    <input name="model" value="{{ cfg.embedding.model }}" class="field-input font-mono" placeholder="text-embedding-3-small" />
+                    <input name="model" value="{{ cfg.embedding.model }}" class="field-input font-mono" />
                 </div>
                 <div>
                     <label class="field-label">Dimensions<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Changing this drops all vector collections and marks sources for reindex</span></span></label>
-                    <input name="dimensions" value="{{ cfg.embedding.dimensions }}" type="number" class="field-input" placeholder="1536" />
-                </div>
-                <div id="field-api-key">
-                    <label class="field-label">API Key Env Var<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Name of the environment variable that holds your API key</span></span></label>
-                    <input name="api_key_env_var" value="{{ cfg.embedding.api_key_env_var }}" class="field-input font-mono" placeholder="OPENAI_API_KEY" />
-                </div>
-                <div id="field-base-url" style="display:none">
-                    <label class="field-label">Base URL</label>
-                    <input name="base_url" value="{{ cfg.embedding.base_url }}" class="field-input font-mono" placeholder="http://localhost:11434/v1" />
+                    <input name="dimensions" value="{{ cfg.embedding.dimensions }}" type="number" class="field-input" />
                 </div>
                 <div>
                     <label class="field-label">Max Input Chars<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Hard cap on text sent per embedding call. Protects against token-limit errors on long code. 0 = unlimited.</span></span></label>
-                    <input name="max_input_chars" value="{{ cfg.embedding.max_input_chars }}" type="number" class="field-input" placeholder="8000" />
-                </div>
-                <div>
-                    <label class="field-label">SSL Verification<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">true to verify (default), false to skip (corporate/self-signed certs), or a path to a CA bundle file</span></span></label>
-                    <input name="verify_ssl" value="{{ cfg.embedding.verify_ssl }}" class="field-input font-mono" placeholder="true" />
+                    <input name="max_input_chars" value="{{ cfg.embedding.max_input_chars }}" type="number" class="field-input" />
                 </div>
             </div>
 
@@ -142,11 +131,11 @@
             <div class="space-y-4">
                 <div>
                     <label class="field-label">Host<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">In Docker use the service name, e.g. "qdrant"</span></span></label>
-                    <input name="qdrant_host" value="{{ cfg.qdrant.host }}" class="field-input font-mono" placeholder="localhost" />
+                    <input name="qdrant_host" value="{{ cfg.qdrant.host }}" class="field-input font-mono" />
                 </div>
                 <div>
                     <label class="field-label">Port</label>
-                    <input name="qdrant_port" value="{{ cfg.qdrant.port }}" type="number" class="field-input" placeholder="6333" />
+                    <input name="qdrant_port" value="{{ cfg.qdrant.port }}" type="number" class="field-input" />
                 </div>
             </div>
 
@@ -158,6 +147,84 @@
                     Save
                 </button>
                 <button type="button" onclick="verifyService('qdrant')" class="btn-ghost inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    Verify
+                </button>
+            </div>
+        </div>
+    </form>
+
+    <!-- Preprocessing config -->
+    <form method="post" action="/settings/preprocessing" id="form-preprocessing" class="lg:col-span-2">
+        <div class="card p-5">
+            <div class="flex items-center justify-between mb-1">
+                <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                    <svg class="w-4 h-4 text-violet-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                    </svg>
+                    Document Preprocessing
+                </h2>
+                <label class="preproc-toggle cursor-pointer" title="Enable preprocessing">
+                    <input type="checkbox" name="enabled" id="preprocEnabled" value="on"
+                           {% if cfg.preprocessing.enabled %}checked{% endif %}
+                           onchange="togglePreprocFields()" />
+                    <span class="preproc-track"><span class="preproc-thumb"></span></span>
+                </label>
+            </div>
+            <p class="text-xs text-slate-500 mb-4">Use a local Ollama model to summarize documents before chunking — reduces token usage and improves embedding quality.</p>
+
+            <div id="preproc-fields" {% if not cfg.preprocessing.enabled %}style="display:none"{% endif %}>
+                <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                    <div>
+                        <label class="field-label">Ollama Base URL</label>
+                        <input name="base_url" value="{{ cfg.preprocessing.base_url }}" class="field-input font-mono" />
+                    </div>
+                    <div>
+                        <label class="field-label">Model</label>
+                        <input name="model" value="{{ cfg.preprocessing.model }}" class="field-input font-mono" />
+                    </div>
+                </div>
+                <div class="mt-4">
+                    <label class="field-label">System Prompt<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Leave empty to use the built-in summarization prompt.</span></span></label>
+                    <textarea name="system_prompt" rows="3" class="field-input font-mono resize-y">{{ cfg.preprocessing.system_prompt }}</textarea>
+                </div>
+
+                <!-- Per-source-type toggles -->
+                <div class="mt-5">
+                    <label class="field-label mb-3">Apply to source types</label>
+                    <div class="grid grid-cols-2 gap-x-6 gap-y-2 lg:grid-cols-4">
+                        {% set source_type_labels = [
+                            ("workitem",       "Work Items"),
+                            ("requirements",   "Requirements"),
+                            ("test-case",      "Test Cases"),
+                            ("test-results",   "Test Results"),
+                            ("git-commits",    "Git Commits"),
+                            ("code",           "Source Code"),
+                            ("pipeline-build", "Build Results"),
+                            ("documentation",  "Documentation"),
+                        ] %}
+                        {% for type_key, type_label in source_type_labels %}
+                        {% set field_name = "source_type_" + type_key.replace("-", "_") %}
+                        {% set is_checked = cfg.preprocessing.source_types.get(type_key, true) %}
+                        <label class="flex items-center gap-2 cursor-pointer select-none py-1">
+                            <input type="checkbox" name="{{ field_name }}" value="on"
+                                   {% if is_checked %}checked{% endif %}
+                                   class="w-3.5 h-3.5 rounded accent-violet-500" />
+                            <span class="text-xs text-slate-300">{{ type_label }}</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div id="verify-preprocessing-result" class="hidden mt-3 text-xs px-3 py-2 rounded-md"></div>
+
+            <div class="flex items-center gap-2 mt-5">
+                <button type="submit" class="btn-primary inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
+                    Save
+                </button>
+                <button type="button" onclick="verifyService('preprocessing')" class="btn-ghost inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     Verify
                 </button>
@@ -279,32 +346,12 @@ function copyMcpConfig() {
     });
 }
 
-var PROVIDER_DEFAULTS = {
-    openai:             { model: 'text-embedding-3-small', dimensions: 1536 },
-    ollama:             { model: 'nomic-embed-text-v2-moe', dimensions: 768 },
-    'openai-compatible': { model: '', dimensions: 1536 },
-};
 
-function updateEmbeddingFields(applyDefaults) {
-    var p = document.getElementById('embProvider').value;
-    document.getElementById('field-api-key').style.display  = (p === 'ollama') ? 'none' : '';
-    document.getElementById('field-base-url').style.display = (p !== 'openai') ? '' : 'none';
-    if (applyDefaults && PROVIDER_DEFAULTS[p]) {
-        var d = PROVIDER_DEFAULTS[p];
-        if (d.model) document.querySelector('input[name=model]').value = d.model;
-        if (d.dimensions) document.querySelector('input[name=dimensions]').value = d.dimensions;
-    }
+function togglePreprocFields() {
+    var checked = document.getElementById('preprocEnabled').checked;
+    document.getElementById('preproc-fields').style.display = checked ? '' : 'none';
 }
-updateEmbeddingFields(false);
 
-['form-embedding', 'form-qdrant'].forEach(function(id) {
-    var f = document.getElementById(id);
-    if (f) f.addEventListener('submit', function() {
-        this.querySelectorAll('input[placeholder]').forEach(function(el) {
-            if (el.value.trim() === '') el.value = el.placeholder;
-        });
-    });
-});
 
 function verifyService(service) {
     var form = document.getElementById('form-' + service);

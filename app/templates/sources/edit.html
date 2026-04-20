@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}Edit Source{% endblock %}
 
 {% block content %}
@@ -80,11 +80,11 @@
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Area Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this area path</span></span></label>
-                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" placeholder="MyProject\Team A" />
+                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" />
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Iteration Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this iteration path (sprint)</span></span></label>
-                            <input name="ConfigIterationPath" value="{{ cfg.get('IterationPath', '') }}" class="field-input" placeholder="MyProject\Sprint 1" />
+                            <input name="ConfigIterationPath" value="{{ cfg.get('IterationPath', '') }}" class="field-input" />
                         </div>
                     </div>
                     <div id="wi-panel-custom" class="hidden">
@@ -94,7 +94,7 @@
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
-                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" placeholder="System.Title,System.Description,System.State" />
+                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" />
                         </div>
                     </div>
                 </div>
@@ -148,11 +148,11 @@
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Area Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this area path</span></span></label>
-                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" placeholder="MyProject\Team A" />
+                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" />
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Iteration Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this iteration path (sprint)</span></span></label>
-                            <input name="ConfigIterationPath" value="{{ cfg.get('IterationPath', '') }}" class="field-input" placeholder="MyProject\Sprint 1" />
+                            <input name="ConfigIterationPath" value="{{ cfg.get('IterationPath', '') }}" class="field-input" />
                         </div>
                     </div>
                     <div id="req-panel-custom" {% if req_type != 'custom' %}class="hidden"{% endif %}>
@@ -162,23 +162,23 @@
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
-                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" placeholder="System.Title,System.Description,System.State" />
+                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" />
                         </div>
                     </div>
                     <div id="req-panel-repo" {% if req_type != 'repo' %}class="hidden"{% endif %}>
                         <div class="grid grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label class="field-label">Repository</label>
-                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" placeholder="MyRepo" />
+                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" />
                             </div>
                             <div>
                                 <label class="field-label">Branch <span class="text-slate-600">(optional)</span></label>
-                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" placeholder="main" />
+                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" />
                             </div>
                         </div>
                         <div>
                             <label class="field-label">Glob Patterns<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Comma-separated glob patterns for requirement documents, e.g. docs/**/*.md,specs/**/*.txt</span></span></label>
-                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" placeholder="**/*.md" />
+                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" />
                         </div>
                     </div>
                 </div>
@@ -236,11 +236,11 @@
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Area Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this area path</span></span></label>
-                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" placeholder="MyProject\Team A" />
+                            <input name="ConfigAreaPath" value="{{ cfg.get('AreaPath', '') }}" class="field-input" />
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Iteration Path <span class="text-slate-600">(optional)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Limit results to items under this iteration path (sprint)</span></span></label>
-                            <input name="ConfigIterationPath" value="{{ cfg.get('IterationPath', '') }}" class="field-input" placeholder="MyProject\Sprint 1" />
+                            <input name="ConfigIterationPath" value="{{ cfg.get('IterationPath', '') }}" class="field-input" />
                         </div>
                     </div>
                     <div id="tc-panel-custom" {% if tc_type != 'custom' %}class="hidden"{% endif %}>
@@ -250,23 +250,23 @@
                         </div>
                         <div class="mb-4">
                             <label class="field-label">Fields <span class="text-slate-600">(comma-separated, blank = all)</span></label>
-                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" placeholder="System.Title,System.Description,System.State" />
+                            <input name="ConfigFields" value="{{ cfg.get('Fields', '') }}" class="field-input font-mono text-xs" />
                         </div>
                     </div>
                     <div id="tc-panel-repo" {% if tc_type != 'repo' %}class="hidden"{% endif %}>
                         <div class="grid grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label class="field-label">Repository</label>
-                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" placeholder="MyRepo" />
+                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" />
                             </div>
                             <div>
                                 <label class="field-label">Branch <span class="text-slate-600">(optional)</span></label>
-                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" placeholder="main" />
+                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" />
                             </div>
                         </div>
                         <div>
                             <label class="field-label">Glob Patterns<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Comma-separated glob patterns for BDD/feature spec files, e.g. **/*.feature,tests/**/*.spec</span></span></label>
-                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" placeholder="**/*.md" />
+                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" />
                         </div>
                     </div>
                 </div>
@@ -350,7 +350,7 @@
                     </div>
                     <div class="mb-4">
                         <label class="field-label">Glob Patterns <span class="text-slate-600">(comma-separated)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">** matches any depth, * matches any filename. e.g. **/*.cs,**/*.ts</span></span></label>
-                        <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.cs') }}" class="field-input font-mono" placeholder="**/*.cs,**/*.ts" />
+                        <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.cs') }}" class="field-input font-mono" />
                     </div>
                 </div>
                 {% endif %}
@@ -416,11 +416,11 @@
                         <div class="grid grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label class="field-label">Wiki Name <span class="text-slate-600">(optional)</span></label>
-                                <input name="ConfigWikiName" value="{{ cfg.get('WikiName', '') }}" class="field-input" placeholder="MyProject.wiki" />
+                                <input name="ConfigWikiName" value="{{ cfg.get('WikiName', '') }}" class="field-input" />
                             </div>
                             <div>
                                 <label class="field-label">Path Filter <span class="text-slate-600">(optional)</span></label>
-                                <input name="ConfigPathFilter" value="{{ cfg.get('PathFilter', '') }}" class="field-input" placeholder="/Architecture" />
+                                <input name="ConfigPathFilter" value="{{ cfg.get('PathFilter', '') }}" class="field-input" />
                             </div>
                         </div>
                     </div>
@@ -428,16 +428,16 @@
                         <div class="grid grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label class="field-label">Repository</label>
-                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" placeholder="MyRepo" />
+                                <input name="ConfigRepository" value="{{ cfg.get('Repository', '') }}" class="field-input font-mono" />
                             </div>
                             <div>
                                 <label class="field-label">Branch <span class="text-slate-600">(optional)</span></label>
-                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" placeholder="main" />
+                                <input name="ConfigBranch" value="{{ cfg.get('Branch', '') }}" class="field-input font-mono" />
                             </div>
                         </div>
                         <div>
                             <label class="field-label">Glob Patterns<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Comma-separated glob patterns, e.g. **/*.md,docs/**/*.txt</span></span></label>
-                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" placeholder="**/*.md" />
+                            <input name="ConfigGlobPatterns" value="{{ cfg.get('GlobPatterns', '**/*.md') }}" class="field-input font-mono" />
                         </div>
                     </div>
                 </div>

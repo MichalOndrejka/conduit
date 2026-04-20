@@ -1,8 +1,9 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
     <title>{% block title %}Conduit{% endblock %} — Conduit</title>
     <link rel="icon" href="data:,">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -214,6 +215,64 @@
         .table-row:last-child { border-bottom: none; }
         .table-row:hover { background: hsla(199,89%,48%,0.04); }
 
+        /* ── Light theme ───────────────────────────────────────────────────────── */
+        html[data-theme="light"] {
+            --bg:            hsl(210,40%,98%);
+            --fg:            hsl(222,47%,11%);
+            --card:          hsl(0,0%,100%);
+            --secondary:     hsl(210,40%,93%);
+            --muted-bg:      hsl(210,40%,90%);
+            --muted:         hsl(215,20%,45%);
+            --border:        hsl(214,32%,84%);
+            --elevated:      hsl(210,40%,96%);
+            --overlay:       hsl(210,40%,92%);
+            --primary-muted: hsl(199,89%,90%);
+            --primary-glow:  hsla(199,89%,48%,0.12);
+        }
+        html[data-theme="light"] .border-surface-border { border-color: var(--border); }
+        html[data-theme="light"] aside .text-slate-100 { color: var(--fg); }
+        html[data-theme="light"] aside .text-slate-400 { color: hsl(215,20%,40%); }
+        html[data-theme="light"] .sidebar-link:hover { color: var(--primary-h); }
+        html[data-theme="light"] .sidebar-link.active { color: var(--primary-h); }
+        html[data-theme="light"] .card:hover { border-color: hsl(214,32%,70%); }
+        html[data-theme="light"] .tab-on { color: var(--primary-h); border-bottom-color: var(--card); }
+        html[data-theme="light"] .tip-text { background: #f8fafc; border-color: rgba(100,120,150,0.2); color: #475569; }
+        html[data-theme="light"] ::-webkit-scrollbar-thumb:hover { background: hsl(214,32%,65%); }
+        html[data-theme="light"] .field-input::placeholder { color: hsl(215,20%,60%); }
+
+        /* Slate text classes are near-white in dark mode — invert them for light */
+        html[data-theme="light"] .text-slate-100 { color: hsl(222,47%,11%); }
+        html[data-theme="light"] .text-slate-200 { color: hsl(222,47%,18%); }
+        html[data-theme="light"] .text-slate-300 { color: hsl(222,47%,28%); }
+        html[data-theme="light"] .text-slate-400 { color: hsl(215,20%,40%); }
+        html[data-theme="light"] .hover\:text-slate-300:hover { color: hsl(222,47%,11%); }
+
+        /* ── Toggle switch ─────────────────────────────────────────────────────── */
+        .preproc-toggle input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+        .preproc-track {
+            display: inline-flex;
+            align-items: center;
+            width: 2.5rem;
+            height: 1.375rem;
+            border-radius: 9999px;
+            background: var(--border);
+            transition: background 0.2s;
+            position: relative;
+            flex-shrink: 0;
+        }
+        .preproc-thumb {
+            position: absolute;
+            left: 3px;
+            width: 1rem;
+            height: 1rem;
+            border-radius: 50%;
+            background: #fff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            transition: transform 0.2s;
+        }
+        .preproc-toggle input:checked + .preproc-track { background: var(--gradient); }
+        .preproc-toggle input:checked + .preproc-track .preproc-thumb { transform: translateX(1.125rem); }
+
         /* ── Divider ───────────────────────────────────────────────────────────── */
         .divider { border-color: var(--border); }
 
@@ -349,6 +408,19 @@
         </div>
     </nav>
 
+    <!-- Theme toggle -->
+    <div class="px-3 py-3 border-t border-surface-border">
+        <button id="theme-toggle" onclick="toggleTheme()" class="btn-ghost flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs font-medium">
+            <svg id="theme-icon-sun" class="w-4 h-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+            </svg>
+            <svg id="theme-icon-moon" class="w-4 h-4 hidden" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+            </svg>
+            <span id="theme-label"></span>
+        </button>
+    </div>
+
 </aside>
 
 <!-- Main -->
@@ -390,6 +462,31 @@
 </script>
 {% endif %}
 <script>
+// Theme toggle
+function toggleTheme() {
+    var next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+    _updateThemeUI(next);
+    document.dispatchEvent(new CustomEvent('themechange', { detail: { theme: next } }));
+}
+function _updateThemeUI(theme) {
+    var sun = document.getElementById('theme-icon-sun');
+    var moon = document.getElementById('theme-icon-moon');
+    var label = document.getElementById('theme-label');
+    if (!sun) return;
+    if (theme === 'light') {
+        sun.classList.remove('hidden');
+        moon.classList.add('hidden');
+        label.textContent = 'Dark mode';
+    } else {
+        sun.classList.add('hidden');
+        moon.classList.remove('hidden');
+        label.textContent = 'Light mode';
+    }
+}
+_updateThemeUI(document.documentElement.getAttribute('data-theme') || 'dark');
+
 // Disable submit buttons on form submit to prevent double-submission.
 // Excludes forms that opt-out with data-no-loading or that use AJAX (Preview button).
 document.addEventListener('submit', function(e) {
