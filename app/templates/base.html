@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t);})();</script>
+    <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t);if(sessionStorage.getItem('scrollY'))document.documentElement.style.setProperty('--main-opacity','0');})();</script>
     <title>{% block title %}Conduit{% endblock %} — Conduit</title>
     <link rel="icon" href="data:,">
     <script src="https://cdn.tailwindcss.com"></script>
@@ -273,6 +273,48 @@
         .preproc-toggle input:checked + .preproc-track { background: var(--gradient); }
         .preproc-toggle input:checked + .preproc-track .preproc-thumb { transform: translateX(1.125rem); }
 
+        /* ── Custom checkbox ──────────────────────────────────────────────────── */
+        .chk { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; flex-shrink: 0; }
+        .chk input[type=checkbox] { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+        .chk-box {
+            width: 1rem; height: 1rem;
+            border-radius: 4px;
+            border: 1px solid var(--border);
+            background: var(--bg);
+            display: flex; align-items: center; justify-content: center;
+            transition: border-color 0.15s, background 0.15s;
+            pointer-events: none;
+        }
+        .chk-box svg { opacity: 0; transition: opacity 0.1s; }
+        .chk input:checked + .chk-box { background: var(--gradient); border-color: transparent; }
+        .chk input:checked + .chk-box svg { opacity: 1; }
+        .chk:hover input:not(:disabled) + .chk-box { border-color: var(--primary); }
+        .chk input:focus-visible + .chk-box { box-shadow: 0 0 0 3px var(--primary-glow); }
+
+        #main-scroll { opacity: var(--main-opacity, 1); }
+
+        /* ── Toast notifications ─────────────────────────────────────────────── */
+        #toast-container { position: fixed; top: 1.25rem; right: 1.25rem; z-index: 200; display: flex; flex-direction: column; gap: 0.625rem; pointer-events: none; }
+        .toast {
+            display: flex; align-items: flex-start; gap: 0.75rem;
+            padding: 1rem 1.25rem;
+            border-radius: var(--radius);
+            border: 1px solid;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            line-height: 1.4;
+            background: var(--card);
+            box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+            pointer-events: all;
+            min-width: 18rem;
+            max-width: 26rem;
+            animation: toast-in 0.22s ease;
+        }
+        .toast svg { width: 1.125rem; height: 1.125rem; flex-shrink: 0; margin-top: 1px; }
+        .toast-success { border-color: rgba(16,185,129,0.4); color: #34d399; }
+        .toast-warn    { border-color: rgba(245,158,11,0.4);  color: #fbbf24; }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(-0.4rem); } to { opacity: 1; transform: none; } }
+
         /* ── Divider ───────────────────────────────────────────────────────────── */
         .divider { border-color: var(--border); }
 
@@ -424,7 +466,7 @@
 </aside>
 
 <!-- Main -->
-<div class="flex-1 overflow-auto flex flex-col">
+<div id="main-scroll" class="flex-1 overflow-auto flex flex-col">
     {% if not qdrant_ready %}
     <div id="qdrant-warning" class="flex items-start gap-3 px-6 py-3 text-sm" style="background: rgba(245,158,11,0.12); border-bottom: 1px solid rgba(245,158,11,0.3); color: #f59e0b;">
         <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -442,6 +484,25 @@
     </main>
 </div>
 
+<div id="toast-container"></div>
+<script>
+function showToast(message, type) {
+    type = type || 'success';
+    var icon = type === 'success'
+        ? '<svg class="w-4 h-4 flex-shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>'
+        : '<svg class="w-4 h-4 flex-shrink-0 mt-px" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.96L13.75 4a2 2 0 00-3.5 0L3.25 16.04A2 2 0 005.07 19z"/></svg>';
+    var t = document.createElement('div');
+    t.className = 'toast toast-' + type;
+    t.innerHTML = icon + '<span>' + message + '</span>';
+    document.getElementById('toast-container').appendChild(t);
+    setTimeout(function() {
+        t.style.transition = 'opacity 0.25s, transform 0.25s';
+        t.style.opacity = '0';
+        t.style.transform = 'translateY(0.4rem)';
+        setTimeout(function() { t.remove(); }, 260);
+    }, 4000);
+}
+</script>
 {% block scripts %}{% endblock %}
 {% if not qdrant_ready %}
 <script>
@@ -487,6 +548,21 @@ function _updateThemeUI(theme) {
 }
 _updateThemeUI(document.documentElement.getAttribute('data-theme') || 'dark');
 
+// Preserve scroll position across form POST reloads.
+(function () {
+    var scroller = document.getElementById('main-scroll');
+    var saved = sessionStorage.getItem('scrollY');
+    if (saved && scroller) {
+        scroller.scrollTop = parseInt(saved, 10);
+        sessionStorage.removeItem('scrollY');
+    }
+    document.documentElement.style.removeProperty('--main-opacity');
+    document.addEventListener('submit', function (e) {
+        if (e.target.dataset.noLoading) return;
+        if (scroller) sessionStorage.setItem('scrollY', scroller.scrollTop);
+    }, true);
+})();
+
 // Disable submit buttons on form submit to prevent double-submission.
 // Excludes forms that opt-out with data-no-loading or that use AJAX (Preview button).
 document.addEventListener('submit', function(e) {
@@ -495,7 +571,6 @@ document.addEventListener('submit', function(e) {
     var btn = form.querySelector('button[type=submit]');
     if (!btn) return;
     btn.disabled = true;
-    // Replace inner content with spinner + label
     var label = btn.innerText.trim();
     btn.innerHTML =
         '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">' +

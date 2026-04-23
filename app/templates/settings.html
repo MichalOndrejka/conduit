@@ -7,49 +7,6 @@
     <p class="text-xs text-slate-500 mt-0.5">Configure embedding model and vector store connection</p>
 </div>
 
-{% if notice == 'sources_deleted' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    All sources and their indexed data have been deleted.
-</div>
-{% elif notice == 'experiences_deleted' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    All experiences have been deleted.
-</div>
-{% elif notice == 'source_embeddings_cleaned' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.96L13.75 4a2 2 0 00-3.5 0L3.25 16.04A2 2 0 005.07 19z"/></svg>
-    Source embeddings cleared. All sources are marked for re-sync.
-</div>
-{% elif notice == 'experience_embeddings_cleaned' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    Experience embeddings cleared.
-</div>
-{% endif %}
-
-{% if notice == 'embedding_saved' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    Embedding settings saved.
-</div>
-{% elif notice == 'embedding_saved_dropped' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19H19a2 2 0 001.75-2.96L13.75 4a2 2 0 00-3.5 0L3.25 16.04A2 2 0 005.07 19z"/></svg>
-    Embedding settings saved. Model changed — all collections dropped and sources marked for re-sync.
-</div>
-{% elif notice == 'qdrant_saved' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    Vector store settings saved.
-</div>
-{% elif notice == 'preprocessing_saved' %}
-<div class="mb-5 flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm" style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.3);color:#34d399;">
-    <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-    Preprocessing settings saved.
-</div>
-{% endif %}
 
 <!-- MCP Connection -->
 <div class="card p-5 mb-5">
@@ -207,9 +164,15 @@
                         {% set field_name = "source_type_" + type_key.replace("-", "_") %}
                         {% set is_checked = cfg.preprocessing.source_types.get(type_key, true) %}
                         <label class="flex items-center gap-2 cursor-pointer select-none py-1">
-                            <input type="checkbox" name="{{ field_name }}" value="on"
-                                   {% if is_checked %}checked{% endif %}
-                                   class="w-3.5 h-3.5 rounded accent-violet-500" />
+                            <span class="chk">
+                                <input type="checkbox" name="{{ field_name }}" value="on"
+                                       {% if is_checked %}checked{% endif %} />
+                                <span class="chk-box">
+                                    <svg class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                </span>
+                            </span>
                             <span class="text-xs text-slate-300">{{ type_label }}</span>
                         </label>
                         {% endfor %}
@@ -224,7 +187,9 @@
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                     Save
                 </button>
-                <button type="button" onclick="verifyService('preprocessing')" class="btn-ghost inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                <button id="preproc-verify-btn" type="button" onclick="verifyService('preprocessing')"
+                        class="btn-ghost inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium"
+                        {% if not cfg.preprocessing.enabled %}style="display:none"{% endif %}>
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     Verify
                 </button>
@@ -325,6 +290,25 @@
 
 {% block scripts %}
 <script>
+{% if notice == 'embedding_saved' %}
+showToast('Embedding settings saved.');
+{% elif notice == 'embedding_saved_dropped' %}
+showToast('Embedding settings saved. Model changed — all collections dropped and sources marked for re-sync.', 'warn');
+{% elif notice == 'qdrant_saved' %}
+showToast('Vector store settings saved.');
+{% elif notice == 'preprocessing_saved' %}
+showToast('Preprocessing settings saved.');
+{% elif notice == 'sources_deleted' %}
+showToast('All sources and their indexed data have been deleted.');
+{% elif notice == 'experiences_deleted' %}
+showToast('All experiences have been deleted.');
+{% elif notice == 'source_embeddings_cleaned' %}
+showToast('Source embeddings cleared. All sources are marked for re-sync.', 'warn');
+{% elif notice == 'experience_embeddings_cleaned' %}
+showToast('Experience embeddings cleared.');
+{% endif %}
+{% if notice %}history.replaceState(null, '', window.location.pathname);{% endif %}
+
 var mcpConfig = {
     servers: {
         conduit: {
@@ -350,6 +334,11 @@ function copyMcpConfig() {
 function togglePreprocFields() {
     var checked = document.getElementById('preprocEnabled').checked;
     document.getElementById('preproc-fields').style.display = checked ? '' : 'none';
+    document.getElementById('preproc-verify-btn').style.display = checked ? '' : 'none';
+    if (!checked) {
+        var r = document.getElementById('verify-preprocessing-result');
+        r.className = 'hidden mt-3 text-xs px-3 py-2 rounded-md';
+    }
 }
 
 
