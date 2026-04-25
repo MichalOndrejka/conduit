@@ -14,6 +14,7 @@ class CollectionNames:
     WORK_ITEMS       = "conduit_workitems"
     REQUIREMENTS     = "conduit_requirements"
     CODE             = "conduit_code"
+    TEST_CODE        = "conduit_testcode"
     BUILDS           = "conduit_builds"
     TEST_CASES       = "conduit_testcases"
     DOCUMENTATION    = "conduit_documentation"
@@ -22,7 +23,7 @@ class CollectionNames:
     EXPERIENCE       = "conduit_experience"
 
     ALL: list[str] = [
-        WORK_ITEMS, REQUIREMENTS, CODE, BUILDS,
+        WORK_ITEMS, REQUIREMENTS, CODE, TEST_CODE, BUILDS,
         TEST_CASES, DOCUMENTATION, TEST_RESULTS, COMMITS,
         EXPERIENCE,
     ]
@@ -35,6 +36,7 @@ class SourceTypes:
     REQUIREMENTS    = "requirements"
     TEST_CASE       = "test-case"
     CODE_REPO       = "code"
+    TEST_CODE_REPO  = "testcode"
     PIPELINE_BUILD  = "pipeline-build"
     DOCUMENTATION   = "documentation"
     TEST_RESULTS    = "test-results"

@@ -31,6 +31,7 @@ _PREPROCESS_SOURCE_TYPE_DEFAULTS: dict[str, bool] = {
     "test-results":  True,
     "git-commits":   False,
     "code":          False,
+    "testcode":      False,
     "pipeline-build": True,
     "documentation": True,
 }

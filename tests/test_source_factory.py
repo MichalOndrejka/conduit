@@ -72,6 +72,11 @@ def test_create_code_repo_returns_ado_code_repo_source():
     assert isinstance(_factory().create(src), AdoCodeRepoSource)
 
 
+def test_create_test_code_repo_returns_ado_code_repo_source():
+    src = _source(SourceTypes.TEST_CODE_REPO)
+    assert isinstance(_factory().create(src), AdoCodeRepoSource)
+
+
 def test_create_unknown_type_raises_value_error():
     src = _source("totally-unknown-type")
     with pytest.raises(ValueError, match="Unknown source type"):
@@ -87,6 +92,7 @@ def test_create_unknown_type_raises_value_error():
     (SourceTypes.TEST_RESULTS,    CollectionNames.TEST_RESULTS),
     (SourceTypes.GIT_COMMITS,     CollectionNames.COMMITS),
     (SourceTypes.CODE_REPO,       CollectionNames.CODE),
+    (SourceTypes.TEST_CODE_REPO,  CollectionNames.TEST_CODE),
     (SourceTypes.PIPELINE_BUILD,  CollectionNames.BUILDS),
     (SourceTypes.DOCUMENTATION,   CollectionNames.DOCUMENTATION),
 ])

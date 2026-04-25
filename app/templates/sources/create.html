@@ -70,7 +70,7 @@
             <div id="ado-provider-content">
 
                 {# ── ADO connection (shared by all ADO sources) ── #}
-                {% if selected_type in ("workitem", "requirements", "test-case", "code", "pipeline-build", "documentation", "test-results", "git-commits") %}
+                {% if selected_type in ("workitem", "requirements", "test-case", "code", "testcode", "pipeline-build", "documentation", "test-results", "git-commits") %}
                 <div id="ado-connection-block">
                 {% include "sources/_ado_connection.html" %}
                 </div>
@@ -372,6 +372,29 @@
                     <div class="mb-4">
                         <label class="field-label">Glob Patterns <span class="text-slate-600">(comma-separated)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">** matches any depth, * matches any filename. e.g. **/*.cs,**/*.ts</span></span></label>
                         <input name="ConfigGlobPatterns" value="**/*.cs" class="field-input font-mono" />
+                    </div>
+                </div>
+                {% endif %}
+
+                {# ── ADO test code repo ── #}
+                {% if selected_type == "testcode" %}
+                <div class="flex items-end gap-0.5 border-b border-[var(--border)] mt-5">
+                    <button type="button" class="tab-on">Filters</button>
+                </div>
+                <div class="border-x border-b border-[var(--border)] rounded-b-lg rounded-tr-lg p-4">
+                    <div class="grid grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="field-label">Repository <span class="text-red-400">*</span></label>
+                            <input name="ConfigRepository" class="field-input" required />
+                        </div>
+                        <div>
+                            <label class="field-label">Branch</label>
+                            <input name="ConfigBranch" value="Main" class="field-input" />
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="field-label">Glob Patterns <span class="text-slate-600">(comma-separated)</span><span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">** matches any depth, * matches any filename. e.g. **/*Tests.cs,**/*.spec.ts</span></span></label>
+                        <input name="ConfigGlobPatterns" value="**/*Tests.cs,**/*Spec.cs,**/*test*.py,**/*.spec.ts,**/*.test.ts" class="field-input font-mono" />
                     </div>
                 </div>
                 {% endif %}

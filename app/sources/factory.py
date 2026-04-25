@@ -52,6 +52,7 @@ SOURCE_TYPE_META: list[SourceTypeMeta] = [
     SourceTypeMeta(SourceTypes.TEST_RESULTS,    "Test Results",   "Runtime test execution results — pass/fail outcomes, error messages and stack traces.", "ado"),
     SourceTypeMeta(SourceTypes.GIT_COMMITS,     "Git Commits",    "Commit history with messages, authors and change counts.", "ado"),
     SourceTypeMeta(SourceTypes.CODE_REPO,       "Source Code",    "Source files from a git repository, filtered by glob patterns.", "ado"),
+    SourceTypeMeta(SourceTypes.TEST_CODE_REPO,  "Test Code",      "Test files from a git repository — unit tests, integration tests and specs.", "ado"),
     SourceTypeMeta(SourceTypes.DOCUMENTATION,   "Documentation",  "Wiki pages, repo markdown files and uploaded documents.", "ado"),
     SourceTypeMeta(SourceTypes.PIPELINE_BUILD,  "Build Results",  "Recent CI/CD build logs and failure details for a pipeline.", "ado"),
 ]
@@ -68,6 +69,7 @@ def collection_for(source: SourceDefinition) -> str:
         SourceTypes.TEST_RESULTS:    CollectionNames.TEST_RESULTS,
         SourceTypes.GIT_COMMITS:     CollectionNames.COMMITS,
         SourceTypes.CODE_REPO:       CollectionNames.CODE,
+        SourceTypes.TEST_CODE_REPO:  CollectionNames.TEST_CODE,
         SourceTypes.PIPELINE_BUILD:  CollectionNames.BUILDS,
         SourceTypes.DOCUMENTATION:   CollectionNames.DOCUMENTATION,
     }.get(source.type, CollectionNames.DOCUMENTATION)
@@ -99,6 +101,8 @@ class SourceFactory:
                 return AdoRepoDocSource(source, self._ado, self._registry)
             return AdoTestCaseSource(source, self._ado)
         if t == SourceTypes.CODE_REPO:
+            return AdoCodeRepoSource(source, self._ado, self._registry)
+        if t == SourceTypes.TEST_CODE_REPO:
             return AdoCodeRepoSource(source, self._ado, self._registry)
         if t == SourceTypes.PIPELINE_BUILD:
             build_type = source.get_config(ConfigKeys.BUILD_TYPE, "build")

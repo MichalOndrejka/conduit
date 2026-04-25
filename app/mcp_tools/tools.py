@@ -39,9 +39,15 @@ def register_tools(mcp: FastMCP, search_service, memory_service) -> None:
     )
     _make_search_tool(
         CollectionNames.CODE,
-        "search_code",
-        "Semantic search over source code (classes, methods, functions). "
-        "Finds relevant code units for the given query.",
+        "search_source_code",
+        "Semantic search over production source code (classes, methods, functions). "
+        "Does not include test files — use search_test_code for tests.",
+    )
+    _make_search_tool(
+        CollectionNames.TEST_CODE,
+        "search_test_code",
+        "Semantic search over test code — unit tests, integration tests and specs. "
+        "Use this to find test coverage, test patterns, or examples of how code is tested.",
     )
     _make_search_tool(
         CollectionNames.BUILDS,

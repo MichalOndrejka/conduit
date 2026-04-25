@@ -833,21 +833,21 @@ def test_extract_matched_preserves_subdir_in_flat_zip():
         "hello.py": "print('hi')",
         "doc/requirements.md": "# Requirements",
     })
-    result = _extract_matched(zip_bytes, ["**/*"])
+    result, _, _ = _extract_matched(zip_bytes, ["**/*"])
     assert "/doc/requirements.md" in result
     assert "/requirements.md" not in result
 
 
 def test_extract_matched_root_files_correct_in_flat_zip():
     zip_bytes = _make_flat_zip({"README.md": "readme", "doc/spec.md": "spec"})
-    result = _extract_matched(zip_bytes, ["**/*"])
+    result, _, _ = _extract_matched(zip_bytes, ["**/*"])
     assert "/README.md" in result
     assert "/doc/spec.md" in result
 
 
 def test_extract_matched_strips_root_folder_from_ado_zip():
     zip_bytes = _make_zip({"/README.md": "readme", "/doc/spec.md": "spec"})
-    result = _extract_matched(zip_bytes, ["**/*"])
+    result, _, _ = _extract_matched(zip_bytes, ["**/*"])
     assert "/README.md" in result
     assert "/doc/spec.md" in result
     # The root folder component must not appear in the key
@@ -860,7 +860,7 @@ def test_extract_matched_glob_filter_respects_subdir_path():
         "doc/requirements.md": "# Reqs",
         "src/main.py": "code",
     })
-    result = _extract_matched(zip_bytes, ["**/*.py"])
+    result, _, _ = _extract_matched(zip_bytes, ["**/*.py"])
     assert "/src/main.py" in result
     assert "/doc/requirements.md" not in result
     assert "/README.md" not in result

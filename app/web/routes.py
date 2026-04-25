@@ -1035,6 +1035,11 @@ def _build_source_from_form(form) -> SourceDefinition:
         _set(ConfigKeys.BRANCH, "ConfigBranch")
         _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*.cs")
 
+    if source_type == SourceTypes.TEST_CODE_REPO:
+        _set(ConfigKeys.REPOSITORY, "ConfigRepository")
+        _set(ConfigKeys.BRANCH, "ConfigBranch")
+        _set(ConfigKeys.GLOB_PATTERNS, "ConfigGlobPatterns", default="**/*Tests.cs,**/*Spec.cs,**/*test*.py,**/*.spec.ts,**/*.test.ts")
+
     if source_type == SourceTypes.PIPELINE_BUILD:
         _set(ConfigKeys.BUILD_TYPE, "ConfigBuildType", default="build")
         build_type = config.get(ConfigKeys.BUILD_TYPE, "build")
