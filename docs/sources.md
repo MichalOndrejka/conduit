@@ -210,6 +210,26 @@ Document shape:
 
 ---
 
+### Test Code (`testcode`)
+
+Fetches test files from a git repository and parses them into code units (test classes, test methods, spec functions). Uses the same language-aware parsers as Source Code but indexes into `conduit_testcode` so production and test code are searched separately.
+
+| Config key | Description | Default |
+|-----------|-------------|---------|
+| `Repository` | Repository name. | — |
+| `Branch` | Branch to fetch from. | — |
+| `GlobPatterns` | Comma-separated glob patterns, e.g. `**/*.Tests/**/*.cs, **/*.spec.ts`. | `**/*.cs` |
+
+Supported languages: C#, TypeScript, Go, PowerShell, Markdown. Unrecognised file types are indexed as plain text.
+
+Document shape:
+- ID: `{source_id}_{file_path}_{slug}` where slug is derived from the code unit name
+- Text is the `enriched_text` format: namespace, kind, signature, language, file path, docs, then full source
+- Tags: `language`, `kind`
+- Properties: `title` (unit name), `file_path`, `repository`
+
+---
+
 ### Documentation (`documentation`)
 
 Fetches documentation from multiple sources. Supports three sub-cards.

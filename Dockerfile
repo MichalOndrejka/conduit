@@ -13,7 +13,6 @@ RUN uv pip install --system --no-cache .
 
 # Now copy the real application code (overwrites stub)
 COPY app/ ./app/
-COPY config.json .
 
 # Sources file is stored in the named volume at /data
 VOLUME ["/data"]

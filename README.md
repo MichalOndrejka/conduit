@@ -1,6 +1,21 @@
 # Conduit
 
-A RAG + MCP server that gives Claude semantic search over your Azure DevOps data, custom API endpoints, and uploaded documents — plus a persistent **Experience** store so Claude can remember facts, preferences, and past decisions across sessions.
+![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![Docker](https://img.shields.io/badge/docker-michalondrejka%2Fconduit-blue?logo=docker)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+A **RAG + MCP server** that gives Claude semantic search over your Azure DevOps data, custom APIs, and uploaded documents — plus a persistent **Experience** store so Claude can remember facts, preferences, and past decisions across sessions.
+
+## Features
+
+- **9 MCP search tools** covering work items, requirements, source code, test code, test cases, test results, builds, commits, and documentation
+- **Language-aware code parsing** for C#, TypeScript, Go, PowerShell, and Markdown
+- **Local embeddings via Ollama** — no API keys or external services required
+- **Persistent memory** across sessions via the Experience store
+- **Web UI** for managing sources, triggering syncs, and configuring settings
+- **Transactional indexing** — failed syncs leave existing data intact
+- **Azure DevOps support** with PAT, bearer, NTLM, Kerberos, and API-key auth — cloud and on-premise TFS/VSTS
+- **Custom API and manual upload** providers for any data source
 
 ## How it works
 
@@ -27,13 +42,13 @@ Claude
 
 | Tool | What it searches |
 |------|-----------------|
-| `search_documents` | Manually uploaded documents and pasted text |
 | `search_workitems` | Work items — bugs, user stories, tasks, features |
-| `search_code` | Source code (classes, methods, functions) |
+| `search_requirements` | Requirements — features, user stories, epics |
+| `search_source_code` | Production source code (classes, methods, functions) |
+| `search_test_code` | Test code — unit tests, integration tests, specs |
 | `search_builds` | Pipeline build results and failure details |
 | `search_testcases` | Test cases including test steps |
-| `search_documentation` | Wiki pages and documentation sections |
-| `search_pullrequests` | Pull requests — titles, descriptions, reviewers |
+| `search_documentation` | Wiki pages, repo docs, and uploaded documents |
 | `search_test_results` | Test execution results — outcomes and error messages |
 | `search_commits` | Git commit history — messages, authors, change summaries |
 | `retrieve_experience` | Recall relevant past experience. **Call at the start of every task.** |
@@ -53,28 +68,29 @@ Each source type maps to a Qdrant collection. Within any source type you can cho
 
 | Source Type | Collection | Azure DevOps data |
 |-------------|------------|-------------------|
-| Work Items | `search_workitems` | Bugs, tasks, user stories, features — filtered by type or custom WIQL |
-| Test Cases | `search_testcases` | Test case definitions with steps and automation status |
-| Test Results | `search_test_results` | Runtime test outcomes, error messages, stack traces |
-| Pull Requests | `search_pullrequests` | PR titles, descriptions, reviewers, branch context |
-| Git Commits | `search_commits` | Commit messages, authors, change counts |
-| Source Code | `search_code` | Source files filtered by glob pattern |
-| Documentation | `search_documentation` | Wiki pages with optional path filter; or file upload |
-| Build Results | `search_builds` | Recent CI/CD builds and failed task details |
+| Work Items | `conduit_workitems` | Bugs, tasks, user stories, features — filtered by type or custom WIQL |
+| Requirements | `conduit_requirements` | Features, epics, user stories — filtered by type or custom WIQL |
+| Test Cases | `conduit_testcases` | Test case definitions with steps and automation status |
+| Test Results | `conduit_testresults` | Runtime test outcomes, error messages, stack traces |
+| Git Commits | `conduit_commits` | Commit messages, authors, change counts |
+| Source Code | `conduit_code` | Source files filtered by glob pattern |
+| Test Code | `conduit_testcode` | Test files — unit tests, integration tests, specs |
+| Documentation | `conduit_documentation` | Wiki pages with optional path filter; or file upload |
+| Build Results | `conduit_builds` | Recent CI/CD builds and failed task details |
 
 ## Prerequisites
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (package manager)
 - [Docker](https://docs.docker.com/get-docker/) (for Qdrant)
-- OpenAI API key **or** a local Ollama instance (for embeddings)
+- [Ollama](https://ollama.ai) (for embeddings)
 
 ## Quick start
 
 ### 1. Clone and install
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/MichalOndrejka/conduit.git
 cd conduit
 uv sync
 ```
@@ -85,25 +101,13 @@ uv sync
 docker-compose up -d qdrant
 ```
 
-### 3. Configure embeddings
+### 3. Pull an embedding model
 
-Edit `config.json` (auto-created on first run) or use the **Settings** page in the web UI.
-
-**OpenAI:**
 ```bash
-export OPENAI_API_KEY="sk-..."
-```
-```json
-{ "embedding": { "provider": "openai", "model": "text-embedding-3-small", "api_key_env_var": "OPENAI_API_KEY", "dimensions": 1536 } }
+ollama pull nomic-embed-text-v2-moe
 ```
 
-**Ollama (default):**
-```bash
-# No API key needed — just run Ollama locally
-```
-```json
-{ "embedding": { "provider": "ollama", "model": "nomic-embed-text-v2-moe", "base_url": "http://localhost:11434/v1", "dimensions": 768 } }
-```
+The default config points to `http://localhost:11434/v1` with this model. Change the model via the **Settings** page or by editing `config.json`.
 
 ### 4. Run Conduit
 
@@ -134,12 +138,46 @@ Open `http://localhost:5000`, click **Add Source**, choose a type, select the ba
 
 **VS Code** — `.vscode/mcp.json` is already included in the repo.
 
-## Docker Compose (full stack)
+## Docker (run without cloning)
 
-Run Qdrant and Conduit together:
+Pull and run the pre-built image from Docker Hub — no Python or uv required:
 
 ```bash
-OPENAI_API_KEY=sk-... docker-compose up
+docker pull michalondrejka/conduit:latest
+```
+
+Start Qdrant and Conduit together using the provided compose file:
+
+```bash
+docker-compose -f docker-compose.hub.yml up
+```
+
+Ollama must be running on the host with an embedding model pulled (`ollama pull nomic-embed-text-v2-moe`).
+
+The web UI will be available at `http://localhost:8000`. Configure embeddings and add sources via the Settings page.
+
+> **Credentials** — pass ADO tokens, API keys, and other secrets as environment variables. The config UI lets you reference them by name so they are never stored in the config file.
+
+### Build & push (maintainers)
+
+```bash
+# Build
+docker build -t michalondrejka/conduit:latest .
+
+# Push
+docker push michalondrejka/conduit:latest
+
+# Versioned release
+docker tag michalondrejka/conduit:latest michalondrejka/conduit:v0.1.0
+docker push michalondrejka/conduit:v0.1.0
+```
+
+## Full stack (Docker Compose)
+
+Run Qdrant and Conduit together from source:
+
+```bash
+docker-compose up
 ```
 
 ## Configuration reference
@@ -149,10 +187,8 @@ OPENAI_API_KEY=sk-... docker-compose up
 ```json
 {
   "embedding": {
-    "provider": "ollama",
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
-    "api_key_env_var": "",
     "dimensions": 768,
     "max_input_chars": 8000
   },
@@ -174,7 +210,6 @@ All settings are editable via the **Settings** page. Changing `dimensions` or em
 
 | Variable | Purpose |
 |----------|---------|
-| `OPENAI_API_KEY` | Example embedding key (referenced by name in config) |
 | `QDRANT_HOST` | Override Qdrant host (default: `localhost`) |
 | `QDRANT_PORT` | Override Qdrant port (default: `6333`) |
 | `CONDUIT_CONFIG` | Path to `config.json` (default: `config.json` in CWD) |
@@ -200,10 +235,9 @@ app/
   container.py   # Dependency wiring
   main.py        # App entry point (FastAPI + FastMCP + lifespan)
   models.py      # Shared domain models
-tests/           # pytest test suite (227 tests)
-config.json      # Runtime config (embedding, Qdrant, chunking)
-conduit-sources.json  # Persisted source definitions
-docker-compose.yml
+tests/                  # pytest test suite
+docker-compose.yml      # Full stack (Qdrant + Conduit built from source)
+docker-compose.hub.yml  # Full stack (Qdrant + Conduit from Docker Hub)
 Dockerfile
 pyproject.toml
 ```
@@ -219,11 +253,19 @@ Indexing runs in two phases to prevent partial writes:
 
 ```bash
 uv sync
-uv run pytest          # all 227 tests
+uv run pytest          # all tests
 uv run pytest -v       # verbose
 uv run pytest -x       # stop on first failure
 uv run pytest -k "ado" # filter by keyword
 ```
+
+## Contributing
+
+Contributions are welcome. Please open an issue to discuss a feature or bug before submitting a pull request.
+
+## License
+
+MIT
 
 ## Further reading
 

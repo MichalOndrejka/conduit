@@ -7,10 +7,8 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
 ```json
 {
   "embedding": {
-    "provider": "ollama",
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
-    "api_key_env_var": "",
     "dimensions": 768,
     "max_input_chars": 8000
   },
@@ -30,31 +28,27 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
 
 ## Embedding
 
-### `provider`
-
-| Value | Description |
-|-------|-------------|
-| `ollama` | Local Ollama instance (default). No API key needed. |
-| `openai` | OpenAI embeddings API. |
-| `openai-compatible` | Any endpoint that speaks the OpenAI embeddings API format. |
+Conduit uses [Ollama](https://ollama.ai) for local, private embeddings. The embedding client speaks the OpenAI embeddings API format, so any Ollama-compatible endpoint works.
 
 ### `model`
 
-Model identifier string. Must match what the provider expects.
+Ollama model identifier. Must match the model name as reported by `ollama list`.
 
-| Provider | Recommended model | Dimensions |
-|----------|------------------|------------|
-| `ollama` | `nomic-embed-text-v2-moe` | `768` |
-| `openai` | `text-embedding-3-small` | `1536` |
-| `openai-compatible` | Provider-specific | Provider-specific |
+| Recommended model | Dimensions |
+|------------------|------------|
+| `nomic-embed-text-v2-moe` | `768` |
 
-### `api_key_env_var`
+Pull the model before starting Conduit:
 
-Name of the environment variable holding the API key. Leave empty for Ollama. For OpenAI, set to `OPENAI_API_KEY` and export that variable.
+```bash
+ollama pull nomic-embed-text-v2-moe
+```
 
 ### `base_url`
 
-Base URL for the embeddings endpoint. Required for Ollama and `openai-compatible` providers. Leave empty for the standard OpenAI endpoint.
+Base URL for the Ollama embeddings endpoint. Default: `http://localhost:11434/v1`.
+
+Change this if Ollama is running on a different host or port.
 
 ### `dimensions`
 
@@ -104,81 +98,6 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 
 ---
 
-## Embedding providers
-
-### Ollama (default)
-
-Run Ollama locally and pull a model:
-
-```bash
-ollama pull nomic-embed-text-v2-moe
-```
-
-Config:
-```json
-{
-  "embedding": {
-    "provider": "ollama",
-    "model": "nomic-embed-text-v2-moe",
-    "base_url": "http://localhost:11434/v1",
-    "dimensions": 768
-  }
-}
-```
-
-### OpenAI
-
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-Config:
-```json
-{
-  "embedding": {
-    "provider": "openai",
-    "model": "text-embedding-3-small",
-    "api_key_env_var": "OPENAI_API_KEY",
-    "dimensions": 1536
-  }
-}
-```
-
-### Azure OpenAI
-
-```bash
-export AZURE_OPENAI_KEY="..."
-```
-
-Config:
-```json
-{
-  "embedding": {
-    "provider": "openai-compatible",
-    "model": "text-embedding-3-small",
-    "base_url": "https://<resource>.openai.azure.com/openai/deployments/<deployment>",
-    "api_key_env_var": "AZURE_OPENAI_KEY",
-    "dimensions": 1536
-  }
-}
-```
-
-### Any OpenAI-compatible endpoint
-
-```json
-{
-  "embedding": {
-    "provider": "openai-compatible",
-    "model": "your-model-name",
-    "base_url": "https://your-endpoint/v1",
-    "api_key_env_var": "YOUR_KEY_VAR",
-    "dimensions": 1536
-  }
-}
-```
-
----
-
 ## Changing embedding model
 
 When you change `model` or `dimensions` in Settings:
@@ -193,13 +112,16 @@ Re-sync all sources after changing the embedding model.
 
 ## Docker deployment
 
-`docker-compose.yml` starts Qdrant and Conduit together. Pass configuration via environment:
+`docker-compose.yml` starts Qdrant and Conduit together. Ollama must be running on the host:
 
 ```bash
-OPENAI_API_KEY=sk-... \
-QDRANT_HOST=qdrant \
-CONDUIT_DATA_DIR=/data \
 docker-compose up
+```
+
+For colleagues pulling from Docker Hub, use `docker-compose.hub.yml` instead:
+
+```bash
+docker-compose -f docker-compose.hub.yml up
 ```
 
 Mount a volume at `/data` to persist source definitions and config across container restarts.

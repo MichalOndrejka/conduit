@@ -44,23 +44,29 @@ Results are returned as a JSON array. Each result contains:
 }
 ```
 
-### `search_documents`
-
-Searches manually uploaded documents and pasted text.
-
-Best for: design documents, ADRs, meeting notes, PDFs, one-off reference material.
-
 ### `search_workitems`
 
 Searches work items — bugs, tasks, user stories, features, epics.
 
 Best for: finding related issues, checking if a bug has been filed, understanding sprint scope.
 
-### `search_code`
+### `search_requirements`
 
-Searches source code at the code-unit level (classes, methods, functions).
+Searches requirements — features, user stories, epics, product and software requirements.
+
+Best for: finding relevant requirements for a feature, checking acceptance criteria, understanding scope.
+
+### `search_source_code`
+
+Searches production source code at the code-unit level (classes, methods, functions). Does not include test files — use `search_test_code` for tests.
 
 Best for: finding implementations, understanding how a feature is built, locating where a concept is defined.
+
+### `search_test_code`
+
+Searches test code — unit tests, integration tests, and specs.
+
+Best for: finding existing test coverage, understanding how code is tested, finding test patterns and examples.
 
 ### `search_builds`
 
@@ -76,15 +82,9 @@ Best for: finding existing test coverage, understanding expected behaviour, chec
 
 ### `search_documentation`
 
-Searches wiki pages and documentation sections.
+Searches wiki pages, repo documentation sections, and manually uploaded documents.
 
-Best for: finding architectural decisions, process documentation, onboarding guides.
-
-### `search_pullrequests`
-
-Searches pull requests — titles, descriptions, branch names, reviewer lists.
-
-Best for: understanding what changed and why, finding related PRs, reviewing who reviewed what.
+Best for: finding architectural decisions, process documentation, onboarding guides, design docs, ADRs.
 
 ### `search_test_results`
 
@@ -171,13 +171,13 @@ Returns:
 If you have multiple ADO sources (e.g. two different repos), use `source_name` to limit results:
 
 ```
-search_code("authentication middleware", source_name="Backend API")
+search_source_code("authentication middleware", source_name="Backend API")
 ```
 
 ### Combining tools for context
 
 For a code change task, a useful sequence is:
 1. `retrieve_experience` — check for relevant past decisions
-2. `search_code` — find the implementation
-3. `search_workitems` — find related requirements or bugs
-4. `search_pullrequests` — check how similar changes were handled before
+2. `search_source_code` — find the implementation
+3. `search_test_code` — find existing tests for that code
+4. `search_workitems` — find related requirements or bugs
