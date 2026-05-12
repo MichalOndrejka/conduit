@@ -98,7 +98,13 @@
 
         <!-- Status -->
         <div class="col-span-3" id="status-{{ source.id }}">
-            {% if st == 'syncing' %}
+            {% set _needs_doc = (source.config.get('Provider') == 'manual' or source.config.get('DocType') == 'upload') and source.config.get('Content') == '__DOCUMENT_REQUIRED__' %}
+            {% if _needs_doc %}
+            <a href="/sources/{{ source.id }}/edit" class="badge" style="background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.3);color:#fbbf24;text-decoration:none;">
+                <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                Upload required
+            </a>
+            {% elif st == 'syncing' %}
             <span class="badge badge-syncing"><span class="spinner"></span>Fetching…</span>
             {% elif st == 'completed' %}
             <span class="badge badge-done">
@@ -227,7 +233,7 @@
 // ── Status polling ────────────────────────────────────────────────────────────
 (function () {
     var syncing = {{ 'true' if sources and sources|selectattr('sync_status','eq','syncing')|list else 'false' }};
-    if (!syncing) return;
+    if (!syncing || !{{ 'true' if qdrant_ready else 'false' }}) return;
 
     function pollStatus() {
         fetch('/status').then(r => r.json()).then(data => {
@@ -271,7 +277,12 @@
 })();
 
 // ── Delete modal ──────────────────────────────────────────────────────────────
+var QDRANT_READY = {{ 'true' if qdrant_ready else 'false' }};
 function openDeleteModal(name, action) {
+    if (!QDRANT_READY) {
+        showError('Vector store is offline. Cannot delete sources while disconnected — this would leave orphaned data in the index.');
+        return;
+    }
     document.getElementById('delete-name').textContent = name;
     document.getElementById('delete-form').action = action;
     document.getElementById('delete-overlay').classList.remove('hidden');

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional
-from app.models import SourceDefinition, SourceDocument, SyncProgress, ConfigKeys
+from app.models import ConfigKeys, DOCUMENT_PLACEHOLDER, SourceDefinition, SourceDocument, SyncProgress
 from app.sources.base import Source, ProgressCallback
 
 
@@ -13,6 +13,8 @@ class ManualDocumentSource(Source):
         self, progress_cb: Optional[ProgressCallback] = None
     ) -> list[SourceDocument]:
         content = self._source.get_config(ConfigKeys.CONTENT)
+        if content == DOCUMENT_PLACEHOLDER:
+            return []
         title = self._source.get_config(ConfigKeys.TITLE) or self._source.name
 
         if progress_cb:

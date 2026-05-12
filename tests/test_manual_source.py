@@ -60,6 +60,17 @@ async def test_none_progress_callback_does_not_raise():
     assert len(docs) == 1
 
 
+async def test_document_placeholder_returns_empty_list():
+    from app.models import DOCUMENT_PLACEHOLDER
+    source = SourceDefinition(
+        type=SourceTypes.WORK_ITEM_QUERY,
+        name="Imported Source",
+        config={ConfigKeys.PROVIDER: "manual", ConfigKeys.CONTENT: DOCUMENT_PLACEHOLDER},
+    )
+    docs = await ManualDocumentSource(source).fetch_documents()
+    assert docs == []
+
+
 async def test_empty_content_returns_doc_with_empty_text():
     source = SourceDefinition(
         type=SourceTypes.WORK_ITEM_QUERY,

@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 import uuid
 
 
+DOCUMENT_PLACEHOLDER = "__DOCUMENT_REQUIRED__"
+
+
 # ── Collection names ────────────────────────────────────────────────────────
 
 class CollectionNames:

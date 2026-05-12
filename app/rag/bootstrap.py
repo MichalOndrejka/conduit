@@ -17,41 +17,117 @@ _FINGERPRINT_PATH = Path("conduit-embedding.json")
 class QdrantHealth:
     def __init__(self) -> None:
         self.is_ready = False
+        self.pending = True
+        self.error: str | None = None
+        self.retry_attempt: int = 0
+        self.max_retries: int = 30
+
+
+class EmbeddingHealth:
+    def __init__(self) -> None:
+        self.is_ready = False
+        self.pending = True
         self.error: str | None = None
 
 
-async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHealth, config_store=None, embedding=None) -> None:
-    """Verify Qdrant connectivity, detect embedding model changes, create collections."""
-    max_retries = 30
+class LlmHealth:
+    def __init__(self) -> None:
+        self.is_ready = False
+        self.pending = True
+        self.error: str | None = None
 
+
+async def _probe_embedding(embedding, embedding_health: EmbeddingHealth, store) -> None:
+    try:
+        probe = await embedding.embed("probe")
+        actual_dims = len(probe)
+        if actual_dims != store._dimensions:
+            store._dimensions = actual_dims
+        embedding_health.is_ready = True
+        embedding_health.error = None
+        logger.info("Embedding model recovered")
+    except Exception as exc:
+        embedding_health.is_ready = False
+        embedding_health.error = str(exc)
+        logger.warning("Embedding model unreachable: %s", exc)
+
+
+async def _probe_llm(cfg: AppConfig, llm_health: LlmHealth) -> None:
+    if not cfg.preprocessing.enabled or not cfg.preprocessing.model:
+        llm_health.is_ready = True
+        llm_health.error = None
+        return
+    try:
+        import httpx
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(base_url=cfg.preprocessing.base_url or "http://localhost:11434/v1", api_key="ollama", http_client=httpx.AsyncClient())
+        await client.chat.completions.create(
+            model=cfg.preprocessing.model,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=1,
+        )
+        llm_health.is_ready = True
+        llm_health.error = None
+        logger.info("Preprocessing LLM recovered")
+    except Exception as exc:
+        llm_health.is_ready = False
+        llm_health.error = str(exc)
+
+
+async def retry_failed_probes(cfg: AppConfig, store: VectorStore, qdrant_health: QdrantHealth, embedding=None, embedding_health: EmbeddingHealth | None = None, llm_health: LlmHealth | None = None, config_store=None) -> None:
+    """Re-probe services that failed at startup every 30 s until all recover."""
+    while True:
+        await asyncio.sleep(30)
+        if (qdrant_health.is_ready
+                and (embedding_health is None or embedding_health.is_ready)
+                and (llm_health is None or llm_health.is_ready)):
+            return
+
+        if embedding_health is not None and not embedding_health.is_ready and embedding is not None:
+            await _probe_embedding(embedding, embedding_health, store)
+
+        if llm_health is not None and not llm_health.is_ready:
+            await _probe_llm(cfg, llm_health)
+
+        if not qdrant_health.is_ready:
+            try:
+                await store.health_check()
+                logger.info("Qdrant recovered — re-running setup")
+                await bootstrap_qdrant(cfg, store, qdrant_health, config_store, embedding,
+                                       embedding_health, llm_health)
+                return  # bootstrap_qdrant handles the rest
+            except Exception as exc:
+                qdrant_health.error = str(exc)
+
+
+async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHealth, config_store=None, embedding=None, embedding_health: EmbeddingHealth | None = None, llm_health: LlmHealth | None = None) -> None:
+    """Verify Qdrant connectivity, detect embedding model changes, create collections."""
+
+    # Probe embedding and LLM first — they are independent of Qdrant.
+    if embedding is not None and embedding_health is not None:
+        await _probe_embedding(embedding, embedding_health, store)
+        embedding_health.pending = False
+
+    if llm_health is not None:
+        await _probe_llm(cfg, llm_health)
+        llm_health.pending = False
+
+    max_retries = 30
+    health.max_retries = max_retries
     for attempt in range(1, max_retries + 1):
+        health.retry_attempt = attempt
         try:
             await store.health_check()
             break
         except Exception as exc:
             if attempt == max_retries:
                 health.is_ready = False
+                health.pending = False
                 health.error = str(exc)
                 logger.error("Qdrant not available after %d retries: %s", max_retries, exc)
                 return
             logger.warning("Qdrant not ready (attempt %d/%d): %s", attempt, max_retries, exc)
             await asyncio.sleep(2)
-
-    # Probe the model to get its actual output dimension — configured dimensions
-    # may not match what the model really returns (e.g. Ollama models have a
-    # fixed output size that the API cannot override).
-    if embedding is not None:
-        try:
-            probe = await embedding.embed("dimension probe")
-            actual_dims = len(probe)
-            if actual_dims != store._dimensions:
-                logger.warning(
-                    "Configured dimensions=%d but model outputs %d — using actual model output size",
-                    store._dimensions, actual_dims,
-                )
-                store._dimensions = actual_dims
-        except Exception as exc:
-            logger.warning("Could not probe embedding dimensions at startup: %s", exc)
 
     ec = cfg.embedding
     fingerprint = {
@@ -103,5 +179,6 @@ async def bootstrap_qdrant(cfg: AppConfig, store: VectorStore, health: QdrantHea
             logger.info("Source '%s' has no data in Qdrant — marked for re-sync", source.name)
 
     health.is_ready = True
+    health.pending = False
     health.error = None
     logger.info("Qdrant ready")

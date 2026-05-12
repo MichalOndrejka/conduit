@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from app.models import SourceDefinition
+from app.models import ConfigKeys, DOCUMENT_PLACEHOLDER, SourceDefinition
 
 
 class SourceConfigStore:
@@ -53,7 +53,14 @@ class SourceConfigStore:
             self._write(ordered + tail)
 
     def export_stripped(self) -> list[dict]:
-        return [s.model_dump(mode="json") for s in self._read()]
+        result = []
+        for s in self._read():
+            d = s.model_dump(mode="json")
+            cfg = d.get("config", {})
+            if cfg.get(ConfigKeys.PROVIDER) == "manual" or cfg.get(ConfigKeys.DOC_TYPE) == "upload":
+                cfg[ConfigKeys.CONTENT] = DOCUMENT_PLACEHOLDER
+            result.append(d)
+        return result
 
     def _read(self) -> list[SourceDefinition]:
         if not self._path.exists():

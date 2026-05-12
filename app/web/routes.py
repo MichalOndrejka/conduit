@@ -45,14 +45,50 @@ async def _extract_file_text(file) -> str:
 
 def _ctx(request: Request, **kwargs) -> dict:
     """Base context injected into every template."""
+    from app.config import get_config
+    cfg = get_config()
     return {
         "qdrant_ready": container.health.is_ready,
+        "qdrant_pending": container.health.pending,
         "qdrant_error": container.health.error,
+        "qdrant_retry": container.health.retry_attempt,
+        "qdrant_max_retries": container.health.max_retries,
+        "embedding_ready": container.embedding_health.is_ready,
+        "embedding_pending": container.embedding_health.pending,
+        "embedding_error": container.embedding_health.error,
+        "llm_configured": cfg.preprocessing.enabled and bool(cfg.preprocessing.model),
+        "llm_ready": container.llm_health.is_ready,
+        "llm_pending": container.llm_health.pending,
+        "llm_error": container.llm_health.error,
         **kwargs,
     }
 
 
 # ── Index ──────────────────────────────────────────────────────────────────────
+
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+    '<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">'
+    '<stop offset="0%" stop-color="#0da2e7"/>'
+    '<stop offset="100%" stop-color="#7c3aed"/>'
+    '</linearGradient></defs>'
+    '<rect width="24" height="24" rx="5" fill="url(#g)"/>'
+    '<path d="M13 10V3L4 14h7v7l9-11h-7z" fill="none" stroke="white"'
+    ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    '</svg>'
+)
+
+
+@router.get("/favicon.svg")
+async def favicon_svg():
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"})
+
+
+@router.get("/favicon.ico")
+async def favicon():
+    return RedirectResponse("/favicon.svg", status_code=301)
+
 
 @router.get("/")
 async def index(request: Request):
@@ -77,6 +113,23 @@ async def sync_all_sources(background_tasks: BackgroundTasks):
     return RedirectResponse("/", status_code=303)
 
 
+@router.get("/health")
+async def health_check():
+    from app.config import get_config
+    cfg = get_config()
+    return JSONResponse({
+        "qdrantReady": container.health.is_ready,
+        "qdrantPending": container.health.pending,
+        "qdrantRetry": container.health.retry_attempt,
+        "qdrantMaxRetries": container.health.max_retries,
+        "embeddingReady": container.embedding_health.is_ready,
+        "embeddingPending": container.embedding_health.pending,
+        "llmConfigured": cfg.preprocessing.enabled and bool(cfg.preprocessing.model),
+        "llmReady": container.llm_health.is_ready,
+        "llmPending": container.llm_health.pending,
+    })
+
+
 @router.get("/status")
 async def status():
     sources = await container.config_store.get_all()
@@ -94,7 +147,7 @@ async def status():
             "syncMessage": p.message if p else None,
             "syncErrorPhase": s.sync_error_phase,
         })
-    return JSONResponse({"qdrantReady": container.health.is_ready, "sources": result})
+    return JSONResponse({"sources": result})
 
 
 @router.get("/export")
@@ -367,6 +420,8 @@ async def settings_verify_preprocessing(
 
 @router.post("/settings/delete-all-sources")
 async def delete_all_sources():
+    if not container.health.is_ready:
+        return RedirectResponse("/settings?notice=qdrant_offline", status_code=303)
     sources = await container.config_store.get_all()
     for source in sources:
         col = collection_for(source)
@@ -609,6 +664,8 @@ async def sources_delete_get(request: Request, source_id: str):
 
 @router.post("/sources/{source_id}/delete")
 async def sources_delete_post(source_id: str):
+    if not container.health.is_ready:
+        return RedirectResponse(f"/sources/{source_id}/delete", status_code=303)
     source = await container.config_store.get_by_id(source_id)
     if source:
         collection = collection_for(source)
@@ -618,7 +675,7 @@ async def sources_delete_post(source_id: str):
             ])
             await container.vector_store.delete_by_filter(collection, filt)
         except Exception:
-            pass  # Qdrant may be offline; config deletion proceeds regardless
+            pass
     await container.config_store.delete(source_id)
     return RedirectResponse("/", status_code=303)
 

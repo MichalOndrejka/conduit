@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <script>(function(){var t=localStorage.getItem('theme')||'dark';document.documentElement.setAttribute('data-theme',t);if(sessionStorage.getItem('scrollY'))document.documentElement.style.setProperty('--main-opacity','0');})();</script>
     <title>{% block title %}Conduit{% endblock %} — Conduit</title>
-    <link rel="icon" href="data:,">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
     tailwind.config = {
@@ -467,22 +467,86 @@
 
 <!-- Main -->
 <div id="main-scroll" class="flex-1 overflow-auto flex flex-col">
-    {% if not qdrant_ready %}
-    <div id="qdrant-warning" class="flex items-start gap-3 px-6 py-3 text-sm" style="background: rgba(245,158,11,0.12); border-bottom: 1px solid rgba(245,158,11,0.3); color: #f59e0b;">
-        <svg class="w-4 h-4 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-        </svg>
-        <span>
-            <strong>Qdrant is not available.</strong>
-            Search and embedding features are disabled until the connection is restored.
-            {% if qdrant_error %} &mdash; <span class="font-mono text-xs opacity-80">{{ qdrant_error }}</span>{% endif %}
-        </span>
-    </div>
-    {% endif %}
     <main class="p-8 flex-1">
         {% block content %}{% endblock %}
     </main>
 </div>
+
+{% set _is_settings = request.url.path.startswith('/settings') %}
+{% set _any_pending = qdrant_pending or embedding_pending or (llm_configured and llm_pending) %}
+{% set _qdrant_down = not qdrant_ready and not qdrant_pending %}
+{% set _embedding_down = not embedding_ready and not embedding_pending %}
+{% set _llm_down = llm_configured and not llm_ready and not llm_pending %}
+{% set _any_down = _qdrant_down or _embedding_down or _llm_down %}
+
+{% if (_any_pending or _any_down) and not _is_settings %}
+<div id="service-overlay" style="position:fixed;top:0;right:0;bottom:0;left:13rem;background:rgba(6,8,15,0.88);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:50;display:flex;align-items:center;justify-content:center;">
+    <div style="max-width:28rem;width:100%;margin:0 1.5rem;text-align:center;">
+        {% if _any_pending and not _any_down %}
+        {# Pure loading — no known failures yet #}
+        <div style="width:2.5rem;height:2.5rem;margin:0 auto 1rem;border-radius:50%;border:2px solid rgba(255,255,255,0.08);border-top-color:#0da2e7;animation:spin 0.8s linear infinite;"></div>
+        <p style="font-size:0.875rem;font-weight:500;color:#94a3b8;">Starting up…</p>
+        {% else %}
+        {# At least one service already known-down; show errors + checking rows #}
+        <div style="width:3rem;height:3rem;margin:0 auto 1.25rem;border-radius:0.75rem;background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.3);display:flex;align-items:center;justify-content:center;">
+            <svg style="width:1.25rem;height:1.25rem;color:#f87171;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+        </div>
+        <h2 style="font-size:0.9375rem;font-weight:600;color:#f1f5f9;margin-bottom:0.375rem;">{% if _any_pending %}Services starting up{% else %}Services unavailable{% endif %}</h2>
+        <p style="font-size:0.75rem;color:#64748b;margin-bottom:1.5rem;">{% if _any_pending %}Some services failed to start.{% else %}Go to Settings to fix the configuration, then reload.{% endif %}</p>
+        <div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.75rem;text-align:left;">
+            {% if _qdrant_down %}
+            <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem 1rem;border-radius:0.5rem;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.18);">
+                <span style="width:0.4rem;height:0.4rem;border-radius:50%;background:#f87171;flex-shrink:0;margin-top:0.3rem;"></span>
+                <div>
+                    <div style="font-size:0.75rem;font-weight:600;color:#fca5a5;margin-bottom:0.2rem;">Vector store (Qdrant) offline</div>
+                    {% if qdrant_error %}<div style="font-size:0.6875rem;color:#475569;font-family:monospace;word-break:break-all;">{{ qdrant_error }}</div>{% endif %}
+                </div>
+            </div>
+            {% elif qdrant_pending %}
+            <div id="qdrant-pending-row" style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                <div style="width:0.6rem;height:0.6rem;border-radius:50%;border:1.5px solid transparent;border-top-color:#0da2e7;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+                <div style="font-size:0.75rem;color:#64748b;">Vector store (Qdrant) — connecting…<span id="qdrant-retry-count" style="margin-left:0.35rem;opacity:0.6;">{% if qdrant_retry > 0 %}({{ qdrant_retry }}/{{ qdrant_max_retries }}){% endif %}</span></div>
+            </div>
+            {% endif %}
+            {% if _embedding_down %}
+            <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem 1rem;border-radius:0.5rem;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.18);">
+                <span style="width:0.4rem;height:0.4rem;border-radius:50%;background:#f87171;flex-shrink:0;margin-top:0.3rem;"></span>
+                <div>
+                    <div style="font-size:0.75rem;font-weight:600;color:#fca5a5;margin-bottom:0.2rem;">Embedding model unreachable</div>
+                    {% if embedding_error %}<div style="font-size:0.6875rem;color:#475569;font-family:monospace;word-break:break-all;">{{ embedding_error }}</div>{% endif %}
+                </div>
+            </div>
+            {% elif embedding_pending %}
+            <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                <div style="width:0.6rem;height:0.6rem;border-radius:50%;border:1.5px solid transparent;border-top-color:#0da2e7;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+                <div style="font-size:0.75rem;color:#64748b;">Embedding model — checking…</div>
+            </div>
+            {% endif %}
+            {% if _llm_down %}
+            <div style="display:flex;align-items:flex-start;gap:0.75rem;padding:0.75rem 1rem;border-radius:0.5rem;background:rgba(239,68,68,0.07);border:1px solid rgba(239,68,68,0.18);">
+                <span style="width:0.4rem;height:0.4rem;border-radius:50%;background:#f87171;flex-shrink:0;margin-top:0.3rem;"></span>
+                <div>
+                    <div style="font-size:0.75rem;font-weight:600;color:#fca5a5;margin-bottom:0.2rem;">Preprocessing LLM unreachable</div>
+                    {% if llm_error %}<div style="font-size:0.6875rem;color:#475569;font-family:monospace;word-break:break-all;">{{ llm_error }}</div>{% endif %}
+                </div>
+            </div>
+            {% elif llm_configured and llm_pending %}
+            <div style="display:flex;align-items:center;gap:0.75rem;padding:0.75rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);">
+                <div style="width:0.6rem;height:0.6rem;border-radius:50%;border:1.5px solid transparent;border-top-color:#0da2e7;animation:spin 0.8s linear infinite;flex-shrink:0;"></div>
+                <div style="font-size:0.75rem;color:#64748b;">Preprocessing LLM — checking…</div>
+            </div>
+            {% endif %}
+        </div>
+        <a href="/settings" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.5rem 1.375rem;border-radius:0.5rem;background:var(--gradient);color:#fff;font-size:0.8125rem;font-weight:500;text-decoration:none;">
+            <svg style="width:0.875rem;height:0.875rem;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            Open Settings
+        </a>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
 
 <div id="toast-container"></div>
 <script>
@@ -504,21 +568,31 @@ function showToast(message, type) {
 }
 </script>
 {% block scripts %}{% endblock %}
-{% if not qdrant_ready %}
+{% if (_any_pending or _any_down) and not _is_settings %}
 <script>
 (function () {
-    var banner = document.getElementById('qdrant-warning');
-    if (!banner) return;
+    var wasPending = {{ 'true' if _any_pending else 'false' }};
     function poll() {
-        fetch('/status').then(function(r) { return r.json(); }).then(function(data) {
-            if (data.qdrantReady) {
-                banner.remove();
-            } else {
-                setTimeout(poll, 3000);
+        fetch('/health').then(function(r) { return r.json(); }).then(function(data) {
+            var nowPending = data.qdrantPending || data.embeddingPending || (data.llmConfigured && data.llmPending);
+            var allOk = data.qdrantReady && data.embeddingReady && (!data.llmConfigured || data.llmReady);
+            // Any service that finished (pending→done, regardless of ok/fail) triggers a reload
+            var anyNewlyDone = wasPending && (
+                (!data.qdrantPending && !data.qdrantReady) ||
+                (!data.embeddingPending && !data.embeddingReady) ||
+                (data.llmConfigured && !data.llmPending && !data.llmReady) ||
+                !nowPending
+            );
+            if (allOk || anyNewlyDone) { location.reload(); return; }
+            // Update Qdrant retry counter in-place while it's still connecting
+            var retryEl = document.getElementById('qdrant-retry-count');
+            if (retryEl && data.qdrantPending && data.qdrantRetry > 0) {
+                retryEl.textContent = '(' + data.qdrantRetry + '/' + data.qdrantMaxRetries + ')';
             }
-        }).catch(function() { setTimeout(poll, 3000); });
+            setTimeout(poll, wasPending ? 500 : 3000);
+        }).catch(function() { setTimeout(poll, 1000); });
     }
-    setTimeout(poll, 3000);
+    setTimeout(poll, 500);
 })();
 </script>
 {% endif %}

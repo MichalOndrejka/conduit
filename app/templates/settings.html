@@ -299,6 +299,8 @@ showToast('Embedding settings saved. Model changed — all collections dropped a
 showToast('Vector store settings saved.');
 {% elif notice == 'preprocessing_saved' %}
 showToast('Preprocessing settings saved.');
+{% elif notice == 'qdrant_offline' %}
+showToast('Vector store is offline. Connect to Qdrant before deleting sources.', 'warn');
 {% elif notice == 'sources_deleted' %}
 showToast('All sources and their indexed data have been deleted.');
 {% elif notice == 'experiences_deleted' %}

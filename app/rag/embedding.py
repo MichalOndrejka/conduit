@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 class EmbeddingService:
     def __init__(self, cfg: AppConfig) -> None:
         ec = cfg.embedding
-        base_url = ec.base_url or "http://localhost:11434/v1"
+        base_url = ec.base_url
         self._client = AsyncOpenAI(base_url=base_url, api_key="ollama", http_client=httpx.AsyncClient())
         self._model      = ec.model
         self._dimensions = ec.dimensions

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 class EmbeddingConfig(BaseModel):
     model: str = "nomic-embed-text-v2-moe"
-    base_url: str = ""                # Ollama base URL; defaults to http://localhost:11434/v1
+    base_url: str = "http://localhost:11434/v1"
     dimensions: int = 768
     max_input_chars: int = 8000       # Hard cap on chars sent per embedding call (≈2 000 tokens)
 

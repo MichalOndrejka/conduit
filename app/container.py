@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.memory.service import MemoryService
-    from app.rag.bootstrap import QdrantHealth
+    from app.rag.bootstrap import EmbeddingHealth, LlmHealth, QdrantHealth
     from app.rag.preprocessor import DocumentPreprocessor
     from app.rag.search import SearchService
     from app.rag.vector_store import VectorStore
@@ -15,6 +15,8 @@ if TYPE_CHECKING:
     from app.sync.service import SyncService
 
 health: "QdrantHealth"
+embedding_health: "EmbeddingHealth"
+llm_health: "LlmHealth"
 config_store: "SourceConfigStore"
 sync_service: "SyncService"
 progress_store: "SyncProgressStore"

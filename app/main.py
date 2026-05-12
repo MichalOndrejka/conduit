@@ -14,7 +14,7 @@ from app.config import load_config
 from app.memory.service import MemoryService
 from app.mcp_tools.tools import register_tools
 from app.parsing.registry import ParserRegistry
-from app.rag.bootstrap import QdrantHealth, bootstrap_qdrant
+from app.rag.bootstrap import EmbeddingHealth, LlmHealth, QdrantHealth, bootstrap_qdrant, retry_failed_probes
 from app.rag.chunker import TextChunker
 from app.rag.embedding import EmbeddingService
 from app.rag.preprocessor import DocumentPreprocessor
@@ -49,10 +49,14 @@ async def lifespan(app: FastAPI):
     source_factory = SourceFactory(ado_client, parser_registry)
     sync_service = SyncService(config_store, source_factory, indexer, progress_store, preprocessor)
     health = QdrantHealth()
+    embedding_health = EmbeddingHealth()
+    llm_health = LlmHealth()
     memory_service = MemoryService(vector_store, embedding)
 
     # Populate global container
     container.health = health
+    container.embedding_health = embedding_health
+    container.llm_health = llm_health
     container.config_store = config_store
     container.sync_service = sync_service
     container.progress_store = progress_store
@@ -65,7 +69,8 @@ async def lifespan(app: FastAPI):
 
     # Bootstrap Qdrant in the background so the UI is immediately available
     # even when Qdrant is offline or still starting up.
-    asyncio.create_task(bootstrap_qdrant(cfg, vector_store, health, config_store, embedding))
+    asyncio.create_task(bootstrap_qdrant(cfg, vector_store, health, config_store, embedding, embedding_health, llm_health))
+    asyncio.create_task(retry_failed_probes(cfg, vector_store, health, embedding, embedding_health, llm_health, config_store))
 
     # Run the FastMCP session manager so its task group is initialized.
     # streamable_http_app() is called at mount time (below), which lazily

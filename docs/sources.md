@@ -66,7 +66,7 @@ Embeds content without any external connection.
 | Text | `Title`, `Content` | Paste a title and body text directly. |
 | File upload | `Title`, `Content` (extracted) | Upload a `.pdf`, `.txt`, or `.md` file. Drag-and-drop supported. |
 
-The extracted text is stored in `conduit-sources.json` so preview and re-sync work without re-uploading.
+The extracted text is stored locally in `conduit-sources.json` so preview and re-sync work without re-uploading. On **export**, document content is replaced with a `__DOCUMENT_REQUIRED__` placeholder — anyone importing the config must open the source and provide the document content again before syncing.
 
 ---
 

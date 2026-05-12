@@ -115,6 +115,41 @@ async def test_export_stripped_returns_all_config_keys(store):
     assert set(exported.keys()) == {"Pat", "BaseUrl", "AuthType", "ApiVersion"}
 
 
+async def test_export_stripped_replaces_manual_content_with_placeholder(store):
+    from app.models import ConfigKeys, DOCUMENT_PLACEHOLDER
+    src = SourceDefinition(type="documentation", name="Manual Doc", config={
+        ConfigKeys.PROVIDER: "manual",
+        ConfigKeys.MANUAL_TYPE: "text",
+        ConfigKeys.CONTENT: "This is sensitive document content that should not be exported",
+    })
+    await store.save(src)
+    exported = store.export_stripped()[0]["config"]
+    assert exported[ConfigKeys.CONTENT] == DOCUMENT_PLACEHOLDER
+
+
+async def test_export_stripped_replaces_upload_doc_type_content_with_placeholder(store):
+    from app.models import ConfigKeys, DOCUMENT_PLACEHOLDER
+    src = SourceDefinition(type="documentation", name="Uploaded Doc", config={
+        ConfigKeys.DOC_TYPE: "upload",
+        ConfigKeys.CONTENT: "Extracted PDF content",
+        ConfigKeys.TITLE: "doc.pdf",
+    })
+    await store.save(src)
+    exported = store.export_stripped()[0]["config"]
+    assert exported[ConfigKeys.CONTENT] == DOCUMENT_PLACEHOLDER
+
+
+async def test_export_stripped_preserves_content_for_non_manual_sources(store):
+    from app.models import ConfigKeys
+    src = SourceDefinition(type="documentation", name="Wiki", config={
+        ConfigKeys.DOC_TYPE: "wiki",
+        ConfigKeys.WIKI_NAME: "MyWiki",
+    })
+    await store.save(src)
+    exported = store.export_stripped()[0]["config"]
+    assert ConfigKeys.CONTENT not in exported
+
+
 # ── _normalise_keys ────────────────────────────────────────────────────────────
 
 def test_normalise_keys_converts_camel_case():
