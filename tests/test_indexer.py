@@ -213,6 +213,66 @@ async def test_no_replace_source_id_does_not_call_delete_by_filter():
     store.delete_by_filter.assert_not_called()
 
 
+# ── checkpoint parameter ───────────────────────────────────────────────────────
+
+async def test_checkpoint_called_once_per_doc():
+    store = _make_store()
+    calls: list[int] = []
+
+    async def cp():
+        calls.append(1)
+
+    await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch(
+        "col", [_doc("d1"), _doc("d2"), _doc("d3")], checkpoint=cp
+    )
+    assert len(calls) == 3
+
+
+async def test_checkpoint_not_called_when_omitted():
+    """Default behaviour (no checkpoint arg) must not raise."""
+    store = _make_store()
+    await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch("col", [_doc()])
+    store.upsert.assert_called_once()
+
+
+async def test_sync_cancelled_stops_embed_loop_before_any_write():
+    from app.store.sync_control import SyncCancelled
+
+    store = _make_store()
+    call_count = 0
+
+    async def cp():
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise SyncCancelled()
+
+    with pytest.raises(SyncCancelled):
+        await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch(
+            "col", [_doc("d1"), _doc("d2"), _doc("d3")], checkpoint=cp
+        )
+
+    # Cancelled before any Qdrant write
+    store.upsert.assert_not_called()
+    store.delete_by_filter.assert_not_called()
+
+
+async def test_sync_cancelled_on_first_doc_writes_nothing():
+    from app.store.sync_control import SyncCancelled
+
+    store = _make_store()
+
+    async def cp():
+        raise SyncCancelled()
+
+    with pytest.raises(SyncCancelled):
+        await DocumentIndexer(store, _make_embedding(), _chunker()).index_batch(
+            "col", [_doc()], checkpoint=cp
+        )
+
+    store.upsert.assert_not_called()
+
+
 async def test_replace_source_id_skipped_for_empty_doc_list():
     """Nothing to index means no delete either — avoids wiping data for a failed fetch."""
     store = _make_store()

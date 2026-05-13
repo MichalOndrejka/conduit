@@ -4,7 +4,7 @@
 ![Docker](https://img.shields.io/badge/docker-michalondrejka%2Fconduit-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-A **RAG + MCP server** that gives Claude semantic search over your Azure DevOps data, custom APIs, and uploaded documents — plus a persistent **Experience** store so Claude can remember facts, preferences, and past decisions across sessions.
+A **RAG + MCP server** that gives any MCP client semantic search over your Azure DevOps data, custom APIs, and uploaded documents — plus a persistent **Experience** store for remembering facts, preferences, and past decisions across sessions.
 
 ## Features
 
@@ -13,6 +13,8 @@ A **RAG + MCP server** that gives Claude semantic search over your Azure DevOps 
 - **Local embeddings via Ollama** — no API keys or external services required
 - **Persistent memory** across sessions via the Experience store
 - **Web UI** for managing sources, triggering syncs, and configuring settings
+- **Encrypted credential library** — store PATs, tokens, and API keys in the UI; never in config files or environment variables
+- **Sync controls** — pause or cancel a running sync from the source list
 - **Transactional indexing** — failed syncs leave existing data intact
 - **Azure DevOps support** with PAT, bearer, NTLM, Kerberos, and API-key auth — cloud and on-premise TFS/VSTS
 - **Custom API and manual upload** providers for any data source
@@ -20,7 +22,7 @@ A **RAG + MCP server** that gives Claude semantic search over your Azure DevOps 
 ## How it works
 
 ```
-Claude
+MCP Client
   └─► MCP Tools (Conduit)
         └─► Qdrant Vector Store
               └─► Indexed from sources (ADO / Custom API / Manual)
@@ -34,8 +36,8 @@ Claude
 5. Store in Qdrant, one collection per content type
 
 **Search pipeline**
-1. Claude calls an MCP search tool with a natural-language query
-2. Query is embedded and semantically searched against the relevant Qdrant collection
+1. The MCP client calls a search tool with a natural-language query
+2. The query is embedded and semantically searched against the relevant Qdrant collection
 3. Top-K results returned with similarity scores
 
 ## MCP Tools
@@ -118,13 +120,20 @@ uv run uvicorn app.main:app --host 0.0.0.0 --port 5000 --reload
 - Web UI: `http://localhost:5000`
 - MCP endpoint: `http://localhost:5000/mcp`
 
-### 5. Add sources and sync
+### 5. Add credentials
 
-Open `http://localhost:5000`, click **Add Source**, choose a type, select the backend tab (Azure DevOps / Custom API / Manual), fill in the connection details, and hit **Save & Sync**.
+Open `http://localhost:5000/credentials`, click **Add Credential**, give it a name (e.g. `My ADO PAT`), paste the secret value, and save. Credentials are stored encrypted on disk and referenced by name in source config — the actual secret never appears in `conduit-sources.json`.
 
-### 6. Connect to Claude
+### 6. Add sources and sync
 
-**Claude Desktop** — add to `claude_desktop_config.json`:
+Open `http://localhost:5000`, click **Add Source**, choose a type, select the backend tab (Azure DevOps / Custom API / Manual), fill in the connection details, pick credentials from the dropdown fields, and hit **Save & Sync**.
+
+Use **Save** (without sync) to save configuration changes without triggering a re-index. While a sync is running, **Pause** and **Cancel** buttons appear on the source row.
+
+### 7. Connect your MCP client
+
+Point your MCP client at `http://localhost:5000/mcp`. For clients that use a JSON config file, the entry looks like:
+
 ```json
 {
   "mcpServers": {
@@ -136,7 +145,7 @@ Open `http://localhost:5000`, click **Add Source**, choose a type, select the ba
 }
 ```
 
-**VS Code** — `.vscode/mcp.json` is already included in the repo.
+A `.vscode/mcp.json` is already included in the repo for VS Code users.
 
 ## Docker (run without cloning)
 
@@ -156,7 +165,7 @@ Ollama must be running on the host with an embedding model pulled (`ollama pull 
 
 The web UI will be available at `http://localhost:8000`. Configure embeddings and add sources via the Settings page.
 
-> **Credentials** — pass ADO tokens, API keys, and other secrets as environment variables. The config UI lets you reference them by name so they are never stored in the config file.
+> **Credentials** — add secrets at `/credentials` in the web UI. They are Fernet-encrypted on disk inside the mounted `/data` volume. The optional `CONDUIT_SECRET_KEY` env var pins the encryption key across restarts; without it, a key is auto-generated and stored as `.secret_key` inside the data directory.
 
 ### Build & push (maintainers)
 
@@ -213,9 +222,10 @@ All settings are editable via the **Settings** page. Changing `dimensions` or em
 | `QDRANT_HOST` | Override Qdrant host (default: `localhost`) |
 | `QDRANT_PORT` | Override Qdrant port (default: `6333`) |
 | `CONDUIT_CONFIG` | Path to `config.json` (default: `config.json` in CWD) |
-| `CONDUIT_DATA_DIR` | Directory for `conduit-sources.json` and config |
+| `CONDUIT_DATA_DIR` | Directory for `conduit-sources.json`, `credentials.enc.json`, and config. **Required in Docker** to persist data across restarts. |
+| `CONDUIT_SECRET_KEY` | Base64url Fernet key used to encrypt `credentials.enc.json`. Auto-generated and stored as `.secret_key` if not set. Pin this in production so credentials survive container recreation. |
 
-ADO credentials (PAT, bearer token, passwords) are stored as **environment variable names**, not values. The actual secret is read from the environment at sync time, so `conduit-sources.json` never contains plaintext credentials.
+Credentials (PATs, tokens, API keys) are stored encrypted in `credentials.enc.json` inside the data directory and managed entirely through the web UI — no environment variables needed for secrets.
 
 ## Project structure
 
@@ -227,8 +237,8 @@ app/
   parsing/       # Language-aware code parsers (C#, TS, Go, PS, Markdown)
   rag/           # Embedding, chunking, vector store, indexer, search
   sources/       # Source implementations (ADO, Custom API, Manual)
-  store/         # Source config persistence (JSON file)
-  sync/          # Sync orchestration service
+  store/         # Persistence: source config, secrets, sync progress & control
+  sync/          # Sync orchestration service (cancel/pause support)
   templates/     # Jinja2 HTML templates (Tailwind CSS)
   web/           # FastAPI route handlers
   config.py      # Configuration models and loader

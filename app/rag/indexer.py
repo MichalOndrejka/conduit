@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from qdrant_client.models import FieldCondition, Filter, MatchValue, PointIdsList, PointStruct
 
@@ -45,6 +45,7 @@ class DocumentIndexer:
         docs: list[SourceDocument],
         progress_cb: Optional[Callable[[int, int], None]] = None,
         replace_source_id: Optional[str] = None,
+        checkpoint: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> None:
         now_ms = int(time.time() * 1000)
 
@@ -58,6 +59,8 @@ class DocumentIndexer:
         points: list[PointStruct] = []
 
         for i, doc in enumerate(docs):
+            if checkpoint:
+                await checkpoint()
             chunks = self._chunker.chunk(doc.text)
             total_chunks = len(chunks)
 

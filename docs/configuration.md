@@ -91,10 +91,10 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | Variable | Effect |
 |----------|--------|
 | `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in CWD. |
-| `CONDUIT_DATA_DIR` | If set, `config.json` and `conduit-sources.json` are placed here. Useful for Docker volumes. |
+| `CONDUIT_DATA_DIR` | If set, `config.json`, `conduit-sources.json`, and `credentials.enc.json` are placed here. **Required in Docker** to persist all data across container restarts. |
+| `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
 | `QDRANT_HOST` | Overrides `qdrant.host` in config. |
 | `QDRANT_PORT` | Overrides `qdrant.port` in config. |
-| Any name | Can be used as a credential reference in source config fields (`Pat`, `Token`, `Password`, `ApiKeyValue`). |
 
 ---
 
@@ -124,4 +124,29 @@ For colleagues pulling from Docker Hub, use `docker-compose.hub.yml` instead:
 docker-compose -f docker-compose.hub.yml up
 ```
 
-Mount a volume at `/data` to persist source definitions and config across container restarts.
+Both compose files mount a volume at `/data` and set `CONDUIT_DATA_DIR=/data`, so source definitions, config, and credentials all persist across container restarts.
+
+To keep the credential encryption key stable across container recreation, add `CONDUIT_SECRET_KEY` to your environment or a `.env` file:
+
+```bash
+# generate once and store safely
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Then set it in your shell or `.env`:
+
+```
+CONDUIT_SECRET_KEY=<generated key>
+```
+
+Without this, Conduit auto-generates a key saved as `.secret_key` inside `/data`. As long as the volume is preserved, credentials remain readable — but if the volume is deleted and recreated, existing `credentials.enc.json` data will be unreadable.
+
+---
+
+## Credential library
+
+Secrets (PATs, tokens, API keys) are managed on the **`/credentials`** page in the web UI, not as environment variables. Each credential has a name and an optional note; the secret value is Fernet-encrypted before being written to disk.
+
+Source config fields (`Pat`, `Token`, `Password`, `ApiKeyValue`) store the credential name. At sync time, Conduit looks up the name in the in-memory cache, decrypts the value, and passes it to the HTTP client — the plaintext secret never appears in `conduit-sources.json` or the config file.
+
+**Cross-system portability**: credential names are stable identifiers. When you export sources and import them on another machine, Conduit will list any referenced-but-missing credentials on the `/credentials` page so you can create them before syncing.

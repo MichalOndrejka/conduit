@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import urljoin
@@ -48,10 +47,17 @@ class AdoConnection:
             verify_ssl=verify_ssl,
         )
 
-    def _resolve_env(self, var_name: str) -> str:
-        if not var_name:
+    def _get_secret(self, cred_id: str) -> str:
+        if not cred_id:
             return ""
-        return os.environ.get(var_name, var_name)
+        from app import container
+        val = container.secrets_store.get_value_sync(cred_id)
+        if not val:
+            raise ValueError(
+                f"Credential '{cred_id}' not found. "
+                "Open the source editor and select a valid credential."
+            )
+        return val
 
     def _make_session(self) -> requests.Session:
         session = requests.Session()
@@ -59,14 +65,14 @@ class AdoConnection:
         auth_type = self.auth_type.lower()
 
         if auth_type == "pat":
-            pat = self._resolve_env(self.pat)
+            pat = self._get_secret(self.pat)
             session.auth = HTTPBasicAuth("", pat)
         elif auth_type == "bearer":
-            token = self._resolve_env(self.token)
+            token = self._get_secret(self.token)
             session.headers["Authorization"] = f"Bearer {token}"
         elif auth_type == "ntlm":
             from requests_ntlm import HttpNtlmAuth
-            password = self._resolve_env(self.password)
+            password = self._get_secret(self.password)
             user = f"{self.domain}\\{self.username}" if self.domain else self.username
             session.auth = HttpNtlmAuth(user, password)
         elif auth_type == "negotiate":
@@ -75,11 +81,11 @@ class AdoConnection:
                 session.auth = HttpNegotiateAuth()
             except ImportError:
                 from requests_ntlm import HttpNtlmAuth
-                password = self._resolve_env(self.password)
+                password = self._get_secret(self.password)
                 user = f"{self.domain}\\{self.username}" if self.domain else self.username
                 session.auth = HttpNtlmAuth(user, password)
         elif auth_type == "apikey":
-            api_key = self._resolve_env(self.api_key_value)
+            api_key = self._get_secret(self.api_key_value)
             session.headers[self.api_key_header] = api_key
 
         return session
@@ -89,6 +95,11 @@ class AdoConnection:
             raise ValueError(
                 "BaseUrl is not configured for this source. "
                 "Edit the source and enter the full project URL (e.g. https://tfs.company.com/DefaultCollection/MyProject)."
+            )
+        if not self.base_url.startswith(("http://", "https://")):
+            raise ValueError(
+                f"BaseUrl '{self.base_url}' is not a valid URL — it must start with http:// or https://. "
+                "Edit the source and correct the Base URL field."
             )
         url = f"{self.base_url}/{api_path.lstrip('/')}"
         query = dict(params)

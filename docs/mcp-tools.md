@@ -1,10 +1,11 @@
 # MCP Tools Reference
 
-Conduit exposes its search and memory capabilities as MCP tools. Claude can call these tools directly during a conversation.
+Conduit exposes its search and memory capabilities as MCP tools that any MCP-compatible client can call.
 
 ## Connecting
 
-Add to `claude_desktop_config.json`:
+The MCP endpoint is `http://localhost:5000/mcp`. For clients that use a JSON config file:
+
 ```json
 {
   "mcpServers": {
@@ -16,7 +17,7 @@ Add to `claude_desktop_config.json`:
 }
 ```
 
-Or in VS Code, use the `.vscode/mcp.json` already included in the repo.
+A `.vscode/mcp.json` is already included in the repo for VS Code users.
 
 ---
 
@@ -110,7 +111,7 @@ retrieve_experience(query: str, top_k: int = 5) -> str
 
 Recalls relevant past experience: guidance, preferences, known mistakes, and past decisions. Returns a JSON object with an `experience` array of strings.
 
-**Always call this at the start of every new task or user request.** The experience store is where Claude's memory of the project accumulates over time.
+**Always call this at the start of every new task or user request.** The experience store is where project knowledge accumulates over time.
 
 Example:
 ```

@@ -113,6 +113,26 @@ async def sync_all_sources(background_tasks: BackgroundTasks):
     return RedirectResponse("/", status_code=303)
 
 
+@router.post("/sources/{source_id}/sync/pause")
+async def sync_pause(source_id: str):
+    source = await container.config_store.get_by_id(source_id)
+    if source and source.sync_status == "syncing":
+        container.sync_control.pause(source_id)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/sources/{source_id}/sync/resume")
+async def sync_resume(source_id: str):
+    container.sync_control.resume(source_id)
+    return JSONResponse({"ok": True})
+
+
+@router.post("/sources/{source_id}/sync/cancel")
+async def sync_cancel(source_id: str):
+    container.sync_control.request_cancel(source_id)
+    return RedirectResponse("/", status_code=303)
+
+
 @router.get("/health")
 async def health_check():
     from app.config import get_config
@@ -146,6 +166,7 @@ async def status():
             "syncTotal": p.total if p else None,
             "syncMessage": p.message if p else None,
             "syncErrorPhase": s.sync_error_phase,
+            "syncPaused": container.sync_control.is_paused(s.id),
         })
     return JSONResponse({"sources": result})
 
@@ -185,7 +206,7 @@ async def import_sources(request: Request, file: UploadFile):
         sources = await container.config_store.get_all()
         return templates.TemplateResponse(request, "index.html", _ctx(
             request, sources=sources,
-            import_message=f"Imported {imported} source(s). Fill in credentials before syncing.",
+            import_message=f"Imported {imported} source(s). Add credentials at /credentials, then edit each source to assign them before syncing.",
         ))
     except Exception as exc:
         sources = await container.config_store.get_all()
@@ -193,6 +214,93 @@ async def import_sources(request: Request, file: UploadFile):
             request, sources=sources,
             import_error=f"Import failed: {exc}",
         ))
+
+
+# ── Credentials ───────────────────────────────────────────────────────────────
+
+_CREDENTIAL_FIELDS = {"Pat", "Token", "Password", "ApiKeyValue"}
+
+
+@router.get("/credentials")
+async def credentials_get(request: Request, notice: str = ""):
+    credentials = await container.secrets_store.list_all()
+    sources = await container.config_store.get_all()
+    cred_usage = {
+        c.id: container.secrets_store.sources_using(c.id, sources)
+        for c in credentials
+    }
+
+    # Names referenced in source configs but not yet created in the store.
+    existing_names = {c.name for c in credentials}
+    missing: dict[str, list[str]] = {}
+    for source in sources:
+        for field in _CREDENTIAL_FIELDS:
+            ref = source.config.get(field, "")
+            if ref and ref not in existing_names:
+                missing.setdefault(ref, []).append(source.name)
+
+    return templates.TemplateResponse(request, "credentials.html", _ctx(
+        request,
+        credentials=credentials,
+        cred_usage=cred_usage,
+        missing_credentials=missing,
+        notice=notice,
+    ))
+
+
+@router.post("/credentials/create")
+async def credentials_create(
+    name: str = Form(...),
+    note: str = Form(""),
+    value: str = Form(...),
+):
+    name = name.strip()
+    value = value.strip()
+    if not name or not value:
+        return RedirectResponse("/credentials?notice=error_empty", status_code=303)
+    if "/" in name:
+        return RedirectResponse("/credentials?notice=error_invalid_name", status_code=303)
+    try:
+        await container.secrets_store.create(name, note, value)
+    except ValueError:
+        return RedirectResponse("/credentials?notice=error_duplicate", status_code=303)
+    except Exception:
+        return RedirectResponse("/credentials?notice=error_unexpected", status_code=303)
+    return RedirectResponse("/credentials?notice=created", status_code=303)
+
+
+@router.post("/credentials/{cred_name}/edit")
+async def credentials_edit(
+    cred_name: str,
+    name: str = Form(...),
+    note: str = Form(""),
+    value: str = Form(""),
+):
+    name = name.strip()
+    if not name:
+        return RedirectResponse("/credentials?notice=error_empty", status_code=303)
+    if "/" in name:
+        return RedirectResponse("/credentials?notice=error_invalid_name", status_code=303)
+    try:
+        old_name = await container.secrets_store.update(cred_name, name, note, value.strip() or None)
+    except ValueError:
+        return RedirectResponse("/credentials?notice=error_duplicate", status_code=303)
+    except Exception:
+        return RedirectResponse("/credentials?notice=error_unexpected", status_code=303)
+    if not old_name:
+        return RedirectResponse("/credentials?notice=error_not_found", status_code=303)
+    if old_name != name:
+        await container.config_store.rename_credential_references(old_name, name)
+    return RedirectResponse("/credentials?notice=updated", status_code=303)
+
+
+@router.post("/credentials/{cred_name}/delete")
+async def credentials_delete(cred_name: str):
+    try:
+        await container.secrets_store.delete(cred_name)
+    except Exception:
+        return RedirectResponse("/credentials?notice=error_unexpected", status_code=303)
+    return RedirectResponse("/credentials?notice=deleted", status_code=303)
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -531,6 +639,7 @@ async def sources_create_get(request: Request, type: str = "", provider: str = "
 
     # Step 3 — configure a specific type
     if type:
+        credentials = await container.secrets_store.list_all()
         return templates.TemplateResponse(request, "sources/create.html", _ctx(
             request,
             step="configure",
@@ -539,6 +648,7 @@ async def sources_create_get(request: Request, type: str = "", provider: str = "
             type_label=meta.label if meta else type,
             provider_label=PROVIDERS.get(meta.provider if meta else "", {}).get("label", ""),
             source=SourceDefinition(type=type, name=""),
+            credentials=credentials,
         ))
 
     # Step 2 — pick a type within a platform
@@ -578,7 +688,8 @@ async def sources_create_post(request: Request, background_tasks: BackgroundTask
                 source.config[ConfigKeys.TITLE] = manual_file.filename
 
     await container.config_store.save(source)
-    background_tasks.add_task(container.sync_service.sync, source.id)
+    if form.get("action", "save_sync") == "save_sync":
+        background_tasks.add_task(container.sync_service.sync, source.id)
     return RedirectResponse("/", status_code=303)
 
 
@@ -592,11 +703,13 @@ async def sources_edit_get(request: Request, source_id: str):
     meta = next((m for m in SOURCE_TYPE_META if m.type == source.type), None)
     type_label = meta.label if meta else source.type
     provider_label = PROVIDERS.get(meta.provider, {}).get("label", "") if meta else ""
+    credentials = await container.secrets_store.list_all()
     return templates.TemplateResponse(request, "sources/edit.html", _ctx(
         request,
         source=source,
         type_label=type_label,
         provider_label=provider_label,
+        credentials=credentials,
     ))
 
 
@@ -646,6 +759,8 @@ async def sources_edit_post(request: Request, source_id: str, background_tasks: 
             pass  # Qdrant may be offline; config save proceeds regardless
 
     await container.config_store.save(updated)
+    if form.get("action") == "save_sync":
+        background_tasks.add_task(container.sync_service.sync, source_id)
     return RedirectResponse("/", status_code=303)
 
 
@@ -664,8 +779,6 @@ async def sources_delete_get(request: Request, source_id: str):
 
 @router.post("/sources/{source_id}/delete")
 async def sources_delete_post(source_id: str):
-    if not container.health.is_ready:
-        return RedirectResponse(f"/sources/{source_id}/delete", status_code=303)
     source = await container.config_store.get_by_id(source_id)
     if source:
         collection = collection_for(source)

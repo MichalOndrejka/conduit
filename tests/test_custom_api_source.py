@@ -133,23 +133,32 @@ async def test_tags_contain_source_metadata(httpx_mock):
     assert docs[0].tags["source_name"] == "Test API"
 
 
+def _mock_store(monkeypatch, values: dict):
+    from app import container as _container
+    from unittest.mock import MagicMock
+    mock = MagicMock()
+    mock.get_value_sync.side_effect = lambda cred_id: values.get(cred_id, "")
+    monkeypatch.setattr(_container, "secrets_store", mock, raising=False)
+    return mock
+
+
 async def test_bearer_auth_header_sent(httpx_mock, monkeypatch):
-    monkeypatch.setenv("MY_TOKEN_VAR", "secret-token")
+    _mock_store(monkeypatch, {"cred-token-id": "secret-token"})
     httpx_mock.add_response(json=[])
     await CustomApiSource(_source(**{
         ConfigKeys.AUTH_TYPE: "bearer",
-        ConfigKeys.TOKEN: "MY_TOKEN_VAR",
+        ConfigKeys.TOKEN: "cred-token-id",
     })).fetch_documents()
     assert httpx_mock.get_requests()[0].headers["Authorization"] == "Bearer secret-token"
 
 
 async def test_apikey_auth_header_sent(httpx_mock, monkeypatch):
-    monkeypatch.setenv("MY_KEY", "abc123")
+    _mock_store(monkeypatch, {"cred-key-id": "abc123"})
     httpx_mock.add_response(json=[])
     await CustomApiSource(_source(**{
         ConfigKeys.AUTH_TYPE: "apikey",
         ConfigKeys.API_KEY_HEADER: "X-Custom-Key",
-        ConfigKeys.API_KEY_VALUE: "MY_KEY",
+        ConfigKeys.API_KEY_VALUE: "cred-key-id",
     })).fetch_documents()
     assert httpx_mock.get_requests()[0].headers["X-Custom-Key"] == "abc123"
 
@@ -158,17 +167,6 @@ async def test_no_auth_sends_no_authorization_header(httpx_mock):
     httpx_mock.add_response(json=[])
     await CustomApiSource(_source(**{ConfigKeys.AUTH_TYPE: "none"})).fetch_documents()
     assert "authorization" not in httpx_mock.get_requests()[0].headers
-
-
-async def test_bearer_env_var_not_set_uses_literal_as_token(httpx_mock, monkeypatch):
-    """When TOKEN env var is not defined, the literal config string is used as the token value."""
-    monkeypatch.delenv("NONEXISTENT_TOKEN_VAR", raising=False)
-    httpx_mock.add_response(json=[])
-    await CustomApiSource(_source(**{
-        ConfigKeys.AUTH_TYPE: "bearer",
-        ConfigKeys.TOKEN: "NONEXISTENT_TOKEN_VAR",
-    })).fetch_documents()
-    assert httpx_mock.get_requests()[0].headers["Authorization"] == "Bearer NONEXISTENT_TOKEN_VAR"
 
 
 async def test_absent_auth_type_sends_no_authorization_header(httpx_mock):

@@ -21,6 +21,8 @@ conduit-sources.json
 conduit-settings.json
 conduit-embedding.json
 *.local.json
+.secret_key
+credentials.enc.json
 
 # Qdrant local storage
 qdrant_storage/

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from typing import Optional
 
 import httpx
@@ -78,17 +77,21 @@ class CustomApiSource(Source):
 
         return docs
 
+    def _get_secret(self, cred_id: str) -> str:
+        if not cred_id:
+            return ""
+        from app import container
+        return container.secrets_store.get_value_sync(cred_id)
+
     def _build_headers(self, auth_type: str) -> dict[str, str]:
         headers: dict[str, str] = {}
         cfg = self._source
         if auth_type == "bearer":
-            env_var = cfg.get_config(ConfigKeys.TOKEN)
-            token = os.environ.get(env_var, env_var)
+            token = self._get_secret(cfg.get_config(ConfigKeys.TOKEN))
             headers["Authorization"] = f"Bearer {token}"
         elif auth_type == "apikey":
             header_name = cfg.get_config(ConfigKeys.API_KEY_HEADER, "X-Api-Key")
-            env_var = cfg.get_config(ConfigKeys.API_KEY_VALUE)
-            value = os.environ.get(env_var, env_var)
+            value = self._get_secret(cfg.get_config(ConfigKeys.API_KEY_VALUE))
             headers[header_name] = value
         return headers
 

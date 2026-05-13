@@ -59,8 +59,23 @@ class SourceConfigStore:
             cfg = d.get("config", {})
             if cfg.get(ConfigKeys.PROVIDER) == "manual" or cfg.get(ConfigKeys.DOC_TYPE) == "upload":
                 cfg[ConfigKeys.CONTENT] = DOCUMENT_PLACEHOLDER
+            # Credential fields store the credential NAME — portable across systems.
+            # Importers create a credential with the same name and sources resolve automatically.
             result.append(d)
         return result
+
+    async def rename_credential_references(self, old_name: str, new_name: str) -> None:
+        credential_fields = {ConfigKeys.PAT, ConfigKeys.TOKEN, ConfigKeys.PASSWORD, ConfigKeys.API_KEY_VALUE}
+        async with self._lock:
+            sources = self._read()
+            changed = False
+            for s in sources:
+                for field in credential_fields:
+                    if s.config.get(field) == old_name:
+                        s.config[field] = new_name
+                        changed = True
+            if changed:
+                self._write(sources)
 
     def _read(self) -> list[SourceDefinition]:
         if not self._path.exists():

@@ -1,7 +1,8 @@
-﻿{# Shared Custom API connection partial. #}
+{# Shared Custom API connection partial. #}
 {% set cfg = source.config %}
 {% set raw_auth = cfg.get("AuthType", "") %}
 {% set current_auth = raw_auth if raw_auth else "none" %}
+{% set credentials = credentials | default([]) %}
 
 <div class="mb-4">
     <label class="field-label">Endpoint URL <span class="text-red-400">*</span></label>
@@ -26,9 +27,24 @@
     </div>
 </div>
 
+{% macro cred_select(field_name, form_key, label) %}
+{% set current_id = source.config.get(field_name, '') %}
+{% set creds = credentials | default([]) %}
+<div>
+    <label class="field-label">{{ label }}</label>
+    <select name="{{ form_key }}" class="field-input">
+        <option value="">— Select credential —</option>
+        {% for cred in creds %}
+        <option value="{{ cred.name }}" {% if current_id == cred.name %}selected{% endif %}>
+            {{ cred.name }}{% if cred.note %} — {{ cred.note }}{% endif %}
+        </option>
+        {% endfor %}
+    </select>
+</div>
+{% endmacro %}
+
 <div id="custom-auth-bearer" {% if current_auth != "bearer" %}style="display:none"{% endif %} class="mb-4">
-    <label class="field-label">Token Environment Variable</label>
-    <input name="ConfigToken" value="{{ cfg.get('Token', '') }}" class="field-input font-mono" />
+    {{ cred_select('Token', 'ConfigToken', 'Bearer Token') }}
 </div>
 
 <div id="custom-auth-apikey" {% if current_auth != "apikey" %}style="display:none"{% endif %} class="mb-4">
@@ -37,10 +53,7 @@
             <label class="field-label">Header Name <span class="text-red-400">*</span></label>
             <input name="ConfigApiKeyHeader" value="{{ cfg.get('ApiKeyHeader', '') }}" class="field-input" />
         </div>
-        <div>
-            <label class="field-label">Header Value Env Var <span class="text-red-400">*</span></label>
-            <input name="ConfigApiKeyValue" value="{{ cfg.get('ApiKeyValue', '') }}" class="field-input font-mono" />
-        </div>
+        {{ cred_select('ApiKeyValue', 'ConfigApiKeyValue', 'API Key') }}
     </div>
 </div>
 

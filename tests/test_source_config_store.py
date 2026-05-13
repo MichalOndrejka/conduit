@@ -82,33 +82,35 @@ async def test_reset_all_sync_status_updates_all_sources(store):
 
 
 # ── export_stripped ────────────────────────────────────────────────────────────
-# Pat/Token/Password/ApiKeyValue store *env var names*, not actual secrets.
-# export_stripped must preserve them so the config is usable on another system.
+# Credential fields (Pat/Token/Password/ApiKeyValue) store the credential NAME,
+# which is the portable cross-system identifier. export_stripped must preserve
+# them so importers can create a credential with the same name and skip
+# reconfiguring every source.
 
-async def test_export_stripped_preserves_pat_env_var_name(store, sample_source):
+async def test_export_stripped_preserves_pat_name(store, sample_source):
     await store.save(sample_source)
     assert store.export_stripped()[0]["config"]["Pat"] == "secret-pat"
 
 
 async def test_export_stripped_preserves_token_and_base_url(store):
-    src = SourceDefinition(type="t", name="n", config={"Token": "MY_TOKEN_VAR", "BaseUrl": "http://x"})
+    src = SourceDefinition(type="t", name="n", config={"Token": "MY_TOKEN", "BaseUrl": "http://x"})
     await store.save(src)
     exported = store.export_stripped()[0]["config"]
-    assert exported["Token"] == "MY_TOKEN_VAR"
+    assert exported["Token"] == "MY_TOKEN"
     assert exported["BaseUrl"] == "http://x"
 
 
 async def test_export_stripped_preserves_password_and_api_key_value(store):
-    src = SourceDefinition(type="t", name="n", config={"Password": "MY_PW_VAR", "ApiKeyValue": "MY_KEY_VAR"})
+    src = SourceDefinition(type="t", name="n", config={"Password": "MY_PW", "ApiKeyValue": "MY_KEY"})
     await store.save(src)
     exported = store.export_stripped()[0]["config"]
-    assert exported["Password"] == "MY_PW_VAR"
-    assert exported["ApiKeyValue"] == "MY_KEY_VAR"
+    assert exported["Password"] == "MY_PW"
+    assert exported["ApiKeyValue"] == "MY_KEY"
 
 
-async def test_export_stripped_returns_all_config_keys(store):
+async def test_export_stripped_includes_credential_fields_in_key_set(store):
     src = SourceDefinition(type="t", name="n", config={
-        "Pat": "TFS_PAT", "BaseUrl": "https://x", "AuthType": "pat", "ApiVersion": "7.1"
+        "Pat": "MY_PAT", "BaseUrl": "https://x", "AuthType": "pat", "ApiVersion": "7.1"
     })
     await store.save(src)
     exported = store.export_stripped()[0]["config"]
@@ -148,6 +150,31 @@ async def test_export_stripped_preserves_content_for_non_manual_sources(store):
     await store.save(src)
     exported = store.export_stripped()[0]["config"]
     assert ConfigKeys.CONTENT not in exported
+
+
+# ── rename_credential_references ─────────────────────────────────────────────
+
+async def test_rename_credential_updates_all_matching_sources(store):
+    src1 = SourceDefinition(type="t", name="S1", config={"Pat": "OLD_NAME", "BaseUrl": "http://x"})
+    src2 = SourceDefinition(type="t", name="S2", config={"Token": "OLD_NAME"})
+    src3 = SourceDefinition(type="t", name="S3", config={"Pat": "OTHER"})
+    for s in [src1, src2, src3]:
+        await store.save(s)
+
+    await store.rename_credential_references("OLD_NAME", "NEW_NAME")
+
+    sources = await store.get_all()
+    by_name = {s.name: s for s in sources}
+    assert by_name["S1"].config["Pat"] == "NEW_NAME"
+    assert by_name["S2"].config["Token"] == "NEW_NAME"
+    assert by_name["S3"].config["Pat"] == "OTHER"   # untouched
+
+
+async def test_rename_credential_noop_when_not_referenced(store):
+    src = SourceDefinition(type="t", name="S", config={"Pat": "KEEP"})
+    await store.save(src)
+    await store.rename_credential_references("GHOST", "NEW")  # must not raise or corrupt
+    assert (await store.get_all())[0].config["Pat"] == "KEEP"
 
 
 # ── _normalise_keys ────────────────────────────────────────────────────────────

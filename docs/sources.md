@@ -18,16 +18,18 @@ Fetches data from an ADO REST API — cloud or on-premise TFS/VSTS.
 
 **Auth type details**
 
-| Auth type | Additional fields | Notes |
-|-----------|------------------|-------|
-| `pat` | `Pat` (env var name) | Personal Access Token. Recommended for ADO cloud. |
-| `bearer` | `Token` (env var name) | Bearer token. Suitable for service principals. |
-| `ntlm` | `Username`, `Password` (env var name), `Domain` | On-premise TFS with Windows/NTLM auth. |
-| `negotiate` | `Username`, `Password` (env var name), `Domain` | Kerberos/NTLM negotiate. Falls back to NTLM if `requests-negotiate-sspi` is not installed. |
-| `apikey` | `ApiKeyHeader`, `ApiKeyValue` (env var name) | Sends a custom header, e.g. `X-Api-Key: <value>`. |
-| `none` | — | No authentication. For open endpoints or when auth is handled at network level. |
+| Auth type | Credential fields | Plain-text fields | Notes |
+|-----------|------------------|-------------------|-------|
+| `pat` | `Pat` | — | Personal Access Token. Recommended for ADO cloud. |
+| `bearer` | `Token` | — | Bearer token. Suitable for service principals. |
+| `ntlm` | `Password` | `Username`, `Domain` | On-premise TFS with Windows/NTLM auth. |
+| `negotiate` | `Password` | `Username`, `Domain` | Kerberos/NTLM negotiate. Falls back to NTLM if `requests-negotiate-sspi` is not installed. |
+| `apikey` | `ApiKeyValue` | `ApiKeyHeader` | Sends a custom header, e.g. `X-Api-Key: <value>`. |
+| `none` | — | — | No authentication. For open endpoints or when auth is handled at network level. |
 
-Credential fields (`Pat`, `Token`, `Password`, `ApiKeyValue`) store the **name of an environment variable**, not the secret itself. Conduit reads the actual value from the environment at sync time. If the named variable is not set, the literal string is used as a fallback (useful for testing).
+**Credential fields** (`Pat`, `Token`, `Password`, `ApiKeyValue`) show a dropdown populated from the [credential library](/credentials). Select the named credential that holds the secret value. The credential name is stored in `conduit-sources.json`; the actual secret is looked up from the encrypted store at sync time.
+
+Add and manage credentials at `/credentials` in the web UI before configuring sources that require authentication.
 
 ---
 
@@ -40,9 +42,9 @@ Fetches from any HTTP endpoint that returns JSON.
 | URL | `Url` | Full endpoint URL. Required. |
 | HTTP method | `HttpMethod` | `GET` (default) or `POST`. |
 | Auth type | `AuthType` | `none` (default) \| `bearer` \| `apikey` |
-| Token | `Token` | Env var name holding the bearer token. |
+| Token | `Token` | Credential name (selected from `/credentials`). Used for bearer auth. |
 | API key header | `ApiKeyHeader` | Header name for API key auth, e.g. `X-Api-Key`. |
-| API key value | `ApiKeyValue` | Env var name holding the API key value. |
+| API key value | `ApiKeyValue` | Credential name (selected from `/credentials`). Used for API-key auth. |
 | Items path | `ItemsPath` | Dot-notation path into the response JSON to the array of items, e.g. `data.records`. Leave empty if the root is an array. |
 | Title field | `TitleField` | Field name used as the document title. Defaults to `title`. |
 | Content fields | `ContentFields` | Comma-separated field names to include in the document body. Leave empty to include all fields. |
@@ -298,8 +300,8 @@ Create one source per repository. Use the `source_name` filter on MCP search too
 
 ### On-premise TFS with Windows auth
 
-Set `AuthType` to `ntlm` and set `BaseUrl` to your TFS collection URL, e.g. `https://tfs.company.com/DefaultCollection/MyProject`. Store your Windows password in an environment variable and reference it in `Password`.
+Set `AuthType` to `ntlm` and `BaseUrl` to your TFS collection URL, e.g. `https://tfs.company.com/DefaultCollection/MyProject`. Create a credential at `/credentials` with your Windows password and select it in the `Password` dropdown on the source form.
 
 ### Private API with no standard auth
 
-Use the Custom API provider with `AuthType: apikey`. Set `ApiKeyHeader` to the header name your API expects and `ApiKeyValue` to the name of an environment variable holding the key.
+Use the Custom API provider with `AuthType: apikey`. Set `ApiKeyHeader` to the header name your API expects, then create a credential at `/credentials` containing the key value and select it in the `ApiKeyValue` dropdown.

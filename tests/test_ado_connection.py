@@ -143,23 +143,32 @@ def test_empty_body_does_not_raise():
     _check_html_auth_redirect(_resp(text=""), "http://x", "POST")
 
 
-# ── _resolve_env ──────────────────────────────────────────────────────────────
+# ── _get_secret ───────────────────────────────────────────────────────────────
 
-def test_resolve_env_returns_env_var_value_when_set(monkeypatch):
-    monkeypatch.setenv("MY_SECRET_VAR", "actual-secret")
+def test_get_secret_empty_string_returns_empty_string():
     conn = AdoConnection(base_url="http://x")
-    assert conn._resolve_env("MY_SECRET_VAR") == "actual-secret"
+    assert conn._get_secret("") == ""
 
 
-def test_resolve_env_falls_back_to_literal_when_var_not_set(monkeypatch):
-    monkeypatch.delenv("UNSET_VAR_XYZ", raising=False)
+def test_get_secret_raises_when_credential_not_found(monkeypatch):
+    from app import container as _container
+    from unittest.mock import MagicMock
+    mock_store = MagicMock()
+    mock_store.get_value_sync.return_value = ""
+    monkeypatch.setattr(_container, "secrets_store", mock_store, raising=False)
     conn = AdoConnection(base_url="http://x")
-    assert conn._resolve_env("UNSET_VAR_XYZ") == "UNSET_VAR_XYZ"
+    with __import__("pytest").raises(ValueError, match="not found"):
+        conn._get_secret("missing-cred-id")
 
 
-def test_resolve_env_empty_string_returns_empty_string():
+def test_get_secret_returns_value_from_store(monkeypatch):
+    from app import container as _container
+    from unittest.mock import MagicMock
+    mock_store = MagicMock()
+    mock_store.get_value_sync.return_value = "actual-secret"
+    monkeypatch.setattr(_container, "secrets_store", mock_store, raising=False)
     conn = AdoConnection(base_url="http://x")
-    assert conn._resolve_env("") == ""
+    assert conn._get_secret("some-cred-id") == "actual-secret"
 
 
 # ── verify_ssl / SSL config ───────────────────────────────────────────────────

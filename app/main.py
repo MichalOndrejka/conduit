@@ -22,7 +22,9 @@ from app.rag.indexer import DocumentIndexer
 from app.rag.search import SearchService
 from app.rag.vector_store import VectorStore
 from app.sources.factory import SourceFactory
+from app.store.secrets_store import SecretsStore
 from app.store.source_config import SourceConfigStore
+from app.store.sync_control import SyncControlStore
 from app.store.sync_progress import SyncProgressStore
 from app.sync.service import SyncService
 from app.templates_cfg import templates  # noqa: F401 — re-exported for convenience
@@ -36,6 +38,9 @@ mcp = FastMCP("Conduit")
 async def lifespan(app: FastAPI):
     cfg = load_config()
 
+    data_dir = Path(cfg.sources_file_path).parent
+    secrets_store = SecretsStore(data_dir)
+
     embedding = EmbeddingService(cfg)
     chunker = TextChunker(cfg)
     vector_store = VectorStore(cfg)
@@ -44,10 +49,11 @@ async def lifespan(app: FastAPI):
     search_service = SearchService(vector_store, embedding)
     config_store = SourceConfigStore(cfg.sources_file_path)
     progress_store = SyncProgressStore()
+    sync_control = SyncControlStore()
     ado_client = AdoClient()
     parser_registry = ParserRegistry()
     source_factory = SourceFactory(ado_client, parser_registry)
-    sync_service = SyncService(config_store, source_factory, indexer, progress_store, preprocessor)
+    sync_service = SyncService(config_store, source_factory, indexer, progress_store, preprocessor, sync_control)
     health = QdrantHealth()
     embedding_health = EmbeddingHealth()
     llm_health = LlmHealth()
@@ -57,9 +63,11 @@ async def lifespan(app: FastAPI):
     container.health = health
     container.embedding_health = embedding_health
     container.llm_health = llm_health
+    container.secrets_store = secrets_store
     container.config_store = config_store
     container.sync_service = sync_service
     container.progress_store = progress_store
+    container.sync_control = sync_control
     container.vector_store = vector_store
     container.search_service = search_service
     container.memory_service = memory_service

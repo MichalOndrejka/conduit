@@ -21,12 +21,12 @@ services:
     environment:
       # Qdrant — must point to the service name inside compose network
       CONDUIT_CONFIG: /app/config.json
+      CONDUIT_DATA_DIR: /data
       QDRANT_HOST: qdrant
       QDRANT_PORT: "6333"
-      # Embedding API key — set this or use a .env file
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Any other secrets your sources need (PAT, bearer tokens, etc.)
-      ADO_PAT: ${ADO_PAT:-}
+      # Optional: stable Fernet key for credential encryption (base64url, 44 chars).
+      # If not set, a key is auto-generated in the data volume on first start.
+      # CONDUIT_SECRET_KEY: ${CONDUIT_SECRET_KEY:-}
     depends_on:
       qdrant:
         condition: service_healthy

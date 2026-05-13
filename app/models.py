@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from typing import Optional
@@ -8,6 +9,13 @@ import uuid
 
 
 DOCUMENT_PLACEHOLDER = "__DOCUMENT_REQUIRED__"
+
+
+@dataclass
+class CredentialInfo:
+    id: str
+    name: str
+    note: str
 
 
 # ── Collection names ────────────────────────────────────────────────────────

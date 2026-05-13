@@ -10,16 +10,20 @@ if TYPE_CHECKING:
     from app.rag.preprocessor import DocumentPreprocessor
     from app.rag.search import SearchService
     from app.rag.vector_store import VectorStore
+    from app.store.secrets_store import SecretsStore
     from app.store.source_config import SourceConfigStore
+    from app.store.sync_control import SyncControlStore
     from app.store.sync_progress import SyncProgressStore
     from app.sync.service import SyncService
 
 health: "QdrantHealth"
 embedding_health: "EmbeddingHealth"
 llm_health: "LlmHealth"
+secrets_store: "SecretsStore"
 config_store: "SourceConfigStore"
 sync_service: "SyncService"
 progress_store: "SyncProgressStore"
+sync_control: "SyncControlStore"
 vector_store: "VectorStore"
 search_service: "SearchService"
 memory_service: "MemoryService"

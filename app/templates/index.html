@@ -71,6 +71,7 @@
     <div class="table-row grid grid-cols-12 gap-4 px-5 py-3.5 items-center" id="row-{{ source.id }}"
          data-source-id="{{ source.id }}"
          data-name="{{ source.name | lower }}"
+         data-display-name="{{ source.name | e }}"
          data-type="{{ source.type | lower }}"
          data-status="{{ status_order.get(st, 3) }}"
          data-synced="{{ source.last_synced_at.strftime('%Y%m%d%H%M') if source.last_synced_at else '0' }}"
@@ -135,7 +136,21 @@
         </div>
 
         <!-- Actions -->
-        <div class="col-span-1 flex items-center justify-end gap-1.5">
+        <div class="col-span-1 flex items-center justify-end gap-1.5" id="actions-{{ source.id }}">
+            {% if st == 'syncing' %}
+            <button type="button" title="Pause" onclick="syncPause('{{ source.id }}')"
+                class="w-7 h-7 rounded-md flex items-center justify-center text-slate-500 hover:text-amber-400 hover:bg-amber-500/10 transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6"/>
+                </svg>
+            </button>
+            <button type="button" title="Cancel" onclick="syncCancel('{{ source.id }}')"
+                class="w-7 h-7 rounded-md flex items-center justify-center text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+            </button>
+            {% else %}
             <form method="post" action="/sync/{{ source.id }}" class="contents">
                 <button type="submit" title="Sync now"
                     class="w-7 h-7 rounded-md flex items-center justify-center text-slate-500 hover:text-violet-400 hover:bg-violet-500/10 transition-colors">
@@ -165,6 +180,7 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
                 </svg>
             </button>
+            {% endif %}
         </div>
     </div>
     {% endfor %}
@@ -199,15 +215,14 @@
             </div>
         </div>
         <p class="text-sm text-slate-300 mb-5">Delete <span id="delete-name" class="font-medium text-slate-100"></span>?</p>
-        <form id="delete-form" method="post">
-            <div class="flex items-center gap-3">
-                <button type="submit" class="btn-danger inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
-                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
-                    Confirm Delete
-                </button>
-                <button type="button" onclick="closeDeleteModal()" class="btn-ghost inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium">Cancel</button>
-            </div>
-        </form>
+        <div class="flex items-center gap-3">
+            <button type="button" id="delete-confirm-btn" onclick="executeDelete()"
+                    class="btn-danger inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                Confirm Delete
+            </button>
+            <button type="button" onclick="closeDeleteModal()" class="btn-ghost inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium">Cancel</button>
+        </div>
     </div>
 </div>
 
@@ -230,6 +245,62 @@
 
 {% block scripts %}
 <script>
+// ── Sync control helpers ──────────────────────────────────────────────────────
+var ICO_PAUSE   = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6"/></svg>';
+var ICO_PLAY    = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/></svg>';
+var ICO_CANCEL  = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>';
+var ICO_SYNC    = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+var ICO_EDIT    = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>';
+var ICO_COPY    = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>';
+var ICO_DELETE  = '<svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>';
+var ICO_PAUSE_SM = '<svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 9v6m4-6v6"/></svg>';
+var BTN_BASE    = 'w-7 h-7 rounded-md flex items-center justify-center transition-colors';
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function syncingActionsBtns(id, paused) {
+    var pauseBtn = paused
+        ? '<button type="button" title="Resume" onclick="syncResume(\'' + id + '\')" class="' + BTN_BASE + ' text-amber-500 hover:text-amber-400 hover:bg-amber-500/10">' + ICO_PLAY + '</button>'
+        : '<button type="button" title="Pause"  onclick="syncPause(\'' + id + '\')"  class="' + BTN_BASE + ' text-slate-500 hover:text-amber-400 hover:bg-amber-500/10">' + ICO_PAUSE + '</button>';
+    var cancelBtn = '<button type="button" title="Cancel" onclick="syncCancel(\'' + id + '\')" class="' + BTN_BASE + ' text-slate-500 hover:text-red-400 hover:bg-red-500/10">' + ICO_CANCEL + '</button>';
+    return pauseBtn + cancelBtn;
+}
+
+function normalActionsBtns(id, displayName) {
+    var safe = escHtml(displayName);
+    return '<form method="post" action="/sync/' + id + '" class="contents"><button type="submit" title="Sync now" class="' + BTN_BASE + ' text-slate-500 hover:text-violet-400 hover:bg-violet-500/10">' + ICO_SYNC + '</button></form>'
+         + '<a href="/sources/' + id + '/edit" title="Edit" class="' + BTN_BASE + ' text-slate-500 hover:text-violet-400 hover:bg-violet-500/10">' + ICO_EDIT + '</a>'
+         + '<form method="post" action="/sources/' + id + '/copy" class="contents"><button type="submit" title="Duplicate" class="' + BTN_BASE + ' text-slate-500 hover:text-violet-400 hover:bg-violet-500/10">' + ICO_COPY + '</button></form>'
+         + '<button type="button" title="Delete" onclick="openDeleteModal(\'' + safe + '\',\'/sources/' + id + '/delete\')" class="' + BTN_BASE + ' text-slate-500 hover:text-red-400 hover:bg-red-500/10">' + ICO_DELETE + '</button>';
+}
+
+function syncPause(id) {
+    fetch('/sources/' + id + '/sync/pause', {method: 'POST'}).then(function() {
+        var el = document.getElementById('actions-' + id);
+        if (el) el.innerHTML = syncingActionsBtns(id, true);
+        var st = document.getElementById('status-' + id);
+        if (st) st.innerHTML = '<span class="badge badge-paused">' + ICO_PAUSE_SM + '&nbsp;Paused</span>';
+    });
+}
+
+function syncResume(id) {
+    fetch('/sources/' + id + '/sync/resume', {method: 'POST'}).then(function() {
+        var el = document.getElementById('actions-' + id);
+        if (el) el.innerHTML = syncingActionsBtns(id, false);
+        var st = document.getElementById('status-' + id);
+        if (st) st.innerHTML = '<span class="badge badge-syncing"><span class="spinner"></span>Resuming…</span>';
+    });
+}
+
+function syncCancel(id) {
+    fetch('/sources/' + id + '/sync/cancel', {method: 'POST'}).then(function() {
+        var st = document.getElementById('status-' + id);
+        if (st) st.innerHTML = '<span class="badge badge-idle">Cancelling…</span>';
+    });
+}
+
 // ── Status polling ────────────────────────────────────────────────────────────
 (function () {
     var syncing = {{ 'true' if sources and sources|selectattr('sync_status','eq','syncing')|list else 'false' }};
@@ -239,14 +310,19 @@
         fetch('/status').then(r => r.json()).then(data => {
             var stillSyncing = false;
             data.sources.forEach(function(s) {
-                var statusEl = document.getElementById('status-' + s.id);
-                var syncedEl = document.getElementById('synced-' + s.id);
+                var statusEl  = document.getElementById('status-'  + s.id);
+                var syncedEl  = document.getElementById('synced-'  + s.id);
+                var actionsEl = document.getElementById('actions-' + s.id);
+                var row = document.querySelector('[data-source-id="' + s.id + '"]');
+                var displayName = row ? (row.dataset.displayName || '') : '';
                 if (!statusEl) return;
 
                 var badge = '';
                 if (s.syncStatus === 'syncing') {
                     stillSyncing = true;
-                    if (s.syncPhase === 'indexing') {
+                    if (s.syncPaused) {
+                        badge = '<span class="badge badge-paused">' + ICO_PAUSE_SM + '&nbsp;Paused</span>';
+                    } else if (s.syncPhase === 'indexing') {
                         var pct = s.syncTotal ? Math.round((s.syncCurrent / s.syncTotal) * 100) : 0;
                         var countLabel = s.syncTotal ? s.syncCurrent + ' / ' + s.syncTotal : '';
                         badge = '<span class="badge badge-syncing"><span class="spinner"></span>Embedding…' + (countLabel ? ' <span class="opacity-60 font-normal">' + countLabel + '</span>' : '') + '</span>';
@@ -256,16 +332,20 @@
                         var countLabel = (s.syncCurrent && s.syncTotal) ? s.syncCurrent + ' / ' + s.syncTotal : (s.syncTotal ? '0 / ' + s.syncTotal : '');
                         badge = '<span class="badge badge-syncing"><span class="spinner"></span>' + msg + (countLabel ? ' <span class="opacity-60 font-normal">' + countLabel + '</span>' : '') + '</span>';
                     }
-                } else if (s.syncStatus === 'completed') {
-                    badge = '<span class="badge badge-done"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>Indexed</span>';
-                } else if (s.syncStatus === 'failed') {
-                    badge = '<span class="badge badge-error"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>Failed</span>';
-                    if (s.syncError) {
-                        var safeErr = s.syncError.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-                        badge += '<button type="button" data-error="' + safeErr + '" onclick="showError(this.dataset.error)" class="block text-xs text-red-400/70 hover:text-red-300 mt-1 text-left transition-colors" style="max-width:18rem;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">' + safeErr + '</button>';
-                    }
+                    if (actionsEl) actionsEl.innerHTML = syncingActionsBtns(s.id, s.syncPaused);
                 } else {
-                    badge = '<span class="badge badge-idle">Not Indexed</span>';
+                    if (s.syncStatus === 'completed') {
+                        badge = '<span class="badge badge-done"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>Indexed</span>';
+                    } else if (s.syncStatus === 'failed') {
+                        badge = '<span class="badge badge-error"><svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>Failed</span>';
+                        if (s.syncError) {
+                            var safeErr = s.syncError.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+                            badge += '<button type="button" data-error="' + safeErr + '" onclick="showError(this.dataset.error)" class="block text-xs text-red-400/70 hover:text-red-300 mt-1 text-left transition-colors" style="max-width:18rem;word-break:break-word;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;">' + safeErr + '</button>';
+                        }
+                    } else {
+                        badge = '<span class="badge badge-idle">Not Indexed</span>';
+                    }
+                    if (actionsEl) actionsEl.innerHTML = normalActionsBtns(s.id, displayName);
                 }
                 statusEl.innerHTML = badge;
                 if (syncedEl && s.lastSyncedAt) syncedEl.textContent = s.lastSyncedAt;
@@ -278,17 +358,25 @@
 
 // ── Delete modal ──────────────────────────────────────────────────────────────
 var QDRANT_READY = {{ 'true' if qdrant_ready else 'false' }};
+var _deleteAction = '';
 function openDeleteModal(name, action) {
     if (!QDRANT_READY) {
         showError('Vector store is offline. Cannot delete sources while disconnected — this would leave orphaned data in the index.');
         return;
     }
+    _deleteAction = action;
     document.getElementById('delete-name').textContent = name;
-    document.getElementById('delete-form').action = action;
     document.getElementById('delete-overlay').classList.remove('hidden');
 }
 function closeDeleteModal() {
     document.getElementById('delete-overlay').classList.add('hidden');
+}
+function executeDelete() {
+    if (!_deleteAction) return;
+    var btn = document.getElementById('delete-confirm-btn');
+    btn.disabled = true;
+    fetch(_deleteAction, {method: 'POST'})
+        .finally(() => { window.location.href = '/'; });
 }
 document.getElementById('delete-overlay').addEventListener('click', function(e) {
     if (e.target === this) closeDeleteModal();
