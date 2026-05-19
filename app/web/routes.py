@@ -348,7 +348,7 @@ async def settings_save_embedding(
     model: str = Form(...),
     base_url: str = Form(""),
     dimensions: int = Form(768),
-    max_input_chars: int = Form(8000),
+    max_input_tokens: int = Form(8192),
 ):
     from app.config import AppConfig, EmbeddingConfig, get_config, save_config
     from app.models import CollectionNames
@@ -358,7 +358,7 @@ async def settings_save_embedding(
         model=model,
         base_url=base_url,
         dimensions=dimensions,
-        max_input_chars=max_input_chars,
+        max_input_tokens=max_input_tokens,
     )
     new_cfg = AppConfig(
         embedding=new_embedding,
@@ -431,7 +431,7 @@ async def settings_verify_embedding(
     model: str = Form(...),
     base_url: str = Form(""),
     dimensions: int = Form(768),
-    max_input_chars: int = Form(8000),
+    max_input_tokens: int = Form(8192),
 ):
     try:
         from app.config import AppConfig, EmbeddingConfig, get_config
@@ -442,7 +442,7 @@ async def settings_verify_embedding(
                 model=model,
                 base_url=base_url,
                 dimensions=dimensions,
-                max_input_chars=max_input_chars,
+                max_input_tokens=max_input_tokens,
             ),
             qdrant=cfg.qdrant,
             chunking=cfg.chunking,

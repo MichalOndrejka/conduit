@@ -10,7 +10,7 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
     "dimensions": 768,
-    "max_input_chars": 8000
+    "max_input_tokens": 8192
   },
   "qdrant": {
     "host": "localhost",
@@ -54,9 +54,9 @@ Change this if Ollama is running on a different host or port.
 
 Vector dimensions. **Must match the model exactly.** Changing this drops all existing Qdrant collections and marks every source for re-indexing.
 
-### `max_input_chars`
+### `max_input_tokens`
 
-Hard limit on characters sent to the embedding API per chunk. Default `8000` (~2 000 tokens). Chunks exceeding this are truncated before embedding. Increase if your model supports a larger context window and your documents are dense.
+Context window of your embedding model in tokens. Default `8192` (matches `nomic-embed-text-v2-moe`). Check your model's card for the correct value. The app converts this to a character limit using a conservative 2 chars/token estimate, so chunks are never sent to the model in excess of its context window. Update this when switching embedding models (e.g. `mxbai-embed-large` → `512`, `all-minilm` → `256`).
 
 ---
 

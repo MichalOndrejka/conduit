@@ -1,18 +1,31 @@
 from __future__ import annotations
 
+import logging
 import re
 from app.config import AppConfig
 from app.models import TextChunk
 
+log = logging.getLogger(__name__)
 
 _SENTENCE_END = re.compile(r"[.!?]\s+")
 _NEWLINE      = re.compile(r"\n")
+
+_CHARS_PER_TOKEN = 2  # must stay in sync with embedding.py
 
 
 class TextChunker:
     def __init__(self, cfg: AppConfig) -> None:
         self._max_size = cfg.chunking.max_chunk_size
         self._overlap  = cfg.chunking.overlap
+
+        effective_embed_chars = cfg.embedding.max_input_tokens * _CHARS_PER_TOKEN
+        if self._max_size > effective_embed_chars:
+            log.warning(
+                "max_chunk_size (%d chars) exceeds embedding model limit "
+                "(%d tokens × %d chars/token = %d chars) — clamping chunk size",
+                self._max_size, cfg.embedding.max_input_tokens, _CHARS_PER_TOKEN, effective_embed_chars,
+            )
+            self._max_size = effective_embed_chars
 
     def chunk(self, text: str) -> list[TextChunk]:
         """

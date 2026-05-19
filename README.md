@@ -199,7 +199,7 @@ docker-compose up
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
     "dimensions": 768,
-    "max_input_chars": 8000
+    "max_input_tokens": 8192
   },
   "qdrant": {
     "host": "localhost",

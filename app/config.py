@@ -11,7 +11,7 @@ class EmbeddingConfig(BaseModel):
     model: str = "nomic-embed-text-v2-moe"
     base_url: str = "http://localhost:11434/v1"
     dimensions: int = 768
-    max_input_chars: int = 8000       # Hard cap on chars sent per embedding call (≈2 000 tokens)
+    max_input_tokens: int = 8192      # Embedding model's context window in tokens (check model card)
 
 
 class QdrantConfig(BaseModel):
