@@ -313,7 +313,7 @@ def _reload_embedding_services(cfg) -> None:
     from app.rag.search import SearchService
     from app.memory.service import MemoryService
 
-    new_embedding = EmbeddingService(cfg)
+    new_embedding = EmbeddingService(cfg, container.secrets_store)
     new_chunker = TextChunker(cfg)
 
     container.search_service = SearchService(container.vector_store, new_embedding)
@@ -335,30 +335,42 @@ def _reload_preprocessing_service(cfg) -> None:
 async def settings_get(request: Request, notice: str = ""):
     from app.config import get_config, get_config_path
     cfg = get_config()
+    credentials = await container.secrets_store.list_all()
     return templates.TemplateResponse(request, "settings.html", _ctx(
         request,
         cfg=cfg,
         config_path=get_config_path(),
         notice=notice,
+        credentials=credentials,
     ))
 
 
 @router.post("/settings/embedding")
 async def settings_save_embedding(
+    provider: str = Form("openai-compatible"),
     model: str = Form(...),
     base_url: str = Form(""),
     dimensions: int = Form(768),
     max_input_tokens: int = Form(8192),
+    azure_endpoint: str = Form(""),
+    azure_deployment: str = Form(""),
+    azure_api_version: str = Form("2024-02-01"),
+    azure_api_key_credential: str = Form(""),
 ):
     from app.config import AppConfig, EmbeddingConfig, get_config, save_config
     from app.models import CollectionNames
 
     old_cfg = get_config()
     new_embedding = EmbeddingConfig(
+        provider=provider,
         model=model,
         base_url=base_url,
         dimensions=dimensions,
         max_input_tokens=max_input_tokens,
+        azure_endpoint=azure_endpoint,
+        azure_deployment=azure_deployment,
+        azure_api_version=azure_api_version,
+        azure_api_key_credential=azure_api_key_credential,
     )
     new_cfg = AppConfig(
         embedding=new_embedding,
@@ -369,9 +381,12 @@ async def settings_save_embedding(
     )
 
     embedding_changed = (
-        old_cfg.embedding.model != model
+        old_cfg.embedding.provider != provider
+        or old_cfg.embedding.model != model
         or old_cfg.embedding.dimensions != dimensions
         or old_cfg.embedding.base_url != base_url
+        or old_cfg.embedding.azure_endpoint != azure_endpoint
+        or old_cfg.embedding.azure_deployment != azure_deployment
     )
 
     save_config(new_cfg)
@@ -395,13 +410,15 @@ async def settings_save_embedding(
 async def settings_save_qdrant(
     qdrant_host: str = Form("localhost"),
     qdrant_port: int = Form(6333),
+    qdrant_https: str = Form(""),
+    qdrant_api_key: str = Form(""),
 ):
     from app.config import AppConfig, get_config, QdrantConfig, save_config
 
     old_cfg = get_config()
     new_cfg = AppConfig(
         embedding=old_cfg.embedding,
-        qdrant=QdrantConfig(host=qdrant_host, port=qdrant_port),
+        qdrant=QdrantConfig(host=qdrant_host, port=qdrant_port, https=qdrant_https == "on", api_key=qdrant_api_key),
         chunking=old_cfg.chunking,
         preprocessing=old_cfg.preprocessing,
         sources_file_path=old_cfg.sources_file_path,
@@ -414,10 +431,15 @@ async def settings_save_qdrant(
 async def settings_verify_qdrant(
     qdrant_host: str = Form("localhost"),
     qdrant_port: int = Form(6333),
+    qdrant_https: str = Form(""),
+    qdrant_api_key: str = Form(""),
 ):
     try:
         from qdrant_client import AsyncQdrantClient
-        client = AsyncQdrantClient(host=qdrant_host, port=qdrant_port, timeout=5, check_compatibility=False)
+        client = AsyncQdrantClient(
+            host=qdrant_host, port=qdrant_port, https=qdrant_https == "on",
+            api_key=qdrant_api_key or None, timeout=5, check_compatibility=False,
+        )
         collections = await client.get_collections()
         count = len(collections.collections)
         await client.close()
@@ -428,10 +450,15 @@ async def settings_verify_qdrant(
 
 @router.post("/settings/verify/embedding")
 async def settings_verify_embedding(
+    provider: str = Form("openai-compatible"),
     model: str = Form(...),
     base_url: str = Form(""),
     dimensions: int = Form(768),
     max_input_tokens: int = Form(8192),
+    azure_endpoint: str = Form(""),
+    azure_deployment: str = Form(""),
+    azure_api_version: str = Form("2024-02-01"),
+    azure_api_key_credential: str = Form(""),
 ):
     try:
         from app.config import AppConfig, EmbeddingConfig, get_config
@@ -439,16 +466,21 @@ async def settings_verify_embedding(
         cfg = get_config()
         test_cfg = AppConfig(
             embedding=EmbeddingConfig(
+                provider=provider,
                 model=model,
                 base_url=base_url,
                 dimensions=dimensions,
                 max_input_tokens=max_input_tokens,
+                azure_endpoint=azure_endpoint,
+                azure_deployment=azure_deployment,
+                azure_api_version=azure_api_version,
+                azure_api_key_credential=azure_api_key_credential,
             ),
             qdrant=cfg.qdrant,
             chunking=cfg.chunking,
             sources_file_path=cfg.sources_file_path,
         )
-        svc = EmbeddingService(test_cfg)
+        svc = EmbeddingService(test_cfg, container.secrets_store)
         vector = await svc.embed("connection test")
         return JSONResponse({"ok": True, "message": f"OK — model returned {len(vector)}-dim vector"})
     except Exception as exc:

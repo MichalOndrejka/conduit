@@ -28,6 +28,7 @@ from app.store.sync_control import SyncControlStore
 from app.store.sync_progress import SyncProgressStore
 from app.sync.service import SyncService
 from app.templates_cfg import templates  # noqa: F401 — re-exported for convenience
+from app.web.auth import ApiKeyAuthMiddleware
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
@@ -41,7 +42,7 @@ async def lifespan(app: FastAPI):
     data_dir = Path(cfg.sources_file_path).parent
     secrets_store = SecretsStore(data_dir)
 
-    embedding = EmbeddingService(cfg)
+    embedding = EmbeddingService(cfg, secrets_store)
     chunker = TextChunker(cfg)
     vector_store = VectorStore(cfg)
     indexer = DocumentIndexer(vector_store, embedding, chunker)
@@ -88,6 +89,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Conduit", lifespan=lifespan)
+app.add_middleware(ApiKeyAuthMiddleware)
 
 from app.web.routes import router  # noqa: E402 — imported after app creation to avoid circular
 app.include_router(router)

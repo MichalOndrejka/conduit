@@ -7,14 +7,21 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
 ```json
 {
   "embedding": {
+    "provider": "openai-compatible",
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
     "dimensions": 768,
-    "max_input_tokens": 8192
+    "max_input_tokens": 8192,
+    "azure_endpoint": "",
+    "azure_deployment": "",
+    "azure_api_version": "2024-02-01",
+    "azure_api_key_credential": ""
   },
   "qdrant": {
     "host": "localhost",
-    "port": 6333
+    "port": 6333,
+    "https": false,
+    "api_key": ""
   },
   "chunking": {
     "max_chunk_size": 2000,
@@ -28,11 +35,18 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
 
 ## Embedding
 
-Conduit uses [Ollama](https://ollama.ai) for local, private embeddings. The embedding client speaks the OpenAI embeddings API format, so any Ollama-compatible endpoint works.
+Conduit supports two embedding providers, selected via `provider`:
 
-### `model`
+- **`openai-compatible`** (default) — any endpoint speaking the OpenAI
+  embeddings API format, such as [Ollama](https://ollama.ai), for local,
+  private embeddings.
+- **`azure-openai`** — Azure OpenAI Service.
 
-Ollama model identifier. Must match the model name as reported by `ollama list`.
+### `provider: "openai-compatible"`
+
+#### `model`
+
+Model identifier. For Ollama, must match the model name as reported by `ollama list`.
 
 | Recommended model | Dimensions |
 |------------------|------------|
@@ -44,19 +58,45 @@ Pull the model before starting Conduit:
 ollama pull nomic-embed-text-v2-moe
 ```
 
-### `base_url`
+#### `base_url`
 
-Base URL for the Ollama embeddings endpoint. Default: `http://localhost:11434/v1`.
+Base URL for the OpenAI-compatible embeddings endpoint. Default: `http://localhost:11434/v1`.
 
-Change this if Ollama is running on a different host or port.
+Change this if Ollama is running on a different host or port. Override with the `EMBEDDING_BASE_URL` env var.
+
+### `provider: "azure-openai"`
+
+#### `azure_endpoint`
+
+Your Azure OpenAI resource endpoint, e.g. `https://my-resource.openai.azure.com/`. Override with `AZURE_OPENAI_ENDPOINT`.
+
+#### `azure_deployment`
+
+Name of the model deployment in Azure AI Foundry, e.g. `text-embedding-3-small`. Override with `AZURE_OPENAI_DEPLOYMENT`.
+
+#### `azure_api_version`
+
+Azure OpenAI REST API version. Default `2024-02-01`. Override with `AZURE_OPENAI_API_VERSION`.
+
+#### `azure_api_key_credential`
+
+Name of a credential in the [credential library](#credential-library) holding
+the Azure OpenAI API key. If empty, falls back to the `AZURE_OPENAI_API_KEY`
+environment variable — useful for deployments where the key is supplied as a
+platform secret (see [Azure deployment](deployment-azure.md)).
+
+| Recommended model | Dimensions |
+|------------------|------------|
+| `text-embedding-3-small` | `1536` |
+| `text-embedding-3-large` | `3072` (≈6x the cost/storage of `-small`) |
 
 ### `dimensions`
 
-Vector dimensions. **Must match the model exactly.** Changing this drops all existing Qdrant collections and marks every source for re-indexing.
+Vector dimensions. **Must match the model exactly.** Changing this drops all existing Qdrant collections and marks every source for re-indexing. Override with `EMBEDDING_DIMENSIONS`.
 
 ### `max_input_tokens`
 
-Context window of your embedding model in tokens. Default `8192` (matches `nomic-embed-text-v2-moe`). Check your model's card for the correct value. The app converts this to a character limit using a conservative 2 chars/token estimate, so chunks are never sent to the model in excess of its context window. Update this when switching embedding models (e.g. `mxbai-embed-large` → `512`, `all-minilm` → `256`).
+Context window of your embedding model in tokens. Default `8192` (matches `nomic-embed-text-v2-moe`; `text-embedding-3-small`/`-large` use `8191`). Check your model's card for the correct value. The app converts this to a character limit using a conservative 2 chars/token estimate, so chunks are never sent to the model in excess of its context window. Override with `EMBEDDING_MAX_INPUT_TOKENS`.
 
 ---
 
@@ -65,6 +105,18 @@ Context window of your embedding model in tokens. Default `8192` (matches `nomic
 ### `host` / `port`
 
 Qdrant connection details. Override with `QDRANT_HOST` / `QDRANT_PORT` environment variables (useful in Docker where the service name differs from `localhost`).
+
+### `https`
+
+Connect to Qdrant over TLS. Needed for Qdrant Cloud, or when reaching Qdrant
+through an Azure Container Apps internal ingress (use `port: 443`). Override
+with `QDRANT_HTTPS=true`.
+
+### `api_key`
+
+Optional API key sent with every Qdrant request. Required for Qdrant Cloud or
+a self-hosted Qdrant with `QDRANT__SERVICE__API_KEY` set. Override with
+`QDRANT_API_KEY`.
 
 ---
 
@@ -95,6 +147,40 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
 | `QDRANT_HOST` | Overrides `qdrant.host` in config. |
 | `QDRANT_PORT` | Overrides `qdrant.port` in config. |
+| `QDRANT_HTTPS` | Overrides `qdrant.https` (`true`/`false`). |
+| `QDRANT_API_KEY` | Overrides `qdrant.api_key`. |
+| `EMBEDDING_PROVIDER` | Overrides `embedding.provider` (`openai-compatible` / `azure-openai`). |
+| `EMBEDDING_MODEL` | Overrides `embedding.model`. |
+| `EMBEDDING_BASE_URL` | Overrides `embedding.base_url`. |
+| `EMBEDDING_DIMENSIONS` | Overrides `embedding.dimensions`. |
+| `EMBEDDING_MAX_INPUT_TOKENS` | Overrides `embedding.max_input_tokens`. |
+| `AZURE_OPENAI_ENDPOINT` | Overrides `embedding.azure_endpoint`. |
+| `AZURE_OPENAI_DEPLOYMENT` | Overrides `embedding.azure_deployment`. |
+| `AZURE_OPENAI_API_VERSION` | Overrides `embedding.azure_api_version`. |
+| `AZURE_OPENAI_API_KEY` | Fallback API key for `provider: "azure-openai"` when `azure_api_key_credential` is empty. |
+| `CONDUIT_API_KEY` | If set, requires this shared secret on every request (web UI, settings, credentials, `/mcp`). Accepted via `Authorization: Bearer <key>` or HTTP Basic auth (any username, key as password). Unset by default — only the open local/dev mode skips auth. |
+
+For a full Azure Container Apps deployment that wires these together with
+Azure OpenAI and an internal Qdrant container app, see
+[Deploying to Azure Container Apps](deployment-azure.md).
+
+---
+
+## Securing a public deployment
+
+Conduit has no built-in user accounts — anyone who can reach the app can view
+and change settings, manage credentials and sources, trigger syncs, and query
+indexed data via `/mcp`. If Conduit is reachable from outside your local
+machine (e.g. exposed via `docker run -p`, a reverse proxy, or Azure Container
+Apps with `external: true` ingress), set `CONDUIT_API_KEY` to a long random
+value. Every request then requires either:
+
+- `Authorization: Bearer <CONDUIT_API_KEY>`, or
+- HTTP Basic auth with the key as the password (any username) — browsers will
+  prompt for this automatically.
+
+Without `CONDUIT_API_KEY` set, Conduit remains open with no authentication —
+the correct setting for `localhost`-only use.
 
 ---
 

@@ -224,6 +224,7 @@ All settings are editable via the **Settings** page. Changing `dimensions` or em
 | `CONDUIT_CONFIG` | Path to `config.json` (default: `config.json` in CWD) |
 | `CONDUIT_DATA_DIR` | Directory for `conduit-sources.json`, `credentials.enc.json`, and config. **Required in Docker** to persist data across restarts. |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key used to encrypt `credentials.enc.json`. Auto-generated and stored as `.secret_key` if not set. Pin this in production so credentials survive container recreation. |
+| `CONDUIT_API_KEY` | If set, requires this shared secret (via `Authorization: Bearer <key>` or HTTP Basic auth) on every request. **Set this if Conduit is reachable from outside `localhost`** — there is no other access control. |
 
 Credentials (PATs, tokens, API keys) are stored encrypted in `credentials.enc.json` inside the data directory and managed entirely through the web UI — no environment variables needed for secrets.
 
@@ -282,3 +283,4 @@ MIT
 - [Source configuration reference](docs/sources.md) — all config keys, provider options, auth methods
 - [MCP tools reference](docs/mcp-tools.md) — tool signatures, search parameters, experience store
 - [Configuration reference](docs/configuration.md) — embedding providers, chunking, environment variables
+- [Deploying to Azure Container Apps](docs/deployment-azure.md) — Bicep templates for Conduit + Qdrant + Azure OpenAI

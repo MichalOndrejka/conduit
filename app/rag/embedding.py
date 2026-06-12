@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 
 import httpx
-from openai import AsyncOpenAI
+from openai import AsyncAzureOpenAI, AsyncOpenAI
 
 from app.config import AppConfig
 
@@ -15,11 +16,24 @@ _CHARS_PER_TOKEN = 2
 
 
 class EmbeddingService:
-    def __init__(self, cfg: AppConfig) -> None:
+    def __init__(self, cfg: AppConfig, secrets_store=None) -> None:
         ec = cfg.embedding
-        base_url = ec.base_url
-        self._client = AsyncOpenAI(base_url=base_url, api_key="ollama", http_client=httpx.AsyncClient())
-        self._model      = ec.model
+        if ec.provider == "azure-openai":
+            api_key = ""
+            if ec.azure_api_key_credential and secrets_store is not None:
+                api_key = secrets_store.get_value_sync(ec.azure_api_key_credential)
+            if not api_key:
+                api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+            self._client = AsyncAzureOpenAI(
+                azure_endpoint=ec.azure_endpoint,
+                api_key=api_key,
+                api_version=ec.azure_api_version,
+                http_client=httpx.AsyncClient(),
+            )
+            self._model = ec.azure_deployment or ec.model
+        else:
+            self._client = AsyncOpenAI(base_url=ec.base_url, api_key="ollama", http_client=httpx.AsyncClient())
+            self._model = ec.model
         self._dimensions = ec.dimensions
         self._max_tokens = ec.max_input_tokens
         self._max_chars  = self._max_tokens * _CHARS_PER_TOKEN

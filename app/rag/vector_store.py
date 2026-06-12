@@ -15,6 +15,8 @@ class VectorStore:
         self._client = AsyncQdrantClient(
             host=cfg.qdrant.host,
             port=cfg.qdrant.port,
+            https=cfg.qdrant.https,
+            api_key=cfg.qdrant.api_key or None,
             timeout=30,
             check_compatibility=False,
         )

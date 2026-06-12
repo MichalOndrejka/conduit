@@ -27,6 +27,9 @@ services:
       # Optional: stable Fernet key for credential encryption (base64url, 44 chars).
       # If not set, a key is auto-generated in the data volume on first start.
       # CONDUIT_SECRET_KEY: ${CONDUIT_SECRET_KEY:-}
+      # Required if this host is reachable from outside localhost — without it,
+      # the web UI, settings, credentials, and /mcp have no access control.
+      # CONDUIT_API_KEY: ${CONDUIT_API_KEY:-}
     depends_on:
       qdrant:
         condition: service_healthy

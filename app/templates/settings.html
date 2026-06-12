@@ -43,15 +43,51 @@
 
             <div class="space-y-4">
                 <div>
-                    <label class="field-label">Ollama Base URL</label>
-                    <input name="base_url" value="{{ cfg.embedding.base_url }}" class="field-input font-mono" />
+                    <label class="field-label">Provider</label>
+                    <select name="provider" id="embeddingProvider" class="field-input" onchange="toggleEmbeddingProvider()">
+                        <option value="openai-compatible" {% if cfg.embedding.provider != "azure-openai" %}selected{% endif %}>Local / OpenAI-compatible (Ollama, etc.)</option>
+                        <option value="azure-openai" {% if cfg.embedding.provider == "azure-openai" %}selected{% endif %}>Azure OpenAI</option>
+                    </select>
                 </div>
-                <div>
-                    <label class="field-label">Model</label>
-                    <input name="model" value="{{ cfg.embedding.model }}" class="field-input font-mono" />
+
+                <div id="embedding-local-fields" {% if cfg.embedding.provider == "azure-openai" %}style="display:none"{% endif %} class="space-y-4">
+                    <div>
+                        <label class="field-label">Base URL<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">OpenAI-compatible endpoint, e.g. Ollama's http://localhost:11434/v1</span></span></label>
+                        <input name="base_url" value="{{ cfg.embedding.base_url }}" class="field-input font-mono" />
+                    </div>
+                    <div>
+                        <label class="field-label">Model</label>
+                        <input name="model" value="{{ cfg.embedding.model }}" class="field-input font-mono" />
+                    </div>
                 </div>
+
+                <div id="embedding-azure-fields" {% if cfg.embedding.provider != "azure-openai" %}style="display:none"{% endif %} class="space-y-4">
+                    <div>
+                        <label class="field-label">Azure OpenAI Endpoint</label>
+                        <input name="azure_endpoint" value="{{ cfg.embedding.azure_endpoint }}" placeholder="https://my-resource.openai.azure.com/" class="field-input font-mono" />
+                    </div>
+                    <div>
+                        <label class="field-label">Deployment Name<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Name of the model deployment in Azure AI Foundry, e.g. text-embedding-3-small</span></span></label>
+                        <input name="azure_deployment" value="{{ cfg.embedding.azure_deployment }}" placeholder="text-embedding-3-small" class="field-input font-mono" />
+                    </div>
+                    <div>
+                        <label class="field-label">API Version</label>
+                        <input name="azure_api_version" value="{{ cfg.embedding.azure_api_version }}" class="field-input font-mono" />
+                    </div>
+                    <div>
+                        <label class="field-label">API Key<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">If left empty, falls back to the AZURE_OPENAI_API_KEY environment variable</span></span></label>
+                        <select name="azure_api_key_credential" class="field-input">
+                            <option value="">— Select credential —</option>
+                            {% for cred in credentials %}
+                            <option value="{{ cred.name }}" {% if cfg.embedding.azure_api_key_credential == cred.name %}selected{% endif %}>{{ cred.name }}{% if cred.note %} — {{ cred.note }}{% endif %}</option>
+                            {% endfor %}
+                        </select>
+                        <p class="text-xs text-slate-500 mt-1">Manage credentials on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
+                    </div>
+                </div>
+
                 <div>
-                    <label class="field-label">Dimensions<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Changing this drops all vector collections and marks sources for reindex</span></span></label>
+                    <label class="field-label">Dimensions<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Changing this drops all vector collections and marks sources for reindex. text-embedding-3-small uses 1536, text-embedding-3-large uses 3072.</span></span></label>
                     <input name="dimensions" value="{{ cfg.embedding.dimensions }}" type="number" class="field-input" />
                 </div>
                 <div>
@@ -87,12 +123,27 @@
 
             <div class="space-y-4">
                 <div>
-                    <label class="field-label">Host<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">In Docker use the service name, e.g. "qdrant"</span></span></label>
+                    <label class="field-label">Host<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">In Docker use the service name, e.g. "qdrant". For Azure Container Apps, use the internal app FQDN.</span></span></label>
                     <input name="qdrant_host" value="{{ cfg.qdrant.host }}" class="field-input font-mono" />
                 </div>
                 <div>
                     <label class="field-label">Port</label>
                     <input name="qdrant_port" value="{{ cfg.qdrant.port }}" type="number" class="field-input" />
+                </div>
+                <label class="flex items-center gap-2 cursor-pointer select-none py-1">
+                    <span class="chk">
+                        <input type="checkbox" name="qdrant_https" value="on" {% if cfg.qdrant.https %}checked{% endif %} />
+                        <span class="chk-box">
+                            <svg class="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </span>
+                    </span>
+                    <span class="text-xs text-slate-300">Use HTTPS<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Enable for Qdrant Cloud or when reaching Qdrant through an Azure Container Apps internal ingress (port 443)</span></span></span>
+                </label>
+                <div>
+                    <label class="field-label">API Key<span class="tip"><svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 16v-4m0-4h.01"/></svg><span class="tip-text">Optional. Required for Qdrant Cloud or a Qdrant instance with QDRANT__SERVICE__API_KEY set.</span></span></label>
+                    <input name="qdrant_api_key" type="password" autocomplete="off" value="{{ cfg.qdrant.api_key }}" class="field-input font-mono" />
                 </div>
             </div>
 
@@ -331,6 +382,13 @@ function copyMcpConfig() {
             btn.innerHTML = '<svg id="copy-icon" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Copy';
         }, 2000);
     });
+}
+
+
+function toggleEmbeddingProvider() {
+    var provider = document.getElementById('embeddingProvider').value;
+    document.getElementById('embedding-local-fields').style.display = (provider === 'azure-openai') ? 'none' : '';
+    document.getElementById('embedding-azure-fields').style.display = (provider === 'azure-openai') ? '' : 'none';
 }
 
 

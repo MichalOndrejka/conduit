@@ -20,6 +20,9 @@ services:
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      # Required if this host is reachable from outside localhost — without it,
+      # the web UI, settings, credentials, and /mcp have no access control.
+      # - CONDUIT_API_KEY=${CONDUIT_API_KEY}
       # Add your credential env vars here, e.g.:
       # - ADO_PAT=${ADO_PAT}
     depends_on:

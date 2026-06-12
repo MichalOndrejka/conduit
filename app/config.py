@@ -8,15 +8,23 @@ from pydantic import BaseModel
 
 
 class EmbeddingConfig(BaseModel):
+    provider: str = "openai-compatible"  # "openai-compatible" (Ollama, etc.) | "azure-openai"
     model: str = "nomic-embed-text-v2-moe"
     base_url: str = "http://localhost:11434/v1"
     dimensions: int = 768
     max_input_tokens: int = 8192      # Embedding model's context window in tokens (check model card)
+    # Azure OpenAI — only used when provider == "azure-openai"
+    azure_endpoint: str = ""          # e.g. https://my-resource.openai.azure.com/
+    azure_deployment: str = ""        # name of the model deployment (e.g. "text-embedding-3-small")
+    azure_api_version: str = "2024-02-01"
+    azure_api_key_credential: str = ""  # name of a credential in the secrets store holding the API key
 
 
 class QdrantConfig(BaseModel):
     host: str = "localhost"
     port: int = 6333
+    https: bool = False
+    api_key: str = ""
 
 
 class ChunkingConfig(BaseModel):
@@ -69,6 +77,27 @@ def load_config() -> AppConfig:
         _config.qdrant.host = os.environ["QDRANT_HOST"]
     if os.environ.get("QDRANT_PORT"):
         _config.qdrant.port = int(os.environ["QDRANT_PORT"])
+    if os.environ.get("QDRANT_HTTPS"):
+        _config.qdrant.https = os.environ["QDRANT_HTTPS"].strip().lower() in ("1", "true", "yes")
+    if os.environ.get("QDRANT_API_KEY"):
+        _config.qdrant.api_key = os.environ["QDRANT_API_KEY"]
+    # Allow env vars to configure embedding (useful for cloud deploys with no mounted config.json)
+    if os.environ.get("EMBEDDING_PROVIDER"):
+        _config.embedding.provider = os.environ["EMBEDDING_PROVIDER"]
+    if os.environ.get("EMBEDDING_MODEL"):
+        _config.embedding.model = os.environ["EMBEDDING_MODEL"]
+    if os.environ.get("EMBEDDING_BASE_URL"):
+        _config.embedding.base_url = os.environ["EMBEDDING_BASE_URL"]
+    if os.environ.get("EMBEDDING_DIMENSIONS"):
+        _config.embedding.dimensions = int(os.environ["EMBEDDING_DIMENSIONS"])
+    if os.environ.get("EMBEDDING_MAX_INPUT_TOKENS"):
+        _config.embedding.max_input_tokens = int(os.environ["EMBEDDING_MAX_INPUT_TOKENS"])
+    if os.environ.get("AZURE_OPENAI_ENDPOINT"):
+        _config.embedding.azure_endpoint = os.environ["AZURE_OPENAI_ENDPOINT"]
+    if os.environ.get("AZURE_OPENAI_DEPLOYMENT"):
+        _config.embedding.azure_deployment = os.environ["AZURE_OPENAI_DEPLOYMENT"]
+    if os.environ.get("AZURE_OPENAI_API_VERSION"):
+        _config.embedding.azure_api_version = os.environ["AZURE_OPENAI_API_VERSION"]
     if os.environ.get("CONDUIT_DATA_DIR"):
         data_dir = Path(os.environ["CONDUIT_DATA_DIR"])
         data_dir.mkdir(parents=True, exist_ok=True)
