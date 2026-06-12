@@ -1,0 +1,101 @@
+{{define "title"}}Sources — Conduit{{end}}
+{{define "content"}}
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <div>
+    <h1 class="text-2xl font-semibold text-white">Sources</h1>
+    <p class="text-sm text-slate-400 mt-1">Knowledge sources indexed into Qdrant.</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/sources/create" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">New source</a>
+    <form method="post" action="/sync-all">
+      <button type="submit" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Sync all</button>
+    </form>
+    <a href="/export" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Export</a>
+  </div>
+</div>
+
+{{if not .Sources}}
+<div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
+  No sources configured yet. <a href="/sources/create" class="text-violet-400 hover:underline">Create one</a>.
+</div>
+{{else}}
+<div class="space-y-3">
+  {{range .Sources}}
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4" data-source-id="{{.ID}}">
+    <div class="flex items-center gap-4 flex-wrap">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <a href="/sources/{{.ID}}/items" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
+          <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Type}}</span>
+        </div>
+        <div class="text-xs text-slate-500 mt-1">
+          {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
+          <span data-error class="text-red-400 ml-2">{{if .SyncError}}· {{.SyncError}}{{end}}</span>
+        </div>
+        <div data-progress class="text-xs text-violet-400 mt-1 hidden"></div>
+      </div>
+      <!-- Colors come from STATUS_CLASSES in the script below (single source of truth) -->
+      <span data-status data-s="{{.SyncStatus}}" class="text-xs rounded-full px-2.5 py-1 border">{{.SyncStatus}}</span>
+      <div class="flex gap-1.5">
+        <form method="post" action="/sync/{{.ID}}">
+          <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Sync</button>
+        </form>
+        <button onclick="syncCtl('{{.ID}}','pause')" data-pause class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Pause</button>
+        <button onclick="syncCtl('{{.ID}}','resume')" data-resume class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Resume</button>
+        <button onclick="syncCtl('{{.ID}}','cancel')" data-cancel class="hidden text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Cancel</button>
+        <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
+        <form method="post" action="/sources/{{.ID}}/delete" onsubmit="return confirm('Delete source and its vectors?')">
+          <button type="submit" class="text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {{end}}
+</div>
+
+<script>
+function syncCtl(id, action) {
+  fetch('/sources/' + id + '/sync/' + action, {method: 'POST'}).then(poll);
+}
+const STATUS_CLASSES = {
+  completed: 'bg-emerald-950 text-emerald-300 border-emerald-800',
+  failed:    'bg-red-950 text-red-300 border-red-800',
+  syncing:   'bg-amber-950 text-amber-300 border-amber-800',
+  idle:      'bg-slate-800 text-slate-300 border-slate-700',
+};
+// Apply initial badge colors from the server-rendered status (avoids
+// duplicating the class map in the Go template).
+document.querySelectorAll('[data-status]').forEach(b => {
+  b.className = 'text-xs rounded-full px-2.5 py-1 border ' + (STATUS_CLASSES[b.dataset.s] || STATUS_CLASSES.idle);
+});
+function poll() {
+  fetch('/status').then(r => r.json()).then(list => {
+    let anySyncing = false;
+    for (const s of list) {
+      const card = document.querySelector(`[data-source-id="${s.id}"]`);
+      if (!card) continue;
+      const badge = card.querySelector('[data-status]');
+      badge.textContent = s.paused ? 'paused' : s.sync_status;
+      badge.className = 'text-xs rounded-full px-2.5 py-1 border ' + (STATUS_CLASSES[s.sync_status] || STATUS_CLASSES.idle);
+      const prog = card.querySelector('[data-progress]');
+      if (s.progress) {
+        anySyncing = true;
+        const p = s.progress;
+        prog.textContent = p.phase + (p.total ? ` ${p.current}/${p.total}` : '') + (p.message ? ` — ${p.message}` : '');
+        prog.classList.remove('hidden');
+      } else {
+        prog.classList.add('hidden');
+      }
+      card.querySelector('[data-error]').textContent = s.sync_error ? '· ' + s.sync_error : '';
+      const syncing = s.sync_status === 'syncing';
+      card.querySelector('[data-pause]').classList.toggle('hidden', !syncing || s.paused);
+      card.querySelector('[data-resume]').classList.toggle('hidden', !syncing || !s.paused);
+      card.querySelector('[data-cancel]').classList.toggle('hidden', !syncing);
+    }
+    setTimeout(poll, anySyncing ? 1500 : 5000);
+  }).catch(() => setTimeout(poll, 5000));
+}
+poll();
+</script>
+{{end}}
+{{end}}

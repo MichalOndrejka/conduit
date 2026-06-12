@@ -1,0 +1,188 @@
+{{define "title"}}{{if .IsNew}}New source{{else}}Edit source{{end}} — Conduit{{end}}
+{{define "content"}}
+<div class="mb-6">
+  <a href="/" class="text-sm text-slate-400 hover:text-white">&larr; Sources</a>
+  <h1 class="text-2xl font-semibold text-white mt-2">{{if .IsNew}}New source{{else}}Edit source{{end}}</h1>
+  <p class="text-sm text-slate-400 mt-1">Any JSON-over-HTTP system can be a source — configure the endpoint, auth and field mappings. No provider-specific code.</p>
+</div>
+
+{{if .Error}}
+<div class="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">{{.Error}}</div>
+{{end}}
+
+<form method="post" class="space-y-6 max-w-2xl">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Name</label>
+        <input name="name" required value="{{.Source.Name}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Type <span class="text-slate-500">(routes to a collection)</span></label>
+        <select name="type" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          {{$cur := .Source.Type}}
+          {{range .SourceTypes}}<option value="{{.Value}}" {{if eq .Value $cur}}selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </div>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-slate-300 mb-1">Provider</label>
+      {{$provider := .Source.GetConfig "Provider"}}
+      <select name="provider" id="provider" onchange="toggleProvider()" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        <option value="api" {{if ne $provider "manual"}}selected{{end}}>HTTP API (generic JSON endpoint)</option>
+        <option value="manual" {{if eq $provider "manual"}}selected{{end}}>Manual document</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ── Generic API fields ─────────────────────────────────────────── -->
+  <div id="api-fields" class="space-y-6">
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Endpoint</h2>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">URL</label>
+        <input name="Url" value="{{.Source.GetConfig "Url"}}" placeholder="https://api.example.com/items?api-version=7.0" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Method</label>
+          {{$method := .Source.GetConfig "HttpMethod"}}
+          <select name="HttpMethod" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="GET" {{if ne $method "POST"}}selected{{end}}>GET</option>
+            <option value="POST" {{if eq $method "POST"}}selected{{end}}>POST</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Max items</label>
+          <input name="Top" value="{{.Source.GetConfig "Top"}}" placeholder="500" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        </div>
+        <div class="flex items-end pb-2">
+          <label class="flex items-center gap-2 text-sm text-slate-300">
+            <input type="checkbox" name="VerifySSL" value="false" {{if eq (.Source.GetConfig "VerifySSL") "false"}}checked{{end}} class="rounded border-slate-700 bg-slate-950">
+            Skip TLS verification
+          </label>
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">POST body <span class="text-slate-500">(raw JSON, optional)</span></label>
+        <textarea name="Body" rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">{{.Source.GetConfig "Body"}}</textarea>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Extra headers <span class="text-slate-500">(one "Name: value" per line)</span></label>
+        <textarea name="Headers" rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">{{.Source.GetConfig "Headers"}}</textarea>
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Authentication</h2>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Auth type</label>
+        {{$auth := .Source.GetConfig "AuthType"}}
+        <select name="AuthType" id="auth-type" onchange="toggleAuth()" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          <option value="none" {{if or (eq $auth "") (eq $auth "none")}}selected{{end}}>None</option>
+          <option value="bearer" {{if eq $auth "bearer"}}selected{{end}}>Bearer token</option>
+          <option value="basic" {{if eq $auth "basic"}}selected{{end}}>Basic (PATs: leave username empty)</option>
+          <option value="apikey" {{if eq $auth "apikey"}}selected{{end}}>API key header</option>
+        </select>
+      </div>
+      <div id="auth-bearer">
+        <label class="block text-sm font-medium text-slate-300 mb-1">Token credential</label>
+        {{$tok := .Source.GetConfig "Token"}}
+        <select name="Token" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          <option value="">— select credential —</option>
+          {{range .Credentials}}<option value="{{.Name}}" {{if eq .Name $tok}}selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <div id="auth-basic" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Username <span class="text-slate-500">(optional)</span></label>
+          <input name="Username" value="{{.Source.GetConfig "Username"}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Password credential</label>
+          {{$pw := .Source.GetConfig "Password"}}
+          <select name="Password" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="">— select credential —</option>
+            {{range .Credentials}}<option value="{{.Name}}" {{if eq .Name $pw}}selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+      <div id="auth-apikey" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Header name</label>
+          <input name="ApiKeyHeader" value="{{.Source.GetConfig "ApiKeyHeader"}}" placeholder="X-Api-Key" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Key credential</label>
+          {{$ak := .Source.GetConfig "ApiKeyValue"}}
+          <select name="ApiKeyValue" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="">— select credential —</option>
+            {{range .Credentials}}<option value="{{.Name}}" {{if eq .Name $ak}}selected{{end}}>{{.Name}}</option>{{end}}
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Response mapping</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Items path <span class="text-slate-500">(dot path, e.g. "value")</span></label>
+          <input name="ItemsPath" value="{{.Source.GetConfig "ItemsPath"}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">ID field <span class="text-slate-500">(stable doc IDs)</span></label>
+          <input name="IdField" value="{{.Source.GetConfig "IdField"}}" placeholder="id" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Title field</label>
+          <input name="TitleField" value="{{.Source.GetConfig "TitleField"}}" placeholder="title" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Content fields <span class="text-slate-500">(comma-sep; empty = all)</span></label>
+          <input name="ContentFields" value="{{.Source.GetConfig "ContentFields"}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Next-page URL path <span class="text-slate-500">(dot path to a full next-page URL — pagination)</span></label>
+        <input name="NextUrlPath" value="{{.Source.GetConfig "NextUrlPath"}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Manual document fields ─────────────────────────────────────── -->
+  <div id="manual-fields" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document</h2>
+    <div>
+      <label class="block text-sm font-medium text-slate-300 mb-1">Title</label>
+      <input name="Title" value="{{.Source.GetConfig "Title"}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-slate-300 mb-1">Content {{if not .IsNew}}<span class="text-slate-500">(leave empty to keep current)</span>{{end}}</label>
+      <textarea name="Content" rows="10" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"></textarea>
+    </div>
+  </div>
+
+  <div class="flex gap-3">
+    <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">
+      {{if .IsNew}}Create source{{else}}Save changes{{end}}
+    </button>
+    <a href="/" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
+  </div>
+</form>
+
+<script>
+function toggleProvider() {
+  var isManual = document.getElementById('provider').value === 'manual';
+  document.getElementById('api-fields').style.display = isManual ? 'none' : '';
+  document.getElementById('manual-fields').style.display = isManual ? '' : 'none';
+}
+function toggleAuth() {
+  var t = document.getElementById('auth-type').value;
+  document.getElementById('auth-bearer').style.display = t === 'bearer' ? '' : 'none';
+  document.getElementById('auth-basic').style.display = t === 'basic' ? '' : 'none';
+  document.getElementById('auth-apikey').style.display = t === 'apikey' ? '' : 'none';
+}
+toggleProvider(); toggleAuth();
+</script>
+{{end}}

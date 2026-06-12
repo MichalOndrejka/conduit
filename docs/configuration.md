@@ -1,5 +1,11 @@
 # Configuration Reference
 
+> **Note** — written for the legacy Python backend. The Go backend reads the
+> same `config.json` and the same `QDRANT_*` / `EMBEDDING_*` /
+> `AZURE_OPENAI_*` / `CONDUIT_*` environment variables, with two differences:
+> LLM preprocessing is not supported, and auth uses the owner login +
+> `CONDUIT_API_KEY` bearer model (see the README's configuration table).
+
 Conduit stores its runtime configuration in `config.json` (location controlled by `CONDUIT_CONFIG` env var). All settings are also editable via the **Settings** page in the web UI.
 
 ## Full schema

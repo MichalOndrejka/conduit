@@ -1,44 +1,37 @@
 # Conduit
 
-![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)
+![Go 1.24+](https://img.shields.io/badge/go-1.24%2B-00ADD8?logo=go)
 ![Docker](https://img.shields.io/badge/docker-michalondrejka%2Fconduit-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-A **RAG + MCP server** that gives any MCP client semantic search over your Azure DevOps data, custom APIs, and uploaded documents — plus a persistent **Experience** store for remembering facts, preferences, and past decisions across sessions.
+A **RAG + MCP server** that gives any MCP client semantic search over your data — work items, code, docs, test results from **any JSON-over-HTTP API** — plus a persistent **Experience** store for remembering facts, preferences, and past decisions across sessions.
+
+Conduit is a single ~13 MB Go binary (≈25 MB distroless image) backed by Qdrant and any OpenAI-compatible embedding endpoint.
 
 ## Features
 
 - **9 MCP search tools** covering work items, requirements, source code, test code, test cases, test results, builds, commits, and documentation
-- **Language-aware code parsing** for C#, TypeScript, Go, PowerShell, and Markdown
-- **Local embeddings via Ollama** — no API keys or external services required
-- **Persistent memory** across sessions via the Experience store
-- **Web UI** for managing sources, triggering syncs, and configuring settings
-- **Encrypted credential library** — store PATs, tokens, and API keys in the UI; never in config files or environment variables
-- **Sync controls** — pause or cancel a running sync from the source list
+- **Provider-agnostic sources** — connect any JSON API through configuration (URL, auth, field mappings, pagination); no provider-specific code. Azure DevOps, Jira, GitHub, internal tools — all just configuration
+- **Persistent memory** across sessions via the Experience store (`remember` / `retrieve_experience`)
+- **Web UI** for managing sources, credentials, triggering syncs, and a PCA vector map
+- **Account login** (n8n-style) — bcrypt-hashed owner account, JWT session cookie; Bearer API key for headless MCP clients
+- **Encrypted credential library** — secrets stored Fernet-encrypted, referenced by name; never in config files or exports
+- **Sync controls** — pause, resume, or cancel a running sync with live progress
 - **Transactional indexing** — failed syncs leave existing data intact
-- **Azure DevOps support** with PAT, bearer, NTLM, Kerberos, and API-key auth — cloud and on-premise TFS/VSTS
-- **Custom API and manual upload** providers for any data source
 
 ## How it works
 
 ```
-MCP Client
-  └─► MCP Tools (Conduit)
-        └─► Qdrant Vector Store
-              └─► Indexed from sources (ADO / Custom API / Manual)
+MCP Client ──► MCP Tools (/mcp) ──► Qdrant Vector Store
+                                       ▲
+Web UI ──► Sync engine ──► generic API / manual sources
 ```
 
 **Indexing pipeline**
-1. Fetch documents from configured sources
-2. Parse code with language-aware parsers (C#, TypeScript, Go, PowerShell, Markdown)
-3. Chunk text with sentence-boundary and newline-priority splitting
-4. Generate embeddings via OpenAI / Ollama / any OpenAI-compatible API
-5. Store in Qdrant, one collection per content type
-
-**Search pipeline**
-1. The MCP client calls a search tool with a natural-language query
-2. The query is embedded and semantically searched against the relevant Qdrant collection
-3. Top-K results returned with similarity scores
+1. Fetch documents from configured sources (any JSON endpoint, or pasted content)
+2. Chunk text with sentence-boundary and newline-priority splitting
+3. Generate embeddings via Ollama / Azure OpenAI / any OpenAI-compatible API
+4. Store in Qdrant, one collection per content type — with rollback on partial failure
 
 ## MCP Tools
 
@@ -46,7 +39,7 @@ MCP Client
 |------|-----------------|
 | `search_workitems` | Work items — bugs, user stories, tasks, features |
 | `search_requirements` | Requirements — features, user stories, epics |
-| `search_source_code` | Production source code (classes, methods, functions) |
+| `search_source_code` | Production source code |
 | `search_test_code` | Test code — unit tests, integration tests, specs |
 | `search_builds` | Pipeline build results and failure details |
 | `search_testcases` | Test cases including test steps |
@@ -58,217 +51,139 @@ MCP Client
 
 All search tools accept `query` (string), optional `top_k` (default 5), and optional `source_name` filter.
 
-## Source types
+## Source configuration (generic by design)
 
-Each source type maps to a Qdrant collection. Within any source type you can choose the backend using the **provider tab**:
+Each source has a **type** (routes documents to a Qdrant collection) and a **provider** (how documents are fetched):
 
-| Tab | Description |
-|-----|-------------|
-| **Azure DevOps** | Fetch from ADO REST APIs using PAT, bearer, NTLM, or API-key auth |
-| **Custom API** | Fetch from any HTTP JSON endpoint with configurable field mapping |
-| **Manual** | Paste text directly or upload a PDF, TXT, or Markdown file |
+| Provider | Description |
+|----------|-------------|
+| **HTTP API** | Any JSON endpoint: GET/POST, Bearer / Basic / API-key auth (credentials by name), items dot-path, ID/title/content field mappings, next-page-URL pagination |
+| **Manual** | Paste text directly |
 
-| Source Type | Collection | Azure DevOps data |
-|-------------|------------|-------------------|
-| Work Items | `conduit_workitems` | Bugs, tasks, user stories, features — filtered by type or custom WIQL |
-| Requirements | `conduit_requirements` | Features, epics, user stories — filtered by type or custom WIQL |
-| Test Cases | `conduit_testcases` | Test case definitions with steps and automation status |
-| Test Results | `conduit_testresults` | Runtime test outcomes, error messages, stack traces |
-| Git Commits | `conduit_commits` | Commit messages, authors, change counts |
-| Source Code | `conduit_code` | Source files filtered by glob pattern |
-| Test Code | `conduit_testcode` | Test files — unit tests, integration tests, specs |
-| Documentation | `conduit_documentation` | Wiki pages with optional path filter; or file upload |
-| Build Results | `conduit_builds` | Recent CI/CD builds and failed task details |
+Examples expressible as pure configuration:
+- **Azure DevOps**: `https://dev.azure.com/{org}/{project}/_apis/wit/workitems?...` with Basic auth, empty username, PAT as the password credential, `ItemsPath=value`
+- **Jira**: `https://you.atlassian.net/rest/api/3/search` with Basic auth, `ItemsPath=issues`
+- **GitHub**: `https://api.github.com/repos/{o}/{r}/issues` with Bearer auth
 
-## Prerequisites
+| Source Type | Collection |
+|-------------|------------|
+| Work Items | `conduit_workitems` |
+| Requirements | `conduit_requirements` |
+| Test Cases | `conduit_testcases` |
+| Test Results | `conduit_testresults` |
+| Git Commits | `conduit_commits` |
+| Source Code | `conduit_code` |
+| Test Code | `conduit_testcode` |
+| Documentation | `conduit_documentation` |
+| Build Results | `conduit_builds` |
 
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/) (package manager)
-- [Docker](https://docs.docker.com/get-docker/) (for Qdrant)
-- [Ollama](https://ollama.ai) (for embeddings)
+## Quick start (from source)
 
-## Quick start
-
-### 1. Clone and install
+Prerequisites: [Go 1.24+](https://go.dev/dl/), [Docker](https://docs.docker.com/get-docker/) (for Qdrant), [Ollama](https://ollama.ai) (for local embeddings).
 
 ```bash
 git clone https://github.com/MichalOndrejka/conduit.git
 cd conduit
-uv sync
-```
 
-### 2. Start Qdrant
-
-```bash
-docker-compose up -d qdrant
-```
-
-### 3. Pull an embedding model
-
-```bash
+docker compose -f docker-compose.go.yml up -d qdrant   # or any local Qdrant
 ollama pull nomic-embed-text-v2-moe
+
+go run ./cmd/conduit
 ```
 
-The default config points to `http://localhost:11434/v1` with this model. Change the model via the **Settings** page or by editing `config.json`.
+- Web UI: `http://localhost:8000` — first visit opens the **owner setup** page
+- MCP endpoint: `http://localhost:8000/mcp` (authenticate with `Authorization: Bearer <CONDUIT_API_KEY>`)
 
-### 4. Run Conduit
+For local plain-HTTP runs set `CONDUIT_SECURE_COOKIE=false` (the session cookie is `Secure` by default).
 
-```bash
-uv run uvicorn app.main:app --host 0.0.0.0 --port 5000 --reload
-```
-
-- Web UI: `http://localhost:5000`
-- MCP endpoint: `http://localhost:5000/mcp`
-
-### 5. Add credentials
-
-Open `http://localhost:5000/credentials`, click **Add Credential**, give it a name (e.g. `My ADO PAT`), paste the secret value, and save. Credentials are stored encrypted on disk and referenced by name in source config — the actual secret never appears in `conduit-sources.json`.
-
-### 6. Add sources and sync
-
-Open `http://localhost:5000`, click **Add Source**, choose a type, select the backend tab (Azure DevOps / Custom API / Manual), fill in the connection details, pick credentials from the dropdown fields, and hit **Save & Sync**.
-
-Use **Save** (without sync) to save configuration changes without triggering a re-index. While a sync is running, **Pause** and **Cancel** buttons appear on the source row.
-
-### 7. Connect your MCP client
-
-Point your MCP client at `http://localhost:5000/mcp`. For clients that use a JSON config file, the entry looks like:
+Then: add credentials at `/credentials`, create a source at `/sources/create`, hit **Sync**, and point your MCP client at `/mcp`:
 
 ```json
 {
   "mcpServers": {
     "conduit": {
       "type": "http",
-      "url": "http://localhost:5000/mcp"
+      "url": "http://localhost:8000/mcp",
+      "headers": { "Authorization": "Bearer <your CONDUIT_API_KEY>" }
     }
   }
 }
 ```
 
-A `.vscode/mcp.json` is already included in the repo for VS Code users.
+## Demo deployment (Caddy TLS → Conduit → Qdrant)
 
-## Docker (run without cloning)
-
-Pull and run the pre-built image from Docker Hub — no Python or uv required:
+Separate containers on one small VM; HTTPS via automatic Let's Encrypt:
 
 ```bash
-docker pull michalondrejka/conduit:latest
+DOMAIN=conduit.example.com \
+CONDUIT_OWNER_EMAIL=you@example.com CONDUIT_OWNER_PASSWORD=... \
+AZURE_OPENAI_ENDPOINT=... AZURE_OPENAI_DEPLOYMENT=... AZURE_OPENAI_API_KEY=... \
+docker compose -f docker-compose.go.yml up -d
 ```
 
-Start Qdrant and Conduit together using the provided compose file:
+See [docs/go-port.md](docs/go-port.md) for the architecture and [Caddyfile](Caddyfile) for the proxy config.
 
-```bash
-docker-compose -f docker-compose.hub.yml up
-```
+## Configuration
 
-Ollama must be running on the host with an embedding model pulled (`ollama pull nomic-embed-text-v2-moe`).
-
-The web UI will be available at `http://localhost:8000`. Configure embeddings and add sources via the Settings page.
-
-> **Credentials** — add secrets at `/credentials` in the web UI. They are Fernet-encrypted on disk inside the mounted `/data` volume. The optional `CONDUIT_SECRET_KEY` env var pins the encryption key across restarts; without it, a key is auto-generated and stored as `.secret_key` inside the data directory.
-
-### Build & push (maintainers)
-
-```bash
-# Build
-docker build -t michalondrejka/conduit:latest .
-
-# Push
-docker push michalondrejka/conduit:latest
-
-# Versioned release
-docker tag michalondrejka/conduit:latest michalondrejka/conduit:v0.1.0
-docker push michalondrejka/conduit:v0.1.0
-```
-
-## Full stack (Docker Compose)
-
-Run Qdrant and Conduit together from source:
-
-```bash
-docker-compose up
-```
-
-## Configuration reference
-
-`config.json` (auto-created with Ollama defaults on first run):
-
-```json
-{
-  "embedding": {
-    "model": "nomic-embed-text-v2-moe",
-    "base_url": "http://localhost:11434/v1",
-    "dimensions": 768,
-    "max_input_tokens": 8192
-  },
-  "qdrant": {
-    "host": "localhost",
-    "port": 6333
-  },
-  "chunking": {
-    "max_chunk_size": 2000,
-    "overlap": 200
-  },
-  "sources_file_path": "conduit-sources.json"
-}
-```
-
-All settings are editable via the **Settings** page. Changing `dimensions` or embedding model drops all Qdrant collections and marks every source for re-indexing.
-
-### Environment variables
+`config.json` (auto-created with Ollama defaults) plus environment overrides:
 
 | Variable | Purpose |
 |----------|---------|
-| `QDRANT_HOST` | Override Qdrant host (default: `localhost`) |
-| `QDRANT_PORT` | Override Qdrant port (default: `6333`) |
-| `CONDUIT_CONFIG` | Path to `config.json` (default: `config.json` in CWD) |
-| `CONDUIT_DATA_DIR` | Directory for `conduit-sources.json`, `credentials.enc.json`, and config. **Required in Docker** to persist data across restarts. |
-| `CONDUIT_SECRET_KEY` | Base64url Fernet key used to encrypt `credentials.enc.json`. Auto-generated and stored as `.secret_key` if not set. Pin this in production so credentials survive container recreation. |
-| `CONDUIT_API_KEY` | If set, requires this shared secret (via `Authorization: Bearer <key>` or HTTP Basic auth) on every request. **Set this if Conduit is reachable from outside `localhost`** — there is no other access control. |
-
-Credentials (PATs, tokens, API keys) are stored encrypted in `credentials.enc.json` inside the data directory and managed entirely through the web UI — no environment variables needed for secrets.
+| `PORT` | Listen port (default `8000`) |
+| `QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_HTTPS` / `QDRANT_API_KEY` | Qdrant connection |
+| `EMBEDDING_PROVIDER` | `openai-compatible` (default) or `azure-openai` |
+| `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_MAX_INPUT_TOKENS` | Embedding settings |
+| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` / `AZURE_OPENAI_API_KEY` | Azure OpenAI embeddings |
+| `CONDUIT_CONFIG` | Path to `config.json` |
+| `CONDUIT_DATA_DIR` | Directory for sources, credentials, and keys. **Required in Docker.** |
+| `CONDUIT_SECRET_KEY` | Base64url Fernet key for `credentials.enc.json`. Pin in production. |
+| `CONDUIT_OWNER_EMAIL` / `CONDUIT_OWNER_PASSWORD` | Seed the owner account (otherwise first-run `/setup`) |
+| `CONDUIT_JWT_SECRET` | Session-signing secret (auto-generated to `.jwt_secret` if unset) |
+| `CONDUIT_SECURE_COOKIE` | Set `false` only for plain-HTTP local runs |
+| `CONDUIT_API_KEY` | Bearer key for headless MCP/API clients |
 
 ## Project structure
 
 ```
-app/
-  ado/           # Azure DevOps REST client and connection model
-  memory/        # Experience store (remember / retrieve_experience)
-  mcp_tools/     # FastMCP tool registrations
-  parsing/       # Language-aware code parsers (C#, TS, Go, PS, Markdown)
-  rag/           # Embedding, chunking, vector store, indexer, search
-  sources/       # Source implementations (ADO, Custom API, Manual)
-  store/         # Persistence: source config, secrets, sync progress & control
-  sync/          # Sync orchestration service (cancel/pause support)
-  templates/     # Jinja2 HTML templates (Tailwind CSS)
-  web/           # FastAPI route handlers
-  config.py      # Configuration models and loader
-  container.py   # Dependency wiring
-  main.py        # App entry point (FastAPI + FastMCP + lifespan)
-  models.py      # Shared domain models
-tests/                  # pytest test suite
-docker-compose.yml      # Full stack (Qdrant + Conduit built from source)
-docker-compose.hub.yml  # Full stack (Qdrant + Conduit from Docker Hub)
-Dockerfile
-pyproject.toml
+cmd/conduit/        entrypoint + `conduit search` verification CLI
+internal/
+  config/           config.json + env overrides
+  models/           domain models & constants
+  secrets/          Fernet credential store
+  rag/              qdrant REST client, embeddings, chunker, indexer, search, PCA
+  memory/           experience store
+  mcptools/         MCP tool registrations (mark3labs/mcp-go)
+  sources/          generic source abstraction (API + manual)
+  syncsvc/          sync orchestration (pause/cancel, status persistence)
+  syncctl/          pause/cancel control + progress stores
+  health/           background connectivity probes
+  store/            conduit-sources.json store
+  web/              routes, templates, n8n-style auth
+Dockerfile.golang        multi-stage distroless build
+docker-compose.go.yml    demo stack (Caddy + Conduit + Qdrant)
 ```
-
-## Transactional indexing
-
-Indexing runs in two phases to prevent partial writes:
-
-1. **Embed phase** — all document chunks are embedded in memory. A failure here writes nothing to Qdrant.
-2. **Write phase** — points are upserted in batches of 100. If any batch fails, all points written by earlier batches in this sync run are deleted before the error is surfaced.
 
 ## Running tests
 
 ```bash
-uv sync
-uv run pytest          # all tests
-uv run pytest -v       # verbose
-uv run pytest -x       # stop on first failure
-uv run pytest -k "ado" # filter by keyword
+go test ./...
 ```
+
+Includes a cross-language fixture test proving the Go Fernet store decrypts
+credentials written by the legacy Python app, and integration tests running
+the full sync pipeline against an in-memory fake Qdrant.
+
+## Legacy Python implementation
+
+The original Python/FastAPI implementation lives in `app/` (run with
+`uv run uvicorn app.main:app`, tests with `uv run pytest`). It remains in the
+repo until the Go demo is validated against production data, and it is the
+only tool that can sync the legacy multi-step Azure DevOps source types
+(WIQL queries, git zip downloads with code parsing). The Go backend reads the
+same Qdrant collections, `conduit-sources.json`, and `credentials.enc.json`,
+so both can run against the same data. See [docs/go-port.md](docs/go-port.md)
+for the migration details; legacy docs: [sources](docs/sources.md),
+[configuration](docs/configuration.md), [Azure deployment](docs/deployment-azure.md).
 
 ## Contributing
 
@@ -280,7 +195,5 @@ MIT
 
 ## Further reading
 
-- [Source configuration reference](docs/sources.md) — all config keys, provider options, auth methods
+- [Go port architecture & migration](docs/go-port.md)
 - [MCP tools reference](docs/mcp-tools.md) — tool signatures, search parameters, experience store
-- [Configuration reference](docs/configuration.md) — embedding providers, chunking, environment variables
-- [Deploying to Azure Container Apps](docs/deployment-azure.md) — Bicep templates for Conduit + Qdrant + Azure OpenAI

@@ -1,0 +1,368 @@
+// HTTP routes — Go port of the read-only slice of app/web/routes.py, plus the
+// n8n-style login/setup/logout pages.
+package web
+
+import (
+	"embed"
+	"encoding/json"
+	"html/template"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/health"
+	"github.com/MichalOndrejka/conduit/internal/memory"
+	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/rag"
+	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/sources"
+	"github.com/MichalOndrejka/conduit/internal/store"
+	"github.com/MichalOndrejka/conduit/internal/syncsvc"
+)
+
+//go:embed templates/*.html
+var templateFS embed.FS
+
+// faviconSVG matches _FAVICON_SVG in app/web/routes.py.
+const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">` +
+	`<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
+	`<stop offset="0%" stop-color="#0da2e7"/>` +
+	`<stop offset="100%" stop-color="#7c3aed"/>` +
+	`</linearGradient></defs>` +
+	`<rect width="24" height="24" rx="5" fill="url(#g)"/>` +
+	`<path d="M13 10V3L4 14h7v7l9-11h-7z" fill="none" stroke="white"` +
+	` stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` +
+	`</svg>`
+
+type Server struct {
+	cfg     *config.AppConfig
+	auth    *AuthService
+	owners  *OwnerStore
+	sources *store.SourceConfigStore
+	vectors *rag.VectorStore
+	memory  *memory.Service
+	secrets *secrets.Store
+	sync    *syncsvc.Service
+	health  *health.Monitor
+
+	loginTmpl      *template.Template
+	setupTmpl      *template.Template
+	indexTmpl      *template.Template
+	itemsTmpl      *template.Template
+	experienceTmpl *template.Template
+	sourceFormTmpl *template.Template
+	credsTmpl      *template.Template
+	mapTmpl        *template.Template
+}
+
+func NewServer(
+	cfg *config.AppConfig,
+	auth *AuthService,
+	owners *OwnerStore,
+	sourceStore *store.SourceConfigStore,
+	vectors *rag.VectorStore,
+	mem *memory.Service,
+	secretsStore *secrets.Store,
+	syncSvc *syncsvc.Service,
+	healthMon *health.Monitor,
+) *Server {
+	page := func(name string) *template.Template {
+		return template.Must(template.ParseFS(templateFS, "templates/base.html", "templates/"+name))
+	}
+	return &Server{
+		cfg:            cfg,
+		auth:           auth,
+		owners:         owners,
+		sources:        sourceStore,
+		vectors:        vectors,
+		memory:         mem,
+		secrets:        secretsStore,
+		sync:           syncSvc,
+		health:         healthMon,
+		loginTmpl:      template.Must(template.ParseFS(templateFS, "templates/login.html")),
+		setupTmpl:      template.Must(template.ParseFS(templateFS, "templates/setup.html")),
+		indexTmpl:      page("index.html"),
+		itemsTmpl:      page("items.html"),
+		experienceTmpl: page("experience.html"),
+		sourceFormTmpl: page("source_form.html"),
+		credsTmpl:      page("credentials.html"),
+		mapTmpl:        page("map.html"),
+	}
+}
+
+// Routes registers all handlers on mux. The MCP handler is mounted separately
+// in main so it can share the auth middleware.
+func (s *Server) Routes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /favicon.svg", s.handleFaviconSVG)
+	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/favicon.svg", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /status", s.handleStatus)
+
+	mux.HandleFunc("GET /login", s.handleLoginGet)
+	mux.HandleFunc("POST /login", s.handleLoginPost)
+	mux.HandleFunc("GET /setup", s.handleSetupGet)
+	mux.HandleFunc("POST /setup", s.handleSetupPost)
+	mux.HandleFunc("POST /logout", s.handleLogout)
+
+	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /sources/{id}/items", s.handleSourceItems)
+	mux.HandleFunc("GET /experience", s.handleExperience)
+
+	// Source management + sync (see routes_manage.go)
+	mux.HandleFunc("GET /sources/create", s.handleSourceCreateGet)
+	mux.HandleFunc("POST /sources/create", s.handleSourceCreatePost)
+	mux.HandleFunc("GET /sources/{id}/edit", s.handleSourceEditGet)
+	mux.HandleFunc("POST /sources/{id}/edit", s.handleSourceEditPost)
+	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
+	mux.HandleFunc("POST /sync/{id}", s.handleSyncOne)
+	mux.HandleFunc("POST /sync-all", s.handleSyncAll)
+	mux.HandleFunc("POST /sources/{id}/sync/pause", s.handleSyncPause)
+	mux.HandleFunc("POST /sources/{id}/sync/resume", s.handleSyncResume)
+	mux.HandleFunc("POST /sources/{id}/sync/cancel", s.handleSyncCancel)
+	mux.HandleFunc("GET /export", s.handleExport)
+
+	// Credentials
+	mux.HandleFunc("GET /credentials", s.handleCredentials)
+	mux.HandleFunc("POST /credentials/create", s.handleCredentialCreate)
+	mux.HandleFunc("POST /credentials/{name}/edit", s.handleCredentialEdit)
+	mux.HandleFunc("POST /credentials/{name}/delete", s.handleCredentialDelete)
+
+	// Vector map (PCA)
+	mux.HandleFunc("GET /map", s.handleMap)
+	mux.HandleFunc("GET /api/map-data", s.handleMapData)
+}
+
+// ── Static / health ─────────────────────────────────────────────────────────
+
+func (s *Server) handleFaviconSVG(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	_, _ = w.Write([]byte(faviconSVG))
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, map[string]any{
+		"qdrant":    s.health.Qdrant(),
+		"embedding": s.health.Embedding(),
+	})
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	srcs, err := s.sources.ListAll()
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	type sourceStatus struct {
+		ID         string               `json:"id"`
+		Name       string               `json:"name"`
+		SyncStatus string               `json:"sync_status"`
+		SyncError  *string              `json:"sync_error,omitempty"`
+		Paused     bool                 `json:"paused"`
+		Progress   *models.SyncProgress `json:"progress,omitempty"`
+	}
+	out := make([]sourceStatus, 0, len(srcs))
+	for _, src := range srcs {
+		st := sourceStatus{
+			ID: src.ID, Name: src.Name,
+			SyncStatus: src.SyncStatus, SyncError: src.SyncError,
+			Paused: s.sync.Control().IsPaused(src.ID),
+		}
+		if p, ok := s.sync.Progress().Get(src.ID); ok {
+			st.Progress = &p
+		}
+		out = append(out, st)
+	}
+	writeJSON(w, out)
+}
+
+// ── Auth pages ──────────────────────────────────────────────────────────────
+
+func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
+	if !s.owners.HasOwner() {
+		http.Redirect(w, r, "/setup", http.StatusFound)
+		return
+	}
+	s.render(w, s.loginTmpl, "login.html", map[string]any{"Error": ""})
+}
+
+func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
+	if !s.auth.limiter.allow(r.RemoteAddr) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		s.render(w, s.loginTmpl, "login.html", map[string]any{
+			"Error": "Too many attempts — wait a moment and try again.",
+		})
+		return
+	}
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+	if !s.owners.Verify(email, password) {
+		w.WriteHeader(http.StatusUnauthorized)
+		s.render(w, s.loginTmpl, "login.html", map[string]any{
+			"Error": "Invalid email or password.",
+		})
+		return
+	}
+	token, err := s.auth.issueToken(s.owners.Email(), time.Now())
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	s.auth.setSessionCookie(w, token)
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
+	if s.owners.HasOwner() {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	s.render(w, s.setupTmpl, "setup.html", map[string]any{"Error": ""})
+}
+
+func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
+	if s.owners.HasOwner() {
+		http.Redirect(w, r, "/login", http.StatusFound)
+		return
+	}
+	email := r.FormValue("email")
+	password := r.FormValue("password")
+	if err := s.owners.Setup(email, password); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		s.render(w, s.setupTmpl, "setup.html", map[string]any{"Error": err.Error()})
+		return
+	}
+	token, err := s.auth.issueToken(s.owners.Email(), time.Now())
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	s.auth.setSessionCookie(w, token)
+	http.Redirect(w, r, "/", http.StatusFound)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	s.auth.clearSessionCookie(w)
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+// ── UI pages ────────────────────────────────────────────────────────────────
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	sources, err := s.sources.ListAll()
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	s.render(w, s.indexTmpl, "base", map[string]any{
+		"Active":  "sources",
+		"Sources": sources,
+	})
+}
+
+func (s *Server) handleSourceItems(w http.ResponseWriter, r *http.Request) {
+	src, err := s.sources.Get(r.PathValue("id"))
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	if src == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	collection := sources.CollectionFor(src)
+	filter := &rag.Filter{Must: []rag.FieldCondition{{
+		Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
+	}}}
+
+	points, next, err := s.vectors.Scroll(r.Context(), collection, filter, 20,
+		parseScrollOffset(r.URL.Query().Get("offset")), false)
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+
+	type item struct{ ID, Text string }
+	items := make([]item, 0, len(points))
+	for _, p := range points {
+		text, _ := p.Payload[models.PayloadText].(string)
+		items = append(items, item{ID: rag.IDString(p.ID), Text: text})
+	}
+	s.render(w, s.itemsTmpl, "base", map[string]any{
+		"Active":     "sources",
+		"Source":     src,
+		"Collection": collection,
+		"Count":      s.vectors.Count(r.Context(), collection, filter),
+		"Items":      items,
+		"NextOffset": offsetParam(next),
+	})
+}
+
+func (s *Server) handleExperience(w http.ResponseWriter, r *http.Request) {
+	entries, next, err := s.memory.GetAllPaginated(r.Context(), 20,
+		parseScrollOffset(r.URL.Query().Get("offset")))
+	if err != nil {
+		// Collection may not exist yet — show an empty page instead of a 500.
+		entries = nil
+		next = nil
+	}
+	s.render(w, s.experienceTmpl, "base", map[string]any{
+		"Active":     "experience",
+		"Entries":    entries,
+		"Count":      s.memory.Count(r.Context()),
+		"NextOffset": offsetParam(next),
+	})
+}
+
+// offsetParam and parseScrollOffset round-trip a Qdrant scroll offset (a
+// point ID: UUID string or integer) through a URL query parameter without
+// changing its JSON type — re-marshaling an integer ID as a string would
+// make Qdrant reject the offset.
+func offsetParam(next json.RawMessage) string {
+	if next == nil {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(next, &s); err == nil {
+		return s // string ID → bare value in the URL
+	}
+	return string(next) // integer ID → digits in the URL
+}
+
+func parseScrollOffset(o string) json.RawMessage {
+	if o == "" {
+		return nil
+	}
+	// Digits are an integer ID (valid JSON as-is); anything else is a string
+	// ID that needs quoting. Conduit's own IDs are UUIDs, never bare digits.
+	if json.Valid([]byte(o)) {
+		return json.RawMessage(o)
+	}
+	data, err := json.Marshal(o)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// ── helpers ─────────────────────────────────────────────────────────────────
+
+func (s *Server) render(w http.ResponseWriter, tmpl *template.Template, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
+		log.Printf("template %s: %v", name, err)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+func httpError(w http.ResponseWriter, err error) {
+	log.Printf("error: %v", err)
+	http.Error(w, err.Error(), http.StatusInternalServerError)
+}

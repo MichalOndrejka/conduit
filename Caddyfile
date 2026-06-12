@@ -1,0 +1,7 @@
+# Caddy reverse proxy for the Conduit demo.
+# Automatic Let's Encrypt certificates for $DOMAIN; Conduit stays plain HTTP
+# on the internal network.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy conduit:8000
+}

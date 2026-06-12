@@ -46,10 +46,12 @@ Key decisions baked into `infra/main.bicep`:
 - **Secrets are native Container Apps secrets** (the Azure OpenAI key, a
   generated Qdrant API key, and a generated Conduit API key), referenced via
   `secretRef` — no Key Vault required.
-- **The Conduit app requires a shared secret (`CONDUIT_API_KEY`) on every
-  request.** Conduit's ingress is public (`external: true`) with no other
-  access control, so without this the web UI, settings, credential store, and
-  MCP endpoint would be open to anyone who finds the URL. See
+- **Two-track auth (Go backend).** Conduit's ingress is public
+  (`external: true`), so every request is gated: browsers sign in with the
+  **owner account** (n8n-style login — seed it via the `conduitOwnerEmail` /
+  `conduitOwnerPassword` parameters, or complete the first-run `/setup` page),
+  while headless MCP/API clients authenticate with the generated
+  `CONDUIT_API_KEY` bearer secret. See
   [Securing the deployment](#securing-the-deployment).
 
 ## Prerequisites
@@ -97,11 +99,15 @@ az deployment group show \
   --query properties.outputs.conduitUrl.value -o tsv
 ```
 
-## 2. Retrieve your access key
+## 2. Sign in and retrieve your MCP key
 
-Conduit's ingress is public, so every request — web UI, settings, credential
-store, and the `/mcp` endpoint — requires the `CONDUIT_API_KEY` secret
-generated during deployment. Retrieve it:
+- **Browser**: open the Conduit URL. If you passed `conduitOwnerEmail` /
+  `conduitOwnerPassword` at deploy time, sign in with those; otherwise the
+  first visit shows the one-time `/setup` page where you create the owner
+  account (it is stored bcrypt-hashed in `owner.json` on the `conduit-data`
+  share and the setup page disables itself afterwards).
+- **MCP clients** authenticate with the `CONDUIT_API_KEY` secret generated
+  during deployment. Retrieve it:
 
 ```bash
 az containerapp secret list \
@@ -109,10 +115,7 @@ az containerapp secret list \
   --show-values --query "[?name=='conduit-api-key'].value" -o tsv
 ```
 
-- **Browser**: open the Conduit URL — your browser will prompt for a
-  username/password. Enter anything as the username and the key as the
-  password (HTTP Basic auth).
-- **MCP clients**: send the key as a bearer token, e.g.:
+Then send it as a bearer token, e.g.:
 
 ```json
 {

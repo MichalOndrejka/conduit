@@ -1,0 +1,29 @@
+{{define "title"}}Experience — Conduit{{end}}
+{{define "content"}}
+<div class="mb-6">
+  <h1 class="text-2xl font-semibold text-white">Experience</h1>
+  <p class="text-sm text-slate-400 mt-1">{{.Count}} stored entries — guidance the MCP <span class="font-mono">remember</span> tool has retained across sessions.</p>
+</div>
+
+{{if not .Entries}}
+<div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
+  No experience entries stored yet.
+</div>
+{{else}}
+<div class="space-y-3">
+  {{range .Entries}}
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+    <div class="text-xs text-slate-500 mb-2">{{.CreatedAt}}</div>
+    <div class="text-sm font-medium text-white mb-1">{{.Situation}}</div>
+    <div class="text-sm text-slate-300">{{.Guidance}}</div>
+  </div>
+  {{end}}
+</div>
+{{if .NextOffset}}
+<div class="mt-6">
+  <a href="/experience?offset={{.NextOffset}}"
+     class="inline-block rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Next page &rarr;</a>
+</div>
+{{end}}
+{{end}}
+{{end}}

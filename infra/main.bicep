@@ -28,8 +28,8 @@ param location string = resourceGroup().location
 @description('Azure region for the Azure OpenAI account. Must be a region where the chosen embedding model is available (e.g. eastus, swedencentral, westus).')
 param openAiLocation string = location
 
-@description('Container image for Conduit.')
-param conduitImage string = 'michalondrejka/conduit:latest'
+@description('Container image for Conduit (Go). Build and push with: docker build -f Dockerfile.golang -t michalondrejka/conduit:go-latest . && docker push michalondrejka/conduit:go-latest')
+param conduitImage string = 'michalondrejka/conduit:go-latest'
 
 @description('Qdrant container image.')
 param qdrantImage string = 'qdrant/qdrant:v1.13.6'
@@ -57,8 +57,15 @@ param conduitShareSizeGiB int = 5
 param qdrantApiKey string = newGuid()
 
 @secure()
-@description('Shared secret required to access the Conduit web UI, settings, and MCP endpoint (sets CONDUIT_API_KEY). Defaults to a freshly generated value on every deployment that omits this parameter — retrieve it after deploy with az containerapp secret list.')
+@description('Bearer key for headless MCP/API clients (sets CONDUIT_API_KEY). Defaults to a freshly generated value on every deployment that omits this parameter — retrieve it after deploy with az containerapp secret list.')
 param conduitApiKey string = newGuid()
+
+@description('Owner account email for the web UI login (n8n-style). Leave empty to use the first-run /setup page instead.')
+param conduitOwnerEmail string = ''
+
+@secure()
+@description('Owner account password. Bcrypt-hashed in memory at startup; never stored in plaintext. Leave empty (with conduitOwnerEmail empty) to use the first-run /setup page.')
+param conduitOwnerPassword string = ''
 
 var namePrefixLower = toLower(namePrefix)
 var storageAccountName = take('${namePrefixLower}st${uniqueString(resourceGroup().id)}', 24)
@@ -261,11 +268,13 @@ resource conduit 'Microsoft.App/containerApps@2023-05-01' = {
         targetPort: 8000
         transport: 'auto'
       }
-      secrets: [
+      secrets: concat([
         { name: 'qdrant-api-key', value: qdrantApiKey }
         { name: 'azure-openai-api-key', value: openAi.listKeys().key1 }
         { name: 'conduit-api-key', value: conduitApiKey }
-      ]
+      ], empty(conduitOwnerPassword) ? [] : [
+        { name: 'conduit-owner-password', value: conduitOwnerPassword }
+      ])
     }
     template: {
       containers: [
@@ -276,7 +285,7 @@ resource conduit 'Microsoft.App/containerApps@2023-05-01' = {
             cpu: json('1.0')
             memory: '2Gi'
           }
-          env: [
+          env: concat([
             { name: 'CONDUIT_DATA_DIR', value: '/data' }
             { name: 'CONDUIT_CONFIG', value: '/data/config.json' }
             { name: 'QDRANT_HOST', value: qdrant.properties.configuration.ingress.fqdn }
@@ -290,7 +299,11 @@ resource conduit 'Microsoft.App/containerApps@2023-05-01' = {
             { name: 'AZURE_OPENAI_API_KEY', secretRef: 'azure-openai-api-key' }
             { name: 'EMBEDDING_DIMENSIONS', value: string(embeddingDimensions) }
             { name: 'CONDUIT_API_KEY', secretRef: 'conduit-api-key' }
-          ]
+          ], empty(conduitOwnerEmail) ? [] : [
+            { name: 'CONDUIT_OWNER_EMAIL', value: conduitOwnerEmail }
+          ], empty(conduitOwnerPassword) ? [] : [
+            { name: 'CONDUIT_OWNER_PASSWORD', secretRef: 'conduit-owner-password' }
+          ])
           volumeMounts: [
             { volumeName: 'conduit-data', mountPath: '/data' }
           ]

@@ -1,0 +1,54 @@
+{{define "title"}}Vector map — Conduit{{end}}
+{{define "content"}}
+<div class="mb-6">
+  <h1 class="text-2xl font-semibold text-white">Vector map</h1>
+  <p class="text-sm text-slate-400 mt-1">PCA projection of indexed vectors (up to 200 samples per completed source).</p>
+</div>
+
+<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+  <div id="legend" class="flex flex-wrap gap-3 mb-3 text-xs"></div>
+  <svg id="plot" viewBox="0 0 800 520" class="w-full" style="max-height:70vh"></svg>
+  <div id="empty" class="hidden p-10 text-center text-slate-400">No completed sources with vectors yet.</div>
+</div>
+
+<script>
+const PALETTE = ['#8b5cf6','#0ea5e9','#10b981','#f59e0b','#ef4444','#ec4899','#14b8a6','#f97316','#6366f1'];
+fetch('/api/map-data').then(r => r.json()).then(data => {
+  const pts = data.points || [];
+  const svg = document.getElementById('plot');
+  if (!pts.length) {
+    svg.classList.add('hidden');
+    document.getElementById('empty').classList.remove('hidden');
+    return;
+  }
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minY = Math.min(...ys), maxY = Math.max(...ys);
+  const sx = x => 30 + (maxX === minX ? 0.5 : (x - minX) / (maxX - minX)) * 740;
+  const sy = y => 30 + (maxY === minY ? 0.5 : (y - minY) / (maxY - minY)) * 460;
+
+  const sourceColors = {};
+  let ci = 0;
+  for (const p of pts) {
+    if (!(p.source in sourceColors)) sourceColors[p.source] = PALETTE[ci++ % PALETTE.length];
+  }
+  const legend = document.getElementById('legend');
+  for (const [name, color] of Object.entries(sourceColors)) {
+    const el = document.createElement('span');
+    el.className = 'inline-flex items-center gap-1.5 text-slate-300';
+    el.innerHTML = `<span style="background:${color}" class="inline-block h-2.5 w-2.5 rounded-full"></span>${name}`;
+    legend.appendChild(el);
+  }
+  const ns = 'http://www.w3.org/2000/svg';
+  for (const p of pts) {
+    const c = document.createElementNS(ns, 'circle');
+    c.setAttribute('cx', sx(p.x)); c.setAttribute('cy', sy(p.y)); c.setAttribute('r', 4);
+    c.setAttribute('fill', sourceColors[p.source]); c.setAttribute('fill-opacity', '0.75');
+    const t = document.createElementNS(ns, 'title');
+    t.textContent = `${p.source}: ${p.title}`;
+    c.appendChild(t);
+    svg.appendChild(c);
+  }
+});
+</script>
+{{end}}

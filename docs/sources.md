@@ -1,4 +1,11 @@
-# Source Configuration Reference
+# Source Configuration Reference (legacy Python backend)
+
+> **Legacy** — this page documents the Python backend's provider-specific
+> sources (notably Azure DevOps). The Go backend replaces them with a single
+> generic HTTP API provider configured per source; see
+> [go-port.md](go-port.md) and the README's source-configuration section.
+> The Python backend remains the only way to sync the multi-step ADO source
+> types (WIQL, git zip + code parsing) until it is retired.
 
 Every source in Conduit has a **type** (which Qdrant collection it targets) and a **provider** (which backend fetches the data). The provider is selected using the tab switcher on the configure page.
 
