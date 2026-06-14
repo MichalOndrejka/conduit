@@ -254,17 +254,6 @@ func (s *Server) deleteSourceAndVectors(ctx context.Context, id string) error {
 
 // ── Sync control ────────────────────────────────────────────────────────────
 
-func (s *Server) handleSyncOne(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	go s.sync.Sync(context.Background(), id)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-func (s *Server) handleSyncAll(w http.ResponseWriter, r *http.Request) {
-	go s.sync.SyncAll(context.Background())
-	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
 // handleSyncSelected syncs each checked source, for the Sources page's bulk
 // "Sync selected" action.
 func (s *Server) handleSyncSelected(w http.ResponseWriter, r *http.Request) {

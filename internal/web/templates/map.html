@@ -7,20 +7,105 @@
 </div>
 
 <div id="card" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-  <div id="legend" class="flex flex-wrap gap-3 mb-3 text-xs"></div>
-  <svg id="plot" viewBox="0 0 800 520" class="w-full" style="max-height:70vh"></svg>
+  <div class="flex flex-col md:flex-row gap-4">
+    <div class="flex-1 min-w-0">
+      <p class="text-xs text-slate-500 mb-2">Scroll to pan &middot; Ctrl+scroll to zoom</p>
+      <div id="plotWrap" class="relative overflow-scroll rounded-xl border border-slate-800 bg-slate-950/40" style="height:70vh">
+        <svg id="plot" viewBox="0 0 800 520" class="block"></svg>
+      </div>
+    </div>
+    <div id="legend" class="flex flex-col gap-2 text-xs md:w-56 shrink-0 md:max-h-[70vh] overflow-y-auto pr-2 md:order-2"></div>
+  </div>
 </div>
 <div id="empty" class="hidden rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
   No completed sources with vectors yet.
 </div>
+<div id="tooltip" class="hidden fixed z-50 max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs shadow-xl pointer-events-none"></div>
+
+<style>
+/* Themed scrollbars for the map viewport (Firefox + WebKit/Chromium). */
+#plotWrap {
+  scrollbar-color: #475569 #0f172a;
+  scrollbar-width: thin;
+}
+#plotWrap::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+#plotWrap::-webkit-scrollbar-track {
+  background: #0f172a;
+}
+#plotWrap::-webkit-scrollbar-thumb {
+  background-color: #475569;
+  border-radius: 8px;
+  border: 3px solid #0f172a;
+}
+#plotWrap::-webkit-scrollbar-thumb:hover {
+  background-color: #7c3aed;
+}
+#plotWrap::-webkit-scrollbar-corner {
+  background: #0f172a;
+}
+</style>
 
 <script>
-const PALETTE = ['#8b5cf6','#0ea5e9','#10b981','#f59e0b','#ef4444','#ec4899','#14b8a6','#f97316','#6366f1'];
+// Evenly distribute hues around the color wheel so colors stay distinct no
+// matter how many sources there are (RGB palette / number of sources).
+function colorFor(i, n) {
+  const hue = Math.round((360 * i) / n);
+  return `hsl(${hue}, 70%, 60%)`;
+}
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+const VB_W = 800, VB_H = 520;
+const MIN_ZOOM = 1, MAX_ZOOM = 6;
+let zoom = 1, baseW = 0, baseH = 0;
+
+const plotWrap = document.getElementById('plotWrap');
+const svg = document.getElementById('plot');
+const tooltip = document.getElementById('tooltip');
+
+// Zoom while keeping the point under (ax, ay) — container-relative
+// coordinates — fixed on screen, so zooming feels anchored to the cursor.
+function applyZoom(target, ax, ay) {
+  target = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, target));
+  if (target === zoom || !baseW) return;
+  if (ax === undefined) ax = plotWrap.clientWidth / 2;
+  if (ay === undefined) ay = plotWrap.clientHeight / 2;
+  const ratio = target / zoom;
+  const newScrollLeft = (plotWrap.scrollLeft + ax) * ratio - ax;
+  const newScrollTop = (plotWrap.scrollTop + ay) * ratio - ay;
+  zoom = target;
+  svg.setAttribute('width', baseW * zoom);
+  svg.setAttribute('height', baseH * zoom);
+  plotWrap.scrollLeft = newScrollLeft;
+  plotWrap.scrollTop = newScrollTop;
+}
+
+plotWrap.addEventListener('wheel', (e) => {
+  if (!e.ctrlKey) return;
+  e.preventDefault();
+  const rect = plotWrap.getBoundingClientRect();
+  applyZoom(zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2), e.clientX - rect.left, e.clientY - rect.top);
+}, { passive: false });
+
+function moveTooltip(e) {
+  const pad = 12;
+  let left = e.clientX + pad;
+  let top = e.clientY + pad;
+  const r = tooltip.getBoundingClientRect();
+  if (left + r.width > window.innerWidth - pad) left = e.clientX - r.width - pad;
+  if (top + r.height > window.innerHeight - pad) top = e.clientY - r.height - pad;
+  tooltip.style.left = left + 'px';
+  tooltip.style.top = top + 'px';
+}
+
 fetch('/api/map-data').then(r => r.json()).then(data => {
   const pts = data.points || [];
-  const svg = document.getElementById('plot');
   if (!pts.length) {
-    svg.classList.add('hidden');
+    document.getElementById('card').classList.add('hidden');
     document.getElementById('empty').classList.remove('hidden');
     return;
   }
@@ -30,26 +115,49 @@ fetch('/api/map-data').then(r => r.json()).then(data => {
   const sx = x => 30 + (maxX === minX ? 0.5 : (x - minX) / (maxX - minX)) * 740;
   const sy = y => 30 + (maxY === minY ? 0.5 : (y - minY) / (maxY - minY)) * 460;
 
+  const sourceNames = [...new Set(pts.map(p => p.source))];
   const sourceColors = {};
-  let ci = 0;
-  for (const p of pts) {
-    if (!(p.source in sourceColors)) sourceColors[p.source] = PALETTE[ci++ % PALETTE.length];
-  }
+  sourceNames.forEach((name, i) => { sourceColors[name] = colorFor(i, sourceNames.length); });
+
   const legend = document.getElementById('legend');
-  for (const [name, color] of Object.entries(sourceColors)) {
+  for (const name of sourceNames) {
     const el = document.createElement('span');
     el.className = 'inline-flex items-center gap-1.5 text-slate-300';
-    el.innerHTML = `<span style="background:${color}" class="inline-block h-2.5 w-2.5 rounded-full"></span>${name}`;
+    el.innerHTML = `<span style="background:${sourceColors[name]}" class="inline-block h-2.5 w-2.5 rounded-full shrink-0"></span><span class="truncate">${escapeHtml(name)}</span>`;
     legend.appendChild(el);
   }
+
+  // Fit the plot to the available width at zoom 1; zooming scales up from there.
+  baseW = plotWrap.clientWidth;
+  baseH = baseW * (VB_H / VB_W);
+  svg.setAttribute('width', baseW * zoom);
+  svg.setAttribute('height', baseH * zoom);
+
   const ns = 'http://www.w3.org/2000/svg';
   for (const p of pts) {
     const c = document.createElementNS(ns, 'circle');
     c.setAttribute('cx', sx(p.x)); c.setAttribute('cy', sy(p.y)); c.setAttribute('r', 4);
     c.setAttribute('fill', sourceColors[p.source]); c.setAttribute('fill-opacity', '0.75');
-    const t = document.createElementNS(ns, 'title');
-    t.textContent = `${p.source}: ${p.title}`;
-    c.appendChild(t);
+    c.classList.add('cursor-pointer');
+    c.addEventListener('mouseenter', (e) => {
+      c.setAttribute('stroke', '#fff');
+      c.setAttribute('stroke-width', '1.5');
+      tooltip.innerHTML = `
+        <div class="flex items-center gap-1.5 font-medium text-slate-100">
+          <span style="background:${sourceColors[p.source]}" class="inline-block h-2 w-2 rounded-full shrink-0"></span>
+          <span class="truncate">${escapeHtml(p.source)}</span>
+        </div>
+        <div class="mt-1 text-slate-300 break-words">${escapeHtml(p.title) || '(untitled)'}</div>
+      `;
+      tooltip.classList.remove('hidden');
+      moveTooltip(e);
+    });
+    c.addEventListener('mousemove', moveTooltip);
+    c.addEventListener('mouseleave', () => {
+      c.removeAttribute('stroke');
+      c.removeAttribute('stroke-width');
+      tooltip.classList.add('hidden');
+    });
     svg.appendChild(c);
   }
 });

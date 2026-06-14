@@ -194,21 +194,15 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	}
 }
 
-// SyncAll syncs every source sequentially, mirroring SyncService.sync_all.
-func (s *Service) SyncAll(ctx context.Context) {
-	srcs, err := s.store.ListAll()
-	if err != nil {
-		log.Printf("error: listing sources: %v", err)
-		return
-	}
-	for _, src := range srcs {
-		s.Sync(ctx, src.ID)
-	}
-}
-
-// SyncSelected syncs the given source IDs sequentially.
+// SyncSelected syncs the given source IDs in parallel.
 func (s *Service) SyncSelected(ctx context.Context, ids []string) {
+	var wg sync.WaitGroup
 	for _, id := range ids {
-		s.Sync(ctx, id)
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			s.Sync(ctx, id)
+		}(id)
 	}
+	wg.Wait()
 }

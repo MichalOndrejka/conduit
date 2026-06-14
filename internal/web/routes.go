@@ -133,8 +133,6 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sources/{id}/edit", s.handleSourceEditPost)
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
 	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)
-	mux.HandleFunc("POST /sync/{id}", s.handleSyncOne)
-	mux.HandleFunc("POST /sync-all", s.handleSyncAll)
 	mux.HandleFunc("POST /sources/sync-selected", s.handleSyncSelected)
 	mux.HandleFunc("POST /sources/{id}/sync/pause", s.handleSyncPause)
 	mux.HandleFunc("POST /sources/{id}/sync/resume", s.handleSyncResume)
