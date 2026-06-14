@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -19,10 +18,9 @@ const (
 
 func TestDecryptsPythonFernetStore(t *testing.T) {
 	dir := t.TempDir()
-	store := map[string]entry{
-		"ado-pat": {Note: "Azure DevOps PAT", Value: pyToken},
-	}
-	data, _ := json.Marshal(store)
+	// Existing Python-written stores include a "note" field; it must be ignored
+	// cleanly now that credentials no longer carry notes.
+	data := []byte(`{"ado-pat": {"note": "Azure DevOps PAT", "value": "` + pyToken + `"}}`)
 	if err := os.WriteFile(filepath.Join(dir, storeFile), data, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -35,9 +33,6 @@ func TestDecryptsPythonFernetStore(t *testing.T) {
 	if got := s.GetValue("ado-pat"); got != "super-secret-PAT-value" {
 		t.Errorf("GetValue = %q, want the Python-encrypted plaintext", got)
 	}
-	if note := s.ListAll()[0].Note; note != "Azure DevOps PAT" {
-		t.Errorf("note = %q", note)
-	}
 }
 
 func TestRoundTripAndReload(t *testing.T) {
@@ -48,7 +43,7 @@ func TestRoundTripAndReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Create("github-token", "demo", "ghp_abc123"); err != nil {
+	if err := s.Create("github-token", "ghp_abc123"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -79,14 +74,14 @@ func TestValidation(t *testing.T) {
 	t.Setenv("CONDUIT_SECRET_KEY", pyKey)
 	s, _ := New(dir)
 
-	if err := s.Create("", "n", "v"); err == nil {
+	if err := s.Create("", "v"); err == nil {
 		t.Error("empty name accepted")
 	}
-	if err := s.Create("a/b", "n", "v"); err == nil {
+	if err := s.Create("a/b", "v"); err == nil {
 		t.Error("name with '/' accepted")
 	}
-	_ = s.Create("dup", "n", "v")
-	if err := s.Create("dup", "n", "v"); err == nil {
+	_ = s.Create("dup", "v")
+	if err := s.Create("dup", "v"); err == nil {
 		t.Error("duplicate name accepted")
 	}
 }

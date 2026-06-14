@@ -19,6 +19,9 @@ services:
       - conduit_data:/data
       - ./config.json:/app/config.json   # mount config for easy editing without rebuild
     environment:
+      # Bind to all interfaces inside the container so the port mapping below
+      # can reach it (the Go binary defaults to loopback-only otherwise).
+      CONDUIT_HOST: 0.0.0.0
       # Qdrant — must point to the service name inside compose network
       CONDUIT_CONFIG: /app/config.json
       CONDUIT_DATA_DIR: /data

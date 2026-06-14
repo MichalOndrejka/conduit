@@ -6,6 +6,8 @@ package web
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -17,18 +19,28 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
 
-// sourceTypes drives the type <select> in the source form: generic domain
-// categories that route to Qdrant collections (not provider-specific).
-var sourceTypes = []struct{ Value, Label string }{
-	{models.SourceWorkItemQuery, "Work Items"},
-	{models.SourceRequirements, "Requirements"},
-	{models.SourceTestCase, "Test Cases"},
-	{models.SourceCodeRepo, "Source Code"},
-	{models.SourceTestCodeRepo, "Test Code"},
-	{models.SourcePipelineBuild, "Build Results"},
-	{models.SourceDocumentation, "Documentation"},
-	{models.SourceTestResults, "Test Results"},
-	{models.SourceGitCommits, "Git Commits"},
+// sourceTypes drives the type-picker tiles: generic domain categories that
+// route to Qdrant collections (not provider-specific). The description is shown
+// on the tile.
+var sourceTypes = []struct{ Value, Label, Description string }{
+	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks from a work-tracking system."},
+	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
+	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
+	{models.SourceTestResults, "Test Results", "Pass/fail outcomes from recent test runs."},
+	{models.SourceGitCommits, "Git Commits", "Commit history and messages from a repository."},
+	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
+	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
+	{models.SourcePipelineBuild, "Build Results", "Build and release pipeline run results."},
+	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
+}
+
+func labelForType(t string) string {
+	for _, st := range sourceTypes {
+		if st.Value == t {
+			return st.Label
+		}
+	}
+	return t
 }
 
 // apiConfigKeys are the generic API source's config fields, read 1:1 from the
@@ -41,22 +53,53 @@ var apiConfigKeys = []string{
 	"NextUrlPath", "Top", "VerifySSL",
 }
 
+// presetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
+// DevOps) store so an existing source re-opens in the right tab, pre-filled.
+// The backend ignores them — execution is driven entirely by apiConfigKeys, so
+// any platform is "just a generic HTTP source" (see internal/sources/source.go).
+var presetConfigKeys = []string{
+	"Platform", "AdoOrg", "AdoProject", "AdoApiVersion", "AdoResource", "AdoQuery",
+}
+
 // ── Source CRUD ─────────────────────────────────────────────────────────────
 
 func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefinition, errMsg string) {
-	creds := s.secrets.ListAll()
+	provider := src.GetConfig("Provider")
+	// Which provider tab opens first: manual → Manual; the ADO preset → Azure
+	// DevOps; an existing generic source → Custom API; a brand-new source
+	// defaults to Azure DevOps (the common case).
+	tab := "ado"
+	switch {
+	case provider == "manual":
+		tab = "manual"
+	case src.GetConfig("Platform") == "ado":
+		tab = "ado"
+	case src.ID != "" || provider != "":
+		tab = "custom"
+	}
 	s.render(w, s.sourceFormTmpl, "base", map[string]any{
 		"Active":      "sources",
 		"Source":      src,
 		"IsNew":       src.ID == "",
 		"Error":       errMsg,
-		"SourceTypes": sourceTypes,
-		"Credentials": creds,
+		"TypeLabel":   labelForType(src.Type),
+		"Tab":         tab,
+		"Credentials": s.secrets.ListAll(),
 	})
 }
 
-func (s *Server) handleSourceCreateGet(w http.ResponseWriter, _ *http.Request) {
-	s.renderSourceForm(w, &models.SourceDefinition{Config: map[string]string{}}, "")
+// handleSourceCreateGet shows the type-picker tiles, or the configure form once
+// a type is chosen (?type=…).
+func (s *Server) handleSourceCreateGet(w http.ResponseWriter, r *http.Request) {
+	t := r.URL.Query().Get("type")
+	if t == "" {
+		s.render(w, s.sourceNewTmpl, "base", map[string]any{
+			"Active":      "sources",
+			"SourceTypes": sourceTypes,
+		})
+		return
+	}
+	s.renderSourceForm(w, &models.SourceDefinition{Type: t, Config: map[string]string{}}, "")
 }
 
 func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.SourceDefinition {
@@ -85,6 +128,14 @@ func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.
 				cfg[key] = v
 			}
 		}
+		// Persist the platform-preset metadata (e.g. Azure DevOps friendly
+		// fields) so the source re-opens in the right tab; the backend ignores
+		// these and runs only the generic apiConfigKeys above.
+		for _, key := range presetConfigKeys {
+			if v := strings.TrimSpace(r.FormValue(key)); v != "" {
+				cfg[key] = v
+			}
+		}
 	}
 	src.Config = cfg
 	return src
@@ -99,6 +150,9 @@ func (s *Server) handleSourceCreatePost(w http.ResponseWriter, r *http.Request) 
 	if err := s.sources.Save(*src); err != nil {
 		httpError(w, err)
 		return
+	}
+	if r.FormValue("action") == "save_sync" {
+		go s.sync.Sync(context.Background(), src.ID)
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -150,30 +204,52 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err)
 		return
 	}
+	if r.FormValue("action") == "save_sync" {
+		go s.sync.Sync(context.Background(), src.ID)
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // handleSourceDelete removes the source and its vectors, mirroring
 // sources_delete_post in app/web/routes.py.
 func (s *Server) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
-	src, err := s.sources.Get(r.PathValue("id"))
-	if err != nil {
+	if err := s.deleteSourceAndVectors(r.Context(), r.PathValue("id")); err != nil {
 		httpError(w, err)
 		return
 	}
-	if src != nil {
-		collection := sources.CollectionFor(src)
-		filter := &rag.Filter{Must: []rag.FieldCondition{{
-			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-		}}}
-		// Best-effort vector cleanup — the source record is removed either way.
-		_ = s.vectors.DeleteByFilter(r.Context(), collection, filter)
-		if err := s.sources.Delete(src.ID); err != nil {
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleDeleteSelected removes each checked source (and its vectors), for the
+// Sources page's bulk "Delete selected" action.
+func (s *Server) handleDeleteSelected(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	for _, id := range r.Form["ids"] {
+		if err := s.deleteSourceAndVectors(r.Context(), id); err != nil {
 			httpError(w, err)
 			return
 		}
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// deleteSourceAndVectors removes a source's indexed vectors (best-effort) and
+// its record. A no-op if the source no longer exists.
+func (s *Server) deleteSourceAndVectors(ctx context.Context, id string) error {
+	src, err := s.sources.Get(id)
+	if err != nil {
+		return err
+	}
+	if src == nil {
+		return nil
+	}
+	collection := sources.CollectionFor(src)
+	filter := &rag.Filter{Must: []rag.FieldCondition{{
+		Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
+	}}}
+	// Best-effort vector cleanup — the source record is removed either way.
+	_ = s.vectors.DeleteByFilter(ctx, collection, filter)
+	return s.sources.Delete(src.ID)
 }
 
 // ── Sync control ────────────────────────────────────────────────────────────
@@ -186,6 +262,15 @@ func (s *Server) handleSyncOne(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSyncAll(w http.ResponseWriter, r *http.Request) {
 	go s.sync.SyncAll(context.Background())
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// handleSyncSelected syncs each checked source, for the Sources page's bulk
+// "Sync selected" action.
+func (s *Server) handleSyncSelected(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	ids := r.Form["ids"]
+	go s.sync.SyncSelected(context.Background(), ids)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -216,6 +301,32 @@ func (s *Server) handleExport(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, stripped)
 }
 
+// handleImport accepts an uploaded conduit-sources.json and merges it into the
+// store, re-rendering the Sources page with a result banner. Port of
+// import_sources in app/web/routes.py.
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		s.renderIndex(w, "", "Import failed: no file uploaded.")
+		return
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(io.LimitReader(file, 32<<20)) // 32 MiB cap
+	if err != nil {
+		s.renderIndex(w, "", "Import failed: "+err.Error())
+		return
+	}
+	count, err := s.sources.Import(data)
+	if err != nil {
+		s.renderIndex(w, "", "Import failed: "+err.Error())
+		return
+	}
+	s.renderIndex(w, fmt.Sprintf(
+		"Imported %d source(s). Add credentials at /credentials, then edit each source to assign them before syncing.",
+		count), "")
+}
+
 // ── Credentials ─────────────────────────────────────────────────────────────
 
 func (s *Server) renderCredentials(w http.ResponseWriter, errMsg string) {
@@ -244,7 +355,7 @@ func (s *Server) handleCredentials(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleCredentialCreate(w http.ResponseWriter, r *http.Request) {
-	err := s.secrets.Create(r.FormValue("name"), r.FormValue("note"), r.FormValue("value"))
+	err := s.secrets.Create(r.FormValue("name"), r.FormValue("value"))
 	if err != nil {
 		s.renderCredentials(w, err.Error())
 		return
@@ -255,7 +366,7 @@ func (s *Server) handleCredentialCreate(w http.ResponseWriter, r *http.Request) 
 func (s *Server) handleCredentialEdit(w http.ResponseWriter, r *http.Request) {
 	oldName := r.PathValue("name")
 	newName := r.FormValue("name")
-	renamed, err := s.secrets.Update(oldName, newName, r.FormValue("note"), r.FormValue("value"))
+	renamed, err := s.secrets.Update(oldName, newName, r.FormValue("value"))
 	if err != nil {
 		s.renderCredentials(w, err.Error())
 		return
@@ -281,7 +392,8 @@ func (s *Server) handleCredentialDelete(w http.ResponseWriter, r *http.Request) 
 // ── Vector map (PCA) ────────────────────────────────────────────────────────
 
 func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
-	s.render(w, s.mapTmpl, "base", map[string]any{"Active": "map"})
+	// The map lives under Sources now — keep that nav item highlighted.
+	s.render(w, s.mapTmpl, "base", map[string]any{"Active": "sources"})
 }
 
 // handleMapData ports /api/map-data: samples vectors per completed source,

@@ -1,13 +1,20 @@
 {
   "embedding": {
+    "provider": "openai-compatible",
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
     "dimensions": 768,
-    "max_input_tokens": 8192
+    "max_input_tokens": 8192,
+    "azure_endpoint": "",
+    "azure_deployment": "",
+    "azure_api_version": "2024-02-01",
+    "azure_api_key_credential": ""
   },
   "qdrant": {
     "host": "localhost",
-    "port": 6333
+    "port": 6333,
+    "https": false,
+    "api_key": ""
   },
   "chunking": {
     "max_chunk_size": 2000,
@@ -15,19 +22,25 @@
   },
   "preprocessing": {
     "enabled": false,
+    "provider": "openai-compatible",
     "base_url": "http://localhost:11434/v1",
     "model": "mistral",
     "system_prompt": "",
     "source_types": {
-      "workitem": true,
+      "code": false,
+      "documentation": true,
+      "git-commits": false,
+      "pipeline-build": true,
       "requirements": true,
       "test-case": true,
       "test-results": true,
-      "git-commits": false,
-      "code": false,
-      "pipeline-build": true,
-      "documentation": true
-    }
+      "testcode": false,
+      "workitem": true
+    },
+    "azure_endpoint": "",
+    "azure_deployment": "",
+    "azure_api_version": "2024-02-01",
+    "azure_api_key_credential": ""
   },
   "sources_file_path": "conduit-sources.json"
 }

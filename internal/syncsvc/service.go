@@ -1,11 +1,6 @@
-// Package syncsvc is the Go port of app/sync/service.py: the fetch → index
-// pipeline with pause/cancel checkpoints, per-phase error tracking, and
-// sync-status persistence to conduit-sources.json.
-//
-// Note: the optional LLM preprocessing phase (Phase 1.5 in Python) is not
-// ported — it is disabled for the demo deployment per the migration plan. If
-// preprocessing is enabled in config a warning is logged and the phase is
-// skipped.
+// Package syncsvc is the Go port of app/sync/service.py: the fetch →
+// preprocess → index pipeline with pause/cancel checkpoints, per-phase error
+// tracking, and sync-status persistence to conduit-sources.json.
 package syncsvc
 
 import (
@@ -137,9 +132,32 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		return
 	}
 
-	// ── Phase 1.5: preprocessing not ported (see package doc) ──────────────
-	if s.cfg.Preprocessing.Enabled {
-		log.Printf("warning: preprocessing is enabled in config but not supported by the Go backend — skipping")
+	// ── Phase 1.5: optional LLM preprocessing (summarize before chunking) ──
+	// Built per-sync so a Settings change applies without a restart (the web
+	// server and this service share the same *config.AppConfig).
+	if pre := rag.NewDocumentPreprocessor(s.cfg, s.secrets); pre.EnabledForType(src.Type) {
+		if err := s.control.Checkpoint(ctx, sourceID); err != nil {
+			cancelledOutcome()
+			return
+		}
+		log.Printf("preprocessing %d documents for source %s", len(docs), sourceID)
+		s.progress.Set(sourceID, models.SyncProgress{Phase: "preprocessing", Total: len(docs)})
+		docs, err = pre.Preprocess(ctx, docs, src.Type, rag.PreprocessOptions{
+			ProgressCb: func(current, total int) {
+				s.progress.Set(sourceID, models.SyncProgress{
+					Phase: "preprocessing", Current: current, Total: total,
+				})
+			},
+			Checkpoint: func() error { return s.control.Checkpoint(ctx, sourceID) },
+		})
+		if err != nil {
+			if errors.Is(err, syncctl.ErrSyncCancelled) {
+				cancelledOutcome()
+				return
+			}
+			failedOutcome("preprocess", err)
+			return
+		}
 	}
 
 	log.Printf("indexing %d documents for source %s", len(docs), sourceID)
@@ -185,5 +203,12 @@ func (s *Service) SyncAll(ctx context.Context) {
 	}
 	for _, src := range srcs {
 		s.Sync(ctx, src.ID)
+	}
+}
+
+// SyncSelected syncs the given source IDs sequentially.
+func (s *Service) SyncSelected(ctx context.Context, ids []string) {
+	for _, id := range ids {
+		s.Sync(ctx, id)
 	}
 }

@@ -1,0 +1,12 @@
+{
+  "name": "conduit-web",
+  "private": true,
+  "description": "Tailwind CSS build for the Conduit Go web UI.",
+  "scripts": {
+    "build:css": "tailwindcss -c tailwind.config.js -i internal/web/static/input.css -o internal/web/static/app.css --minify",
+    "watch:css": "tailwindcss -c tailwind.config.js -i internal/web/static/input.css -o internal/web/static/app.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.0"
+  }
+}

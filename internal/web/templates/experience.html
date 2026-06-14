@@ -2,7 +2,24 @@
 {{define "content"}}
 <div class="mb-6">
   <h1 class="text-2xl font-semibold text-white">Experience</h1>
-  <p class="text-sm text-slate-400 mt-1">{{.Count}} stored entries — guidance the MCP <span class="font-mono">remember</span> tool has retained across sessions.</p>
+  <p class="text-sm text-slate-400 mt-1">{{.Count}} stored entries — guidance the MCP <span class="font-mono">remember</span> tool has retained across sessions. You can also add entries by hand.</p>
+</div>
+
+<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 mb-6 max-w-2xl">
+  <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Add experience</h2>
+  <form method="post" action="/experience/add" class="space-y-3">
+    <div>
+      <label class="block text-xs font-medium text-slate-400 mb-1">Situation <span class="text-slate-500">(when this applies — used for semantic match)</span></label>
+      <textarea name="situation" required rows="2" placeholder="e.g. When syncing an Azure DevOps work-item source…"
+                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"></textarea>
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-slate-400 mb-1">Guidance <span class="text-slate-500">(what to do)</span></label>
+      <textarea name="guidance" required rows="3" placeholder="e.g. Use Basic auth with an empty username and the PAT as the password."
+                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"></textarea>
+    </div>
+    <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Add experience</button>
+  </form>
 </div>
 
 {{if not .Entries}}
@@ -13,9 +30,18 @@
 <div class="space-y-3">
   {{range .Entries}}
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-    <div class="text-xs text-slate-500 mb-2">{{.CreatedAt}}</div>
-    <div class="text-sm font-medium text-white mb-1">{{.Situation}}</div>
-    <div class="text-sm text-slate-300">{{.Guidance}}</div>
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <div class="text-xs text-slate-500 mb-2">{{.CreatedAt}}</div>
+        <div class="text-sm font-medium text-white mb-1">{{.Situation}}</div>
+        <div class="text-sm text-slate-300">{{.Guidance}}</div>
+      </div>
+      {{if .ID}}
+      <form method="post" action="/experience/{{.ID}}/delete" onsubmit="return confirm('Delete this experience?')">
+        <button type="submit" class="shrink-0 text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
+      </form>
+      {{end}}
+    </div>
   </div>
   {{end}}
 </div>

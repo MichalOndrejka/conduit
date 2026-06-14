@@ -83,10 +83,20 @@ func main() {
 	webServer.Routes(mux)
 	mux.Handle("/mcp", mcpHTTP)
 
-	addr := ":8000"
-	if p := os.Getenv("PORT"); p != "" {
-		addr = ":" + p
+	// Bind to loopback by default so a local `go run` doesn't trigger the
+	// Windows "allow this app on public/private networks" firewall prompt,
+	// which only fires for listeners reachable from other interfaces.
+	// Docker needs the container-internal 0.0.0.0 so the port mapping works —
+	// set CONDUIT_HOST=0.0.0.0 there (see docker-compose.yml).
+	host := os.Getenv("CONDUIT_HOST")
+	if host == "" {
+		host = "127.0.0.1"
 	}
+	port := "8000"
+	if p := os.Getenv("PORT"); p != "" {
+		port = p
+	}
+	addr := host + ":" + port
 	log.Printf("Conduit (Go) listening on %s — qdrant=%s:%d embedding=%s/%s",
 		addr, cfg.Qdrant.Host, cfg.Qdrant.Port, cfg.Embedding.Provider, cfg.Embedding.Model)
 	if err := http.ListenAndServe(addr, auth.Middleware(mux)); err != nil {

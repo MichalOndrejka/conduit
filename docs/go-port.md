@@ -89,10 +89,11 @@ go build ./cmd/conduit          # local binary
 go test ./...                   # unit tests (incl. Fernet cross-compat)
 ./conduit                       # serve on :8000
 ./conduit search conduit_workitems "login bug"   # verification CLI
-
-# Demo deployment (Caddy TLS → Go app → Qdrant):
-DOMAIN=demo.example.com docker compose -f docker-compose.go.yml up -d
 ```
+
+Production deployment config (Caddy/TLS demo stack, Azure Container Apps Bicep)
+lives in the [conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy)
+repo.
 
 ## Known losses (accepted in the plan)
 

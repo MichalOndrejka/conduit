@@ -10,19 +10,42 @@
     <form method="post" action="/sync-all">
       <button type="submit" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Sync all</button>
     </form>
+    <a href="/map" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Vector map</a>
     <a href="/export" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Export</a>
+    <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
+      <input type="file" name="file" accept="application/json,.json" id="import-file" class="hidden"
+             onchange="document.getElementById('import-form').submit()">
+      <button type="button" onclick="document.getElementById('import-file').click()"
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Import</button>
+    </form>
   </div>
 </div>
+
+{{if .ImportMessage}}
+<div class="mb-4 rounded-lg border border-emerald-800 bg-emerald-950/50 px-3 py-2 text-sm text-emerald-300">{{.ImportMessage}}</div>
+{{end}}
+{{if .ImportError}}
+<div class="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">{{.ImportError}}</div>
+{{end}}
 
 {{if not .Sources}}
 <div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
   No sources configured yet. <a href="/sources/create" class="text-violet-400 hover:underline">Create one</a>.
 </div>
 {{else}}
+<div class="flex items-center gap-3 mb-3 text-sm text-slate-400">
+  <label class="flex items-center gap-2 cursor-pointer select-none">
+    <input type="checkbox" id="select-all" class="w-4 h-4 accent-violet-600">
+    Select all
+  </label>
+  <button type="button" onclick="bulkAction('/sources/sync-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync selected</button>
+  <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete selected</button>
+</div>
 <div class="space-y-3">
   {{range .Sources}}
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4" data-source-id="{{.ID}}">
     <div class="flex items-center gap-4 flex-wrap">
+      <input type="checkbox" class="row-check w-4 h-4 accent-violet-600 shrink-0" value="{{.ID}}">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <a href="/sources/{{.ID}}/items" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
@@ -30,23 +53,19 @@
         </div>
         <div class="text-xs text-slate-500 mt-1">
           {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
-          <span data-error class="text-red-400 ml-2">{{if .SyncError}}· {{.SyncError}}{{end}}</span>
         </div>
         <div data-progress class="text-xs text-violet-400 mt-1 hidden"></div>
+        <div data-error class="text-xs text-red-300 bg-red-950/40 border border-red-900 rounded-lg px-2.5 py-1.5 mt-2 {{if not .SyncError}}hidden{{end}}">
+          {{if .SyncError}}Sync failed{{if .SyncErrorPhase}} during {{.SyncErrorPhase}}{{end}}: {{.SyncError}}{{end}}
+        </div>
       </div>
       <!-- Colors come from STATUS_CLASSES in the script below (single source of truth) -->
       <span data-status data-s="{{.SyncStatus}}" class="text-xs rounded-full px-2.5 py-1 border">{{.SyncStatus}}</span>
       <div class="flex gap-1.5">
-        <form method="post" action="/sync/{{.ID}}">
-          <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Sync</button>
-        </form>
         <button onclick="syncCtl('{{.ID}}','pause')" data-pause class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Pause</button>
         <button onclick="syncCtl('{{.ID}}','resume')" data-resume class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Resume</button>
         <button onclick="syncCtl('{{.ID}}','cancel')" data-cancel class="hidden text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Cancel</button>
         <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
-        <form method="post" action="/sources/{{.ID}}/delete" onsubmit="return confirm('Delete source and its vectors?')">
-          <button type="submit" class="text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
-        </form>
       </div>
     </div>
   </div>
@@ -56,6 +75,26 @@
 <script>
 function syncCtl(id, action) {
   fetch('/sources/' + id + '/sync/' + action, {method: 'POST'}).then(poll);
+}
+document.getElementById('select-all').addEventListener('change', e => {
+  document.querySelectorAll('.row-check').forEach(cb => cb.checked = e.target.checked);
+});
+function bulkAction(url, confirmMsg) {
+  const ids = [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
+  if (ids.length === 0) return;
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  const form = document.createElement('form');
+  form.method = 'post';
+  form.action = url;
+  for (const id of ids) {
+    const input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'ids';
+    input.value = id;
+    form.appendChild(input);
+  }
+  document.body.appendChild(form);
+  form.submit();
 }
 const STATUS_CLASSES = {
   completed: 'bg-emerald-950 text-emerald-300 border-emerald-800',
@@ -86,7 +125,13 @@ function poll() {
       } else {
         prog.classList.add('hidden');
       }
-      card.querySelector('[data-error]').textContent = s.sync_error ? '· ' + s.sync_error : '';
+      const errBox = card.querySelector('[data-error]');
+      if (s.sync_error) {
+        errBox.textContent = 'Sync failed' + (s.sync_error_phase ? ' during ' + s.sync_error_phase : '') + ': ' + s.sync_error;
+        errBox.classList.remove('hidden');
+      } else {
+        errBox.classList.add('hidden');
+      }
       const syncing = s.sync_status === 'syncing';
       card.querySelector('[data-pause]').classList.toggle('hidden', !syncing || s.paused);
       card.querySelector('[data-resume]').classList.toggle('hidden', !syncing || !s.paused);

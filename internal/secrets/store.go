@@ -35,7 +35,6 @@ type Reader interface {
 }
 
 type entry struct {
-	Note  string `json:"note"`
 	Value string `json:"value"` // plaintext in cache, Fernet token on disk
 }
 
@@ -121,7 +120,7 @@ func (s *Store) load() error {
 		if plain == nil {
 			continue // skip entries that can't be decrypted (wrong key / corrupt)
 		}
-		s.cache[name] = entry{Note: e.Note, Value: string(plain)}
+		s.cache[name] = entry{Value: string(plain)}
 	}
 	return nil
 }
@@ -134,7 +133,7 @@ func (s *Store) save() error {
 		if err != nil {
 			return err
 		}
-		out[name] = entry{Note: e.Note, Value: string(tok)}
+		out[name] = entry{Value: string(tok)}
 	}
 	data, err := json.MarshalIndent(out, "", "  ")
 	if err != nil {
@@ -163,8 +162,8 @@ func (s *Store) ListAll() []models.CredentialInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]models.CredentialInfo, 0, len(s.cache))
-	for name, e := range s.cache {
-		out = append(out, models.CredentialInfo{ID: name, Name: name, Note: e.Note})
+	for name := range s.cache {
+		out = append(out, models.CredentialInfo{ID: name, Name: name})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -180,7 +179,7 @@ func validateName(name string) error {
 	return nil
 }
 
-func (s *Store) Create(name, note, value string) error {
+func (s *Store) Create(name, value string) error {
 	name = strings.TrimSpace(name)
 	if err := validateName(name); err != nil {
 		return err
@@ -190,13 +189,13 @@ func (s *Store) Create(name, note, value string) error {
 	if _, exists := s.cache[name]; exists {
 		return fmt.Errorf("a credential named %q already exists", name)
 	}
-	s.cache[name] = entry{Note: strings.TrimSpace(note), Value: value}
+	s.cache[name] = entry{Value: value}
 	return s.save()
 }
 
 // Update renames/updates a credential. Returns oldName so callers can cascade
 // renames to sources; returns "" if oldName does not exist.
-func (s *Store) Update(oldName, newName, note, value string) (string, error) {
+func (s *Store) Update(oldName, newName, value string) (string, error) {
 	newName = strings.TrimSpace(newName)
 	if err := validateName(newName); err != nil {
 		return "", err
@@ -213,7 +212,6 @@ func (s *Store) Update(oldName, newName, note, value string) (string, error) {
 		}
 	}
 	delete(s.cache, oldName)
-	e.Note = strings.TrimSpace(note)
 	if value != "" {
 		e.Value = value
 	}

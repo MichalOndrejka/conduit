@@ -192,7 +192,9 @@ var publicPaths = map[string]bool{
 // a 401 JSON body.
 func (a *AuthService) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if publicPaths[r.URL.Path] {
+		// Static assets (the stylesheet) must load on the unauthenticated
+		// login/setup pages too, so the whole /static/ prefix is public.
+		if publicPaths[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/static/") {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -37,10 +37,16 @@ type ChunkingConfig struct {
 
 type PreprocessingConfig struct {
 	Enabled      bool            `json:"enabled"`
+	Provider     string          `json:"provider"` // "openai-compatible" (Ollama, etc.) | "azure-openai"
 	BaseURL      string          `json:"base_url"`
 	Model        string          `json:"model"`
 	SystemPrompt string          `json:"system_prompt"`
 	SourceTypes  map[string]bool `json:"source_types"`
+	// Azure OpenAI — only used when Provider == "azure-openai"
+	AzureEndpoint         string `json:"azure_endpoint"`
+	AzureDeployment       string `json:"azure_deployment"`
+	AzureAPIVersion       string `json:"azure_api_version"`
+	AzureAPIKeyCredential string `json:"azure_api_key_credential"` // credential name in the secrets store
 }
 
 type AppConfig struct {
@@ -64,6 +70,8 @@ func defaults() AppConfig {
 		Qdrant:   QdrantConfig{Host: "localhost", Port: 6333},
 		Chunking: ChunkingConfig{MaxChunkSize: 2000, Overlap: 200},
 		Preprocessing: PreprocessingConfig{
+			Provider:        "openai-compatible",
+			AzureAPIVersion: "2024-02-01",
 			SourceTypes: map[string]bool{
 				"workitem": true, "requirements": true, "test-case": true,
 				"test-results": true, "git-commits": false, "code": false,
@@ -148,4 +156,25 @@ func Load() (*AppConfig, error) {
 // DataDir returns the directory holding sources/credentials/config state.
 func DataDir(cfg *AppConfig) string {
 	return filepath.Dir(cfg.SourcesFilePath)
+}
+
+// Path returns the resolved config file path, for display on the Settings page.
+func Path() string {
+	return configPath()
+}
+
+// Save persists cfg to the config file as JSON, mirroring save_config in
+// app/config.py. Connection-affecting fields (embedding/Qdrant) take effect on
+// the next restart, since the RAG services capture their config at startup.
+func Save(cfg *AppConfig) error {
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := configPath()
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }

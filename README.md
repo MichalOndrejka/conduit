@@ -85,7 +85,8 @@ Prerequisites: [Go 1.24+](https://go.dev/dl/), [Docker](https://docs.docker.com/
 git clone https://github.com/MichalOndrejka/conduit.git
 cd conduit
 
-docker compose -f docker-compose.go.yml up -d qdrant   # or any local Qdrant
+docker run -d --name conduit-qdrant -p 6333:6333 \
+  -v conduit_qdrant:/qdrant/storage qdrant/qdrant:v1.13.6   # or any local Qdrant
 ollama pull nomic-embed-text-v2-moe
 
 go run ./cmd/conduit
@@ -110,18 +111,26 @@ Then: add credentials at `/credentials`, create a source at `/sources/create`, h
 }
 ```
 
-## Demo deployment (Caddy TLS → Conduit → Qdrant)
+## Running in Docker
 
-Separate containers on one small VM; HTTPS via automatic Let's Encrypt:
+`docker-compose.yml` builds Conduit and starts it with Qdrant; for a prebuilt
+image from Docker Hub use `docker-compose.hub.yml`:
 
 ```bash
-DOMAIN=conduit.example.com \
-CONDUIT_OWNER_EMAIL=you@example.com CONDUIT_OWNER_PASSWORD=... \
-AZURE_OPENAI_ENDPOINT=... AZURE_OPENAI_DEPLOYMENT=... AZURE_OPENAI_API_KEY=... \
-docker compose -f docker-compose.go.yml up -d
+docker compose up                          # build from source
+docker compose -f docker-compose.hub.yml up   # pull michalondrejka/conduit
 ```
 
-See [docs/go-port.md](docs/go-port.md) for the architecture and [Caddyfile](Caddyfile) for the proxy config.
+Both mount a volume at `/data` (`CONDUIT_DATA_DIR=/data`) so sources, config,
+and credentials persist across restarts. Ollama must be reachable from the
+container — point `EMBEDDING_BASE_URL` at `http://host.docker.internal:11434/v1`,
+or use Azure OpenAI.
+
+## Deployment
+
+Production deployment configuration (single-VM Caddy/TLS stack and Azure
+Container Apps via Bicep) lives in a separate repo:
+**[conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy)**.
 
 ## Configuration
 
@@ -160,7 +169,6 @@ internal/
   store/            conduit-sources.json store
   web/              routes, templates, n8n-style auth
 Dockerfile.golang        multi-stage distroless build
-docker-compose.go.yml    demo stack (Caddy + Conduit + Qdrant)
 ```
 
 ## Running tests
@@ -183,7 +191,7 @@ only tool that can sync the legacy multi-step Azure DevOps source types
 same Qdrant collections, `conduit-sources.json`, and `credentials.enc.json`,
 so both can run against the same data. See [docs/go-port.md](docs/go-port.md)
 for the migration details; legacy docs: [sources](docs/sources.md),
-[configuration](docs/configuration.md), [Azure deployment](docs/deployment-azure.md).
+[configuration](docs/configuration.md).
 
 ## Contributing
 

@@ -18,6 +18,9 @@ services:
     volumes:
       - conduit_data:/data
     environment:
+      # Bind to all interfaces inside the container so the port mapping below
+      # can reach it (the Go binary defaults to loopback-only otherwise).
+      - CONDUIT_HOST=0.0.0.0
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       # Required if this host is reachable from outside localhost — without it,

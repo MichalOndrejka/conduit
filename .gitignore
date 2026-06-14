@@ -23,6 +23,15 @@ conduit-embedding.json
 *.local.json
 .secret_key
 credentials.enc.json
+.jwt_secret
+owner.json
+
+# Go build artifacts
+/conduit
+/conduit.exe
+
+# Node (Tailwind build)
+node_modules/
 
 # Qdrant local storage
 qdrant_storage/

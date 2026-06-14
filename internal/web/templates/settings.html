@@ -1,0 +1,326 @@
+{{define "title"}}Settings — Conduit{{end}}
+{{define "content"}}
+<div class="mb-6">
+  <h1 class="text-2xl font-semibold text-white">Settings</h1>
+  <p class="text-sm text-slate-400 mt-1">Configure the embedding model, vector store, and preprocessing. Connection changes apply after a restart.</p>
+</div>
+
+<div id="notice" data-notice="{{.Notice}}" class="hidden mb-4 rounded-lg border px-3 py-2 text-sm"></div>
+
+<!-- MCP server -->
+<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 mb-5">
+  <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">MCP server</h2>
+  <p class="text-xs text-slate-500 mb-3">Add this to your MCP client config:</p>
+  <div class="relative">
+    <pre id="mcp-config" class="text-xs font-mono rounded-lg border border-slate-700 bg-slate-950 p-4 pr-20 leading-relaxed text-slate-200 overflow-x-auto"></pre>
+    <button type="button" onclick="copyMcp()" id="copy-btn"
+            class="absolute top-3 right-3 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs hover:bg-slate-800">Copy</button>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+
+  <!-- Embedding -->
+  <form method="post" action="/settings/embedding" id="form-embedding" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Embedding</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1">Provider</label>
+        <select name="provider" id="embeddingProvider" onchange="toggleEmbeddingProvider()"
+                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          <option value="openai-compatible" {{if ne .Cfg.Embedding.Provider "azure-openai"}}selected{{end}}>Local / OpenAI-compatible (Ollama, etc.)</option>
+          <option value="azure-openai" {{if eq .Cfg.Embedding.Provider "azure-openai"}}selected{{end}}>Azure OpenAI</option>
+        </select>
+      </div>
+
+      <div id="embedding-local" class="space-y-4 {{if eq .Cfg.Embedding.Provider "azure-openai"}}hidden{{end}}">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Base URL</label>
+          <input name="base_url" value="{{.Cfg.Embedding.BaseURL}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Model</label>
+          <input name="model" value="{{.Cfg.Embedding.Model}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+
+      <div id="embedding-azure" class="space-y-4 {{if ne .Cfg.Embedding.Provider "azure-openai"}}hidden{{end}}">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Azure OpenAI endpoint</label>
+          <input name="azure_endpoint" value="{{.Cfg.Embedding.AzureEndpoint}}" placeholder="https://my-resource.openai.azure.com/" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Deployment name</label>
+          <input name="azure_deployment" value="{{.Cfg.Embedding.AzureDeployment}}" placeholder="text-embedding-3-small" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">API version</label>
+          <input name="azure_api_version" value="{{.Cfg.Embedding.AzureAPIVersion}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">API key credential</label>
+          <select name="azure_api_key_credential" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="">— Select credential —</option>
+            {{range .Credentials}}
+            <option value="{{.Name}}" {{if eq $.Cfg.Embedding.AzureAPIKeyCredential .Name}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+          <p class="text-xs text-slate-500 mt-1">Manage on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Dimensions</label>
+          <input name="dimensions" type="number" value="{{.Cfg.Embedding.Dimensions}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Max input tokens</label>
+          <input name="max_input_tokens" type="number" value="{{.Cfg.Embedding.MaxInputTokens}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        </div>
+      </div>
+      <p class="text-xs text-slate-500">Changing the provider, model, dimensions, or endpoint drops all collections and marks sources for re-index.</p>
+    </div>
+    <div id="verify-embedding" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
+    <div class="flex gap-2 mt-5">
+      <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
+      <button type="button" onclick="verifyService('embedding')" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Verify</button>
+    </div>
+  </form>
+
+  <!-- Qdrant -->
+  <form method="post" action="/settings/qdrant" id="form-qdrant" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Vector store (Qdrant)</h2>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1">Host</label>
+        <input name="qdrant_host" value="{{.Cfg.Qdrant.Host}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1">Port</label>
+        <input name="qdrant_port" type="number" value="{{.Cfg.Qdrant.Port}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+      </div>
+      <label class="flex items-center gap-2 text-sm text-slate-300">
+        <input type="checkbox" name="qdrant_https" value="on" {{if .Cfg.Qdrant.HTTPS}}checked{{end}} class="h-4 w-4 rounded border-slate-700 bg-slate-950">
+        Use HTTPS
+      </label>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1">API key</label>
+        <input name="qdrant_api_key" type="password" autocomplete="off" value="{{.Cfg.Qdrant.APIKey}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+    </div>
+    <div id="verify-qdrant" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
+    <div class="flex gap-2 mt-5">
+      <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
+      <button type="button" onclick="verifyService('qdrant')" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Verify</button>
+    </div>
+  </form>
+
+  <!-- Preprocessing -->
+  <form method="post" action="/settings/preprocessing" id="form-preprocessing" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 lg:col-span-2">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing</h2>
+      <label class="relative inline-flex items-center cursor-pointer" title="Enable preprocessing">
+        <input type="checkbox" name="enabled" id="preprocEnabled" value="on" {{if .Cfg.Preprocessing.Enabled}}checked{{end}}
+               onchange="togglePreproc()" class="sr-only peer">
+        <span class="w-11 h-6 rounded-full bg-slate-700 transition-colors peer-checked:bg-violet-600
+                     after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5
+                     after:rounded-full after:bg-white after:shadow after:transition-transform
+                     peer-checked:after:translate-x-5"></span>
+      </label>
+    </div>
+    <p class="text-xs text-slate-500 mb-4">Summarize each document with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
+
+    <div id="preproc-fields" class="{{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">
+      <div class="mb-4">
+        <label class="block text-xs font-medium text-slate-400 mb-1">Provider</label>
+        <select name="provider" id="preprocProvider" onchange="togglePreprocProvider()"
+                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          <option value="openai-compatible" {{if ne .Cfg.Preprocessing.Provider "azure-openai"}}selected{{end}}>Local / OpenAI-compatible (Ollama, etc.)</option>
+          <option value="azure-openai" {{if eq .Cfg.Preprocessing.Provider "azure-openai"}}selected{{end}}>Azure OpenAI</option>
+        </select>
+      </div>
+
+      <div id="preproc-local" class="grid grid-cols-1 lg:grid-cols-2 gap-4 {{if eq .Cfg.Preprocessing.Provider "azure-openai"}}hidden{{end}}">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Base URL</label>
+          <input name="base_url" value="{{.Cfg.Preprocessing.BaseURL}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Model</label>
+          <input name="model" value="{{.Cfg.Preprocessing.Model}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+
+      <div id="preproc-azure" class="grid grid-cols-1 lg:grid-cols-2 gap-4 {{if ne .Cfg.Preprocessing.Provider "azure-openai"}}hidden{{end}}">
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Azure OpenAI endpoint</label>
+          <input name="azure_endpoint" value="{{.Cfg.Preprocessing.AzureEndpoint}}" placeholder="https://my-resource.openai.azure.com/" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">Deployment name</label>
+          <input name="azure_deployment" value="{{.Cfg.Preprocessing.AzureDeployment}}" placeholder="gpt-4o-mini" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">API version</label>
+          <input name="azure_api_version" value="{{.Cfg.Preprocessing.AzureAPIVersion}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-400 mb-1">API key credential</label>
+          <select name="azure_api_key_credential" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="">— Select credential —</option>
+            {{range .Credentials}}
+            <option value="{{.Name}}" {{if eq $.Cfg.Preprocessing.AzureAPIKeyCredential .Name}}selected{{end}}>{{.Name}}</option>
+            {{end}}
+          </select>
+          <p class="text-xs text-slate-500 mt-1">Manage on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <label class="block text-xs font-medium text-slate-400 mb-1">System prompt</label>
+        <textarea name="system_prompt" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono resize-y">{{.Cfg.Preprocessing.SystemPrompt}}</textarea>
+      </div>
+      <div class="mt-5">
+        <label class="block text-xs font-medium text-slate-400 mb-3">Apply to source types</label>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          {{range .PreprocTypes}}
+          <label class="cursor-pointer select-none">
+            <input type="checkbox" name="{{.FieldName}}" value="on" {{if .Checked}}checked{{end}} class="sr-only peer">
+            <span class="block text-center px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-700 text-slate-400
+                         transition-colors hover:border-slate-500
+                         peer-checked:border-violet-500 peer-checked:text-violet-300 peer-checked:bg-violet-500/10">{{.Label}}</span>
+          </label>
+          {{end}}
+        </div>
+      </div>
+    </div>
+    <div id="verify-preprocessing" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
+    <div class="flex gap-2 mt-5">
+      <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
+      <button type="button" id="verify-btn-preprocessing" onclick="verifyService('preprocessing')"
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 {{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">Verify</button>
+    </div>
+  </form>
+</div>
+
+<p class="text-xs text-slate-500 mt-4">Config file: <span class="font-mono text-slate-400">{{.ConfigPath}}</span></p>
+
+<!-- Danger zone -->
+<div class="mt-8">
+  <h2 class="text-xs font-semibold uppercase tracking-wider text-red-400 mb-3">Danger zone</h2>
+  <div class="rounded-2xl border border-red-900/50 bg-slate-900/60 p-5 space-y-4">
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-medium text-slate-200">Delete all sources</p>
+        <p class="text-xs text-slate-500 mt-0.5">Removes every source definition and all their indexed data from Qdrant.</p>
+      </div>
+      <form method="post" action="/settings/delete-all-sources" onsubmit="return confirm('Permanently delete every source and all indexed documents?')">
+        <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete all sources</button>
+      </form>
+    </div>
+    <div class="border-t border-slate-800"></div>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-medium text-slate-200">Clean source embeddings</p>
+        <p class="text-xs text-slate-500 mt-0.5">Drops all indexed source data but keeps source definitions. Sources are marked for re-sync.</p>
+      </div>
+      <form method="post" action="/settings/clean-source-embeddings" onsubmit="return confirm('Drop all indexed source data from Qdrant?')">
+        <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Clean embeddings</button>
+      </form>
+    </div>
+    <div class="border-t border-slate-800"></div>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-medium text-slate-200">Delete all experiences</p>
+        <p class="text-xs text-slate-500 mt-0.5">Clears the entire experience memory used by the LLM's remember tool.</p>
+      </div>
+      <form method="post" action="/settings/delete-all-experiences" onsubmit="return confirm('Permanently erase all stored experience?')">
+        <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete all experiences</button>
+      </form>
+    </div>
+    <div class="border-t border-slate-800"></div>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm font-medium text-slate-200">Clean experience embeddings</p>
+        <p class="text-xs text-slate-500 mt-0.5">Clears experience vectors from Qdrant. Useful after changing the embedding model.</p>
+      </div>
+      <form method="post" action="/settings/clean-experience-embeddings" onsubmit="return confirm('Erase all experience vectors from Qdrant?')">
+        <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Clean embeddings</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+// MCP config block
+var mcpConfig = { servers: { conduit: { type: "http", url: window.location.origin + "/mcp" } } };
+document.getElementById('mcp-config').textContent = JSON.stringify(mcpConfig, null, 2);
+function copyMcp() {
+  navigator.clipboard.writeText(JSON.stringify(mcpConfig, null, 2)).then(function () {
+    var b = document.getElementById('copy-btn');
+    b.textContent = 'Copied!';
+    setTimeout(function () { b.textContent = 'Copy'; }, 2000);
+  });
+}
+
+function toggleEmbeddingProvider() {
+  var azure = document.getElementById('embeddingProvider').value === 'azure-openai';
+  document.getElementById('embedding-local').classList.toggle('hidden', azure);
+  document.getElementById('embedding-azure').classList.toggle('hidden', !azure);
+}
+function togglePreproc() {
+  var on = document.getElementById('preprocEnabled').checked;
+  document.getElementById('preproc-fields').classList.toggle('hidden', !on);
+  document.getElementById('verify-btn-preprocessing').classList.toggle('hidden', !on);
+  if (!on) document.getElementById('verify-preprocessing').classList.add('hidden');
+}
+function togglePreprocProvider() {
+  var azure = document.getElementById('preprocProvider').value === 'azure-openai';
+  document.getElementById('preproc-local').classList.toggle('hidden', azure);
+  document.getElementById('preproc-azure').classList.toggle('hidden', !azure);
+}
+
+function verifyService(service) {
+  var form = document.getElementById('form-' + service);
+  var box = document.getElementById('verify-' + service);
+  box.className = 'mt-3 text-xs px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-300';
+  box.textContent = 'Verifying…';
+  fetch('/settings/verify/' + service, { method: 'POST', body: new FormData(form) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      box.className = 'mt-3 text-xs px-3 py-2 rounded-lg border ' + (d.ok
+        ? 'border-emerald-800 bg-emerald-950/50 text-emerald-300'
+        : 'border-red-800 bg-red-950/50 text-red-300');
+      box.textContent = d.message;
+    })
+    .catch(function (e) {
+      box.className = 'mt-3 text-xs px-3 py-2 rounded-lg border border-red-800 bg-red-950/50 text-red-300';
+      box.textContent = 'Request failed: ' + e;
+    });
+}
+
+// Notice banner from ?notice=...
+(function () {
+  var NOTICES = {
+    embedding_saved: ['ok', 'Embedding settings saved.'],
+    embedding_saved_dropped: ['warn', 'Embedding settings saved. Model changed — all collections dropped and sources marked for re-index.'],
+    qdrant_saved: ['ok', 'Vector store settings saved. Restart to apply the connection change.'],
+    preprocessing_saved: ['ok', 'Preprocessing settings saved.'],
+    sources_deleted: ['ok', 'All sources and their indexed data have been deleted.'],
+    experiences_deleted: ['ok', 'All experiences have been deleted.'],
+    source_embeddings_cleaned: ['warn', 'Source embeddings cleared. All sources are marked for re-index.'],
+    experience_embeddings_cleaned: ['ok', 'Experience embeddings cleared.'],
+  };
+  var el = document.getElementById('notice');
+  var n = NOTICES[el.dataset.notice];
+  if (!n) return;
+  el.classList.remove('hidden');
+  el.className = 'mb-4 rounded-lg border px-3 py-2 text-sm ' + (n[0] === 'warn'
+    ? 'border-amber-800 bg-amber-950/50 text-amber-300'
+    : 'border-emerald-800 bg-emerald-950/50 text-emerald-300');
+  el.textContent = n[1];
+  history.replaceState(null, '', window.location.pathname);
+})();
+</script>
+{{end}}

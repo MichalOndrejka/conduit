@@ -10,6 +10,8 @@ import (
 	"os"
 	"sync"
 
+	"github.com/google/uuid"
+
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
@@ -111,6 +113,78 @@ func (s *SourceConfigStore) RenameCredentialReferences(oldName, newName string) 
 	}
 	if !changed {
 		return nil
+	}
+	return s.write(sources)
+}
+
+// Import parses an exported sources document (flat [...] array or the
+// {"sources": [...]} wrapper, with camelCase keys normalized like readFile),
+// assigns a fresh ID to any source whose ID collides with an existing one,
+// resets sync state, and saves. Returns the number imported. Mirrors
+// import_sources in app/web/routes.py.
+func (s *SourceConfigStore) Import(data []byte) (int, error) {
+	var rawList []json.RawMessage
+	if err := json.Unmarshal(data, &rawList); err != nil {
+		var wrapper struct {
+			Sources []json.RawMessage `json:"sources"`
+		}
+		if err2 := json.Unmarshal(data, &wrapper); err2 != nil {
+			return 0, err // surface the original (array) parse error
+		}
+		rawList = wrapper.Sources
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sources, err := s.read()
+	if err != nil {
+		return 0, err
+	}
+	existing := make(map[string]bool, len(sources))
+	for _, src := range sources {
+		existing[src.ID] = true
+	}
+
+	imported := 0
+	for _, raw := range rawList {
+		var src models.SourceDefinition
+		if err := json.Unmarshal(normaliseKeys(raw), &src); err != nil {
+			return imported, err
+		}
+		if src.Config == nil {
+			src.Config = map[string]string{}
+		}
+		if src.ID == "" || existing[src.ID] {
+			src.ID = uuid.NewString()
+		}
+		existing[src.ID] = true
+		src.SyncStatus = "idle"
+		src.SyncError = nil
+		sources = append(sources, src)
+		imported++
+	}
+	if imported > 0 {
+		if err := s.write(sources); err != nil {
+			return 0, err
+		}
+	}
+	return imported, nil
+}
+
+// ResetAllSyncStatus sets every source's sync status (clearing any error),
+// used by the Settings danger-zone embedding cleanups. Mirrors
+// reset_all_sync_status in app/store/source_config.py.
+func (s *SourceConfigStore) ResetAllSyncStatus(status string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sources, err := s.read()
+	if err != nil {
+		return err
+	}
+	for i := range sources {
+		sources[i].SyncStatus = status
+		sources[i].SyncError = nil
+		sources[i].LastSyncedAt = nil
 	}
 	return s.write(sources)
 }

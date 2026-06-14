@@ -1,6 +1,6 @@
 // Owner account provisioning — n8n-style single-owner auth.
 //
-// Two provisioning paths (see docs/deployment-azure.md):
+// Two provisioning paths:
 //   - Env-seeded: CONDUIT_OWNER_EMAIL + CONDUIT_OWNER_PASSWORD (bcrypt-hashed
 //     in memory at startup; reproducible deploys).
 //   - First-run setup: if no owner exists, GET /setup collects email+password

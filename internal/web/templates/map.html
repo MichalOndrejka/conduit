@@ -1,14 +1,17 @@
 {{define "title"}}Vector map — Conduit{{end}}
 {{define "content"}}
 <div class="mb-6">
-  <h1 class="text-2xl font-semibold text-white">Vector map</h1>
+  <a href="/" class="text-sm text-slate-400 hover:text-violet-400">&larr; Sources</a>
+  <h1 class="text-2xl font-semibold text-white mt-2">Vector map</h1>
   <p class="text-sm text-slate-400 mt-1">PCA projection of indexed vectors (up to 200 samples per completed source).</p>
 </div>
 
-<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+<div id="card" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
   <div id="legend" class="flex flex-wrap gap-3 mb-3 text-xs"></div>
   <svg id="plot" viewBox="0 0 800 520" class="w-full" style="max-height:70vh"></svg>
-  <div id="empty" class="hidden p-10 text-center text-slate-400">No completed sources with vectors yet.</div>
+</div>
+<div id="empty" class="hidden rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
+  No completed sources with vectors yet.
 </div>
 
 <script>

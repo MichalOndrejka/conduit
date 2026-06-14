@@ -89,7 +89,7 @@ Azure OpenAI REST API version. Default `2024-02-01`. Override with `AZURE_OPENAI
 Name of a credential in the [credential library](#credential-library) holding
 the Azure OpenAI API key. If empty, falls back to the `AZURE_OPENAI_API_KEY`
 environment variable — useful for deployments where the key is supplied as a
-platform secret (see [Azure deployment](deployment-azure.md)).
+platform secret (see the [conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy) repo).
 
 | Recommended model | Dimensions |
 |------------------|------------|
@@ -167,8 +167,8 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `CONDUIT_API_KEY` | If set, requires this shared secret on every request (web UI, settings, credentials, `/mcp`). Accepted via `Authorization: Bearer <key>` or HTTP Basic auth (any username, key as password). Unset by default — only the open local/dev mode skips auth. |
 
 For a full Azure Container Apps deployment that wires these together with
-Azure OpenAI and an internal Qdrant container app, see
-[Deploying to Azure Container Apps](deployment-azure.md).
+Azure OpenAI and an internal Qdrant container app, see the
+[conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy) repo.
 
 ---
 
@@ -237,7 +237,7 @@ Without this, Conduit auto-generates a key saved as `.secret_key` inside `/data`
 
 ## Credential library
 
-Secrets (PATs, tokens, API keys) are managed on the **`/credentials`** page in the web UI, not as environment variables. Each credential has a name and an optional note; the secret value is Fernet-encrypted before being written to disk.
+Secrets (PATs, tokens, API keys) are managed on the **`/credentials`** page in the web UI, not as environment variables. Each credential has a name; the secret value is Fernet-encrypted before being written to disk.
 
 Source config fields (`Pat`, `Token`, `Password`, `ApiKeyValue`) store the credential name. At sync time, Conduit looks up the name in the in-memory cache, decrypts the value, and passes it to the HTTP client — the plaintext secret never appears in `conduit-sources.json` or the config file.
 
