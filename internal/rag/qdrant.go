@@ -185,7 +185,13 @@ func (v *VectorStore) CreateCollection(ctx context.Context, name string, dimensi
 	body := map[string]any{
 		"vectors": map[string]any{"size": size, "distance": "Cosine"},
 	}
-	return v.do(ctx, http.MethodPut, "/collections/"+name, body, nil)
+	err := v.do(ctx, http.MethodPut, "/collections/"+name, body, nil)
+	if err != nil && strings.Contains(err.Error(), "already exists") {
+		// Another concurrent sync (same collection, different source) won the
+		// race to create it — fine, since both compute the same target size.
+		return nil
+	}
+	return err
 }
 
 func (v *VectorStore) DeleteCollection(ctx context.Context, name string) error {
@@ -204,6 +210,25 @@ func (v *VectorStore) PointsCount(ctx context.Context, name string) int {
 		return 0
 	}
 	return resp.Result.PointsCount
+}
+
+// VectorSize returns a collection's configured vector dimension.
+func (v *VectorStore) VectorSize(ctx context.Context, name string) (int, error) {
+	var resp struct {
+		Result struct {
+			Config struct {
+				Params struct {
+					Vectors struct {
+						Size int `json:"size"`
+					} `json:"vectors"`
+				} `json:"params"`
+			} `json:"config"`
+		} `json:"result"`
+	}
+	if err := v.do(ctx, http.MethodGet, "/collections/"+name, nil, &resp); err != nil {
+		return 0, err
+	}
+	return resp.Result.Config.Params.Vectors.Size, nil
 }
 
 // ── Points ──────────────────────────────────────────────────────────────────

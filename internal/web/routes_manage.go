@@ -388,17 +388,26 @@ func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
 // handleMapData ports /api/map-data: samples vectors per completed source,
 // projects them to 2D with PCA (UMAP intentionally dropped — no Go impl).
 func (s *Server) handleMapData(w http.ResponseWriter, r *http.Request) {
-	srcs, err := s.sources.ListAll()
-	if err != nil {
-		httpError(w, err)
-		return
-	}
-
 	type mapPoint struct {
 		X      float64 `json:"x"`
 		Y      float64 `json:"y"`
 		Source string  `json:"source"`
 		Title  string  `json:"title"`
+	}
+
+	if qdrant := s.health.Qdrant(); qdrant.Status != "ready" {
+		msg := "unreachable"
+		if qdrant.Message != "" {
+			msg = qdrant.Message
+		}
+		writeJSON(w, map[string]any{"points": []mapPoint{}, "qdrant_error": msg})
+		return
+	}
+
+	srcs, err := s.sources.ListAll()
+	if err != nil {
+		httpError(w, err)
+		return
 	}
 	var vectors [][]float32
 	var meta []mapPoint

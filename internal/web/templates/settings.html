@@ -79,6 +79,7 @@
           <input name="max_input_tokens" type="number" value="{{.Cfg.Embedding.MaxInputTokens}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
         </div>
       </div>
+      <div id="embedding-dims-warning" class="hidden rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-2 text-xs text-amber-300"></div>
       <p class="text-xs text-slate-500">Changing the provider, model, dimensions, or endpoint drops all collections and marks sources for re-index.</p>
     </div>
     <div id="verify-embedding" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
@@ -268,6 +269,61 @@ function toggleEmbeddingProvider() {
   var azure = document.getElementById('embeddingProvider').value === 'azure-openai';
   document.getElementById('embedding-local').classList.toggle('hidden', azure);
   document.getElementById('embedding-azure').classList.toggle('hidden', !azure);
+  checkEmbeddingDims();
+}
+
+// Known output dimensions for common embedding models, used to warn when the
+// configured "Dimensions" value doesn't match the selected model. Checked in
+// order, so more specific names (e.g. a versioned variant) come first.
+var KNOWN_EMBEDDING_DIMS = [
+  { match: 'text-embedding-3-large', dims: 3072 },
+  { match: 'text-embedding-3-small', dims: 1536 },
+  { match: 'text-embedding-ada-002', dims: 1536 },
+  { match: 'nomic-embed-text-v2-moe', dims: 768 },
+  { match: 'nomic-embed-text', dims: 768 },
+  { match: 'mxbai-embed-large', dims: 1024 },
+  { match: 'bge-m3', dims: 1024 },
+  { match: 'bge-large', dims: 1024 },
+  { match: 'bge-base', dims: 768 },
+  { match: 'bge-small', dims: 384 },
+  { match: 'all-minilm', dims: 384 },
+  { match: 'gte-large', dims: 1024 },
+  { match: 'gte-base', dims: 768 },
+  { match: 'gte-small', dims: 384 },
+  { match: 'e5-large', dims: 1024 },
+  { match: 'e5-base', dims: 768 },
+  { match: 'e5-small', dims: 384 },
+  { match: 'granite-embedding', dims: 768 },
+  { match: 'snowflake-arctic-embed', dims: 1024 },
+];
+
+// Returns the known dimension count for a model/deployment name, or null if
+// the name isn't recognized. Strips Ollama-style ":tag" suffixes.
+function knownEmbeddingDims(name) {
+  name = (name || '').toLowerCase().trim();
+  var colon = name.indexOf(':');
+  if (colon !== -1) name = name.substring(0, colon);
+  for (var i = 0; i < KNOWN_EMBEDDING_DIMS.length; i++) {
+    if (name.indexOf(KNOWN_EMBEDDING_DIMS[i].match) !== -1) return KNOWN_EMBEDDING_DIMS[i].dims;
+  }
+  return null;
+}
+
+function checkEmbeddingDims() {
+  var form = document.getElementById('form-embedding');
+  var azure = document.getElementById('embeddingProvider').value === 'azure-openai';
+  var modelField = form.querySelector(azure ? '[name="azure_deployment"]' : '[name="model"]');
+  var model = modelField ? modelField.value : '';
+  var dims = parseInt(form.querySelector('[name="dimensions"]').value, 10);
+  var known = knownEmbeddingDims(model);
+  var warning = document.getElementById('embedding-dims-warning');
+  if (known !== null && dims !== known) {
+    warning.textContent = '"' + model.trim() + '" is usually ' + known + ' dimensions, but Dimensions is set to ' +
+      (isNaN(dims) ? '(empty)' : dims) + '. A mismatch will cause sync to fail until vectors are re-embedded.';
+    warning.classList.remove('hidden');
+  } else {
+    warning.classList.add('hidden');
+  }
 }
 function togglePreproc() {
   var on = document.getElementById('preprocEnabled').checked;
@@ -299,6 +355,13 @@ function verifyService(service) {
       box.textContent = 'Request failed: ' + e;
     });
 }
+
+// Live-check the embedding model/dimensions warning as the user edits them.
+['model', 'azure_deployment', 'dimensions'].forEach(function (field) {
+  var el = document.querySelector('#form-embedding [name="' + field + '"]');
+  if (el) el.addEventListener('input', checkEmbeddingDims);
+});
+checkEmbeddingDims();
 
 // Notice banner from ?notice=...
 (function () {

@@ -8,6 +8,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -30,6 +31,13 @@ type DocumentIndexer struct {
 	store     *VectorStore
 	embedding *EmbeddingService
 	chunker   *TextChunker
+
+	// collMu serializes the "ensure collection matches this dimension" check
+	// below. Multiple sources of the same type share a collection and can
+	// sync concurrently (SyncSelected) — without this, two syncs can both
+	// see a dimension mismatch and race on delete+recreate, one losing its
+	// CreateCollection to a 409 "already exists".
+	collMu sync.Mutex
 }
 
 func NewDocumentIndexer(store *VectorStore, embedding *EmbeddingService, chunker *TextChunker) *DocumentIndexer {
@@ -109,11 +117,31 @@ func (d *DocumentIndexer) IndexBatch(
 		return nil
 	}
 
-	// Create the collection now that we know the actual vector size.
-	if !d.store.CollectionExists(ctx, collection) {
-		if err := d.store.CreateCollection(ctx, collection, len(points[0].Vector)); err != nil {
+	// Create the collection now that we know the actual vector size, or
+	// recreate it if an existing collection was sized for a different
+	// embedding model — its vectors are in the wrong space and unusable
+	// regardless of source, so every source touching it must be re-synced.
+	size := len(points[0].Vector)
+	if err := func() error {
+		d.collMu.Lock()
+		defer d.collMu.Unlock()
+		if !d.store.CollectionExists(ctx, collection) {
+			return d.store.CreateCollection(ctx, collection, size)
+		}
+		existing, err := d.store.VectorSize(ctx, collection)
+		if err != nil {
 			return err
 		}
+		if existing == size {
+			return nil
+		}
+		log.Printf("collection %s vector size %d != %d — recreating for new embedding model", collection, existing, size)
+		if err := d.store.DeleteCollection(ctx, collection); err != nil {
+			return err
+		}
+		return d.store.CreateCollection(ctx, collection, size)
+	}(); err != nil {
+		return err
 	}
 
 	// ── Between phases: replace old vectors for this source ────────────────

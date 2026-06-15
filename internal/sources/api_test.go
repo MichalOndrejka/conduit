@@ -57,6 +57,44 @@ func TestFetchMapsItemsToDocuments(t *testing.T) {
 	}
 }
 
+func TestEmptyTitleFallsBackToIdField(t *testing.T) {
+	// ADO work items have no top-level "title" — TitleField is configured
+	// empty and the real title lives under fields.System.Title. The document
+	// title should fall back to the item's IdField value, not its position
+	// in this fetched batch (which is meaningless once IdField selects
+	// arbitrary IDs like ADO's `ids=13,14,...,30`).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"value": []map[string]any{
+				{"id": 27, "fields": map[string]any{"System.Title": "Classifier always returns Not Hotdog"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: src(map[string]string{
+		"Url":           srv.URL,
+		"ItemsPath":     "value",
+		"IdField":       "id",
+		"TitleField":    "",
+		"ContentFields": "fields",
+	}), secrets: nil}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("got %d docs", len(docs))
+	}
+	if docs[0].ID != "src-1_capi_27" {
+		t.Errorf("stable ID from IdField not used: %q", docs[0].ID)
+	}
+	if docs[0].Properties["title"] != "Item 27" {
+		t.Errorf("title = %q, want %q", docs[0].Properties["title"], "Item 27")
+	}
+}
+
 func TestContentFieldsSelection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{

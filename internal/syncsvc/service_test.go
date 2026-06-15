@@ -32,10 +32,14 @@ func (fakeSecrets) GetValue(string) string { return "" }
 type fakeQdrant struct {
 	mu          sync.Mutex
 	collections map[string]map[string]map[string]any // collection → id → payload
+	sizes       map[string]int                       // collection → configured vector size
 }
 
 func newFakeQdrant() *fakeQdrant {
-	return &fakeQdrant{collections: map[string]map[string]map[string]any{}}
+	return &fakeQdrant{
+		collections: map[string]map[string]map[string]any{},
+		sizes:       map[string]int{},
+	}
 }
 
 func (f *fakeQdrant) handler() http.Handler {
@@ -52,9 +56,40 @@ func (f *fakeQdrant) handler() http.Handler {
 		})
 	})
 	mux.HandleFunc("PUT /collections/{name}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Vectors struct {
+				Size int `json:"size"`
+			} `json:"vectors"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
 		defer f.mu.Unlock()
-		f.collections[r.PathValue("name")] = map[string]map[string]any{}
+		name := r.PathValue("name")
+		f.collections[name] = map[string]map[string]any{}
+		f.sizes[name] = body.Vectors.Size
+		_, _ = w.Write([]byte(`{"result": true}`))
+	})
+	mux.HandleFunc("GET /collections/{name}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		name := r.PathValue("name")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"points_count": len(f.collections[name]),
+				"config": map[string]any{
+					"params": map[string]any{
+						"vectors": map[string]any{"size": f.sizes[name]},
+					},
+				},
+			},
+		})
+	})
+	mux.HandleFunc("DELETE /collections/{name}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		name := r.PathValue("name")
+		delete(f.collections, name)
+		delete(f.sizes, name)
 		_, _ = w.Write([]byte(`{"result": true}`))
 	})
 	mux.HandleFunc("PUT /collections/{name}/points", func(w http.ResponseWriter, r *http.Request) {

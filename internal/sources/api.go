@@ -200,6 +200,14 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 	docs := make([]models.SourceDocument, 0, len(items))
 	for i, item := range items {
 		title := fieldString(item, titleField)
+		if title == "" && idField != "" {
+			// Fall back to the item's own ID rather than its position in this
+			// batch — a positional "Item N" is meaningless (and misleading)
+			// once IdField selects an arbitrary item like ADO's `ids=...`.
+			if v := fieldString(item, idField); v != "" {
+				title = "Item " + v
+			}
+		}
 		if title == "" {
 			title = fmt.Sprintf("Item %d", i+1)
 		}
