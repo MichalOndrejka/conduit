@@ -72,11 +72,11 @@
       <div class="grid grid-cols-2 gap-3">
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1">Dimensions</label>
-          <input name="dimensions" type="number" value="{{.Cfg.Embedding.Dimensions}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          <input name="dimensions" type="number" min="1" step="1" required value="{{.Cfg.Embedding.Dimensions}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
         </div>
         <div>
           <label class="block text-xs font-medium text-slate-400 mb-1">Max input tokens</label>
-          <input name="max_input_tokens" type="number" value="{{.Cfg.Embedding.MaxInputTokens}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          <input name="max_input_tokens" type="number" min="1" step="1" required value="{{.Cfg.Embedding.MaxInputTokens}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
         </div>
       </div>
       <div id="embedding-dims-warning" class="hidden rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-2 text-xs text-amber-300"></div>
@@ -95,11 +95,11 @@
     <div class="space-y-4">
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1">Host</label>
-        <input name="qdrant_host" value="{{.Cfg.Qdrant.Host}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        <input name="qdrant_host" required value="{{.Cfg.Qdrant.Host}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1">Port</label>
-        <input name="qdrant_port" type="number" value="{{.Cfg.Qdrant.Port}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+        <input name="qdrant_port" type="number" min="1" max="65535" step="1" required value="{{.Cfg.Qdrant.Port}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
       </div>
       <label class="flex items-center gap-2 text-sm text-slate-300">
         <input type="checkbox" name="qdrant_https" value="on" {{if .Cfg.Qdrant.HTTPS}}checked{{end}} class="h-4 w-4 rounded border-slate-700 bg-slate-950">
@@ -368,7 +368,9 @@ checkEmbeddingDims();
   var NOTICES = {
     embedding_saved: ['ok', 'Embedding settings saved.'],
     embedding_saved_dropped: ['warn', 'Embedding settings saved. Model changed — all collections dropped and sources marked for re-index.'],
+    embedding_invalid: ['error', 'Dimensions and max input tokens must be positive numbers — settings not saved.'],
     qdrant_saved: ['ok', 'Vector store settings saved. Restart to apply the connection change.'],
+    qdrant_invalid: ['error', 'Host is required and port must be between 1 and 65535 — settings not saved.'],
     preprocessing_saved: ['ok', 'Preprocessing settings saved.'],
     sources_deleted: ['ok', 'All sources and their indexed data have been deleted.'],
     experiences_deleted: ['ok', 'All experiences have been deleted.'],
@@ -381,6 +383,8 @@ checkEmbeddingDims();
   el.classList.remove('hidden');
   el.className = 'mb-4 rounded-lg border px-3 py-2 text-sm ' + (n[0] === 'warn'
     ? 'border-amber-800 bg-amber-950/50 text-amber-300'
+    : n[0] === 'error'
+    ? 'border-red-800 bg-red-950/50 text-red-300'
     : 'border-emerald-800 bg-emerald-950/50 text-emerald-300');
   el.textContent = n[1];
   history.replaceState(null, '', window.location.pathname);

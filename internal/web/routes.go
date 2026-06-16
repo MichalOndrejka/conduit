@@ -280,19 +280,35 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 // ── UI pages ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	s.renderIndex(w, "", "")
+	s.renderIndex(w, r, "", "")
+}
+
+// sourceRow pairs a source definition with its indexed vector count, so the
+// Sources list can warn about sources with nothing embedded.
+type sourceRow struct {
+	*models.SourceDefinition
+	VectorCount int
 }
 
 // renderIndex renders the Sources list, optionally with an import result banner.
-func (s *Server) renderIndex(w http.ResponseWriter, importMsg, importErr string) {
-	sources, err := s.sources.ListAll()
+func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, importErr string) {
+	allSources, err := s.sources.ListAll()
 	if err != nil {
 		httpError(w, err)
 		return
 	}
+	rows := make([]sourceRow, len(allSources))
+	for i := range allSources {
+		src := &allSources[i]
+		collection := sources.CollectionFor(src)
+		filter := &rag.Filter{Must: []rag.FieldCondition{{
+			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
+		}}}
+		rows[i] = sourceRow{SourceDefinition: src, VectorCount: s.vectors.Count(r.Context(), collection, filter)}
+	}
 	s.render(w, s.indexTmpl, "base", map[string]any{
 		"Active":        "sources",
-		"Sources":       sources,
+		"Sources":       rows,
 		"ImportMessage": importMsg,
 		"ImportError":   importErr,
 	})

@@ -10,6 +10,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -141,10 +143,48 @@ func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.
 	return src
 }
 
+// validateSourceConfig checks provider-specific fields after sourceFromForm,
+// returning a user-facing error message, or "" if the config is valid.
+func validateSourceConfig(cfg map[string]string) string {
+	switch cfg["Provider"] {
+	case "manual":
+		if strings.TrimSpace(cfg["Content"]) == "" {
+			return "Content is required."
+		}
+	case "api":
+		if cfg["Platform"] == "ado" && cfg["AdoProject"] == "" {
+			return "Project is required for Azure DevOps sources."
+		}
+		u, err := url.Parse(cfg["Url"])
+		if cfg["Url"] == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return "URL must be a valid http(s) URL."
+		}
+		if top := cfg["Top"]; top != "" {
+			if n, err := strconv.Atoi(top); err != nil || n <= 0 {
+				return "Max items must be a positive number."
+			}
+		}
+		if body := cfg["Body"]; body != "" && !json.Valid([]byte(body)) {
+			return "POST body must be valid JSON."
+		}
+		for _, line := range strings.Split(cfg["Headers"], "\n") {
+			line = strings.TrimSpace(line)
+			if line != "" && !strings.Contains(line, ":") {
+				return `Headers must be one "Name: value" pair per line.`
+			}
+		}
+	}
+	return ""
+}
+
 func (s *Server) handleSourceCreatePost(w http.ResponseWriter, r *http.Request) {
 	src := sourceFromForm(r, nil)
 	if src.Name == "" {
 		s.renderSourceForm(w, src, "Name is required.")
+		return
+	}
+	if msg := validateSourceConfig(src.Config); msg != "" {
+		s.renderSourceForm(w, src, msg)
 		return
 	}
 	if err := s.sources.Save(*src); err != nil {
@@ -185,6 +225,10 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 	src := sourceFromForm(r, existing)
 	if src.Name == "" {
 		s.renderSourceForm(w, src, "Name is required.")
+		return
+	}
+	if msg := validateSourceConfig(src.Config); msg != "" {
+		s.renderSourceForm(w, src, msg)
 		return
 	}
 	// A type/provider change moves the source to a different collection —
@@ -296,22 +340,22 @@ func (s *Server) handleExport(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		s.renderIndex(w, "", "Import failed: no file uploaded.")
+		s.renderIndex(w, r, "", "Import failed: no file uploaded.")
 		return
 	}
 	defer file.Close()
 
 	data, err := io.ReadAll(io.LimitReader(file, 32<<20)) // 32 MiB cap
 	if err != nil {
-		s.renderIndex(w, "", "Import failed: "+err.Error())
+		s.renderIndex(w, r, "", "Import failed: "+err.Error())
 		return
 	}
 	count, err := s.sources.Import(data)
 	if err != nil {
-		s.renderIndex(w, "", "Import failed: "+err.Error())
+		s.renderIndex(w, r, "", "Import failed: "+err.Error())
 		return
 	}
-	s.renderIndex(w, fmt.Sprintf(
+	s.renderIndex(w, r, fmt.Sprintf(
 		"Imported %d source(s). Add credentials at /credentials, then edit each source to assign them before syncing.",
 		count), "")
 }

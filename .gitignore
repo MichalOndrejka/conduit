@@ -29,6 +29,7 @@ owner.json
 # Go build artifacts
 /conduit
 /conduit.exe
+/tmp/
 
 # Node (Tailwind build)
 node_modules/

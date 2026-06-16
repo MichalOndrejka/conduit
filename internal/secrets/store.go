@@ -184,6 +184,9 @@ func (s *Store) Create(name, value string) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
+	if value == "" {
+		return errors.New("credential value cannot be empty")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.cache[name]; exists {
@@ -211,10 +214,13 @@ func (s *Store) Update(oldName, newName, value string) (string, error) {
 			return "", fmt.Errorf("a credential named %q already exists", newName)
 		}
 	}
-	delete(s.cache, oldName)
 	if value != "" {
 		e.Value = value
 	}
+	if e.Value == "" {
+		return "", errors.New("credential value cannot be empty")
+	}
+	delete(s.cache, oldName)
 	s.cache[newName] = e
 	if err := s.save(); err != nil {
 		return "", err

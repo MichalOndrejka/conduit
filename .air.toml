@@ -1,0 +1,7 @@
+[build]
+  cmd     = "go build -o ./tmp/conduit.exe ./cmd/conduit"
+  bin     = "./tmp/conduit.exe"
+  delay   = 500
+
+  include_ext = ["go", "html", "css"]
+  exclude_dir = ["tmp", "conduit-data"]

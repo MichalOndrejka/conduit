@@ -53,13 +53,13 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Organization URL</label>
-          <input name="AdoOrg" value="{{or ($s.GetConfig `AdoOrg`) `https://dev.azure.com/`}}"
+          <label class="block text-sm font-medium text-slate-300 mb-1">Organization URL <span class="text-red-400">*</span></label>
+          <input name="AdoOrg" required value="{{or ($s.GetConfig `AdoOrg`) `https://dev.azure.com/`}}"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Project <span class="text-red-400">*</span></label>
-          <input name="AdoProject" value="{{$s.GetConfig `AdoProject`}}" placeholder="MyProject"
+          <input name="AdoProject" required value="{{$s.GetConfig `AdoProject`}}" placeholder="MyProject"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
         </div>
       </div>
@@ -100,7 +100,7 @@
         </div>
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Max items</label>
-          <input name="Top" value="{{$s.GetConfig `Top`}}" placeholder="500"
+          <input name="Top" type="number" min="1" step="1" value="{{$s.GetConfig `Top`}}" placeholder="500"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
         </div>
         <div>
@@ -126,8 +126,8 @@
       <div class="space-y-4">
         <h3 class="text-sm font-semibold text-white uppercase tracking-wider">Endpoint</h3>
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">URL</label>
-          <input name="Url" value="{{$s.GetConfig `Url`}}" placeholder="https://api.example.com/items?api-version=7.0"
+          <label class="block text-sm font-medium text-slate-300 mb-1">URL <span class="text-red-400">*</span></label>
+          <input name="Url" type="url" required value="{{$s.GetConfig `Url`}}" placeholder="https://api.example.com/items?api-version=7.0"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -141,7 +141,7 @@
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-300 mb-1">Max items</label>
-            <input name="Top" value="{{$s.GetConfig `Top`}}" placeholder="500"
+            <input name="Top" type="number" min="1" step="1" value="{{$s.GetConfig `Top`}}" placeholder="500"
                    class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
           </div>
           <div class="flex items-end pb-2">
@@ -255,8 +255,8 @@
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Content {{if not .IsNew}}<span class="text-slate-500">(leave empty to keep current)</span>{{end}}</label>
-        <textarea name="Content" rows="10" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"></textarea>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Content {{if .IsNew}}<span class="text-red-400">*</span>{{else}}<span class="text-slate-500">(leave empty to keep current)</span>{{end}}</label>
+        <textarea name="Content" rows="10" {{if .IsNew}}required{{end}} class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"></textarea>
       </div>
     </div>
   </div>

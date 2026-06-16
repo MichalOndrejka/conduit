@@ -1,3 +1,69 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/*
+ * Light theme. Dark is the hardcoded default palette across the templates
+ * (no `dark:` variants are used) — these rules remap the same utility
+ * classes to light equivalents when the `dark` class is absent from <html>.
+ * Toggled by the switch in the sidebar (see base.html) and persisted via
+ * localStorage. Written unlayered so they win over Tailwind's utility layer
+ * regardless of specificity.
+ */
+html:not(.dark) {
+  color-scheme: light;
+}
+
+/* Surfaces */
+html:not(.dark) .bg-slate-950,
+html:not(.dark) .bg-slate-950\/40 { background-color: #f8fafc; }
+html:not(.dark) .bg-slate-900\/60 { background-color: #ffffff; }
+html:not(.dark) .bg-slate-800 { background-color: #e2e8f0; }
+html:not(.dark) .bg-slate-700 { background-color: #cbd5e1; }
+html:not(.dark) .hover\:bg-slate-800:hover,
+html:not(.dark) .hover\:bg-slate-900:hover { background-color: #f1f5f9; }
+
+/* Borders */
+html:not(.dark) .border-slate-800 { border-color: #e2e8f0; }
+html:not(.dark) .border-slate-700 { border-color: #cbd5e1; }
+html:not(.dark) .border-slate-500,
+html:not(.dark) .hover\:border-slate-500:hover { border-color: #94a3b8; }
+
+/* Text */
+html:not(.dark) .text-white:not(.bg-violet-600),
+html:not(.dark) .hover\:text-white:hover { color: #0f172a; }
+html:not(.dark) .text-slate-100,
+html:not(.dark) .text-slate-200 { color: #1e293b; }
+html:not(.dark) .text-slate-300 { color: #334155; }
+html:not(.dark) .text-slate-400 { color: #475569; }
+html:not(.dark) .hover\:text-slate-200:hover { color: #0f172a; }
+html:not(.dark) .hover\:text-slate-300:hover { color: #1e293b; }
+
+/* Status banners (success / error / warning) */
+html:not(.dark) .bg-emerald-950\/50 { background-color: #ecfdf5; }
+html:not(.dark) .border-emerald-800 { border-color: #a7f3d0; }
+html:not(.dark) .text-emerald-300 { color: #047857; }
+
+html:not(.dark) .bg-red-950\/50,
+html:not(.dark) .bg-red-950\/40 { background-color: #fef2f2; }
+html:not(.dark) .border-red-800,
+html:not(.dark) .border-red-900,
+html:not(.dark) .border-red-900\/50 { border-color: #fecaca; }
+html:not(.dark) .text-red-300,
+html:not(.dark) .text-red-400 { color: #b91c1c; }
+html:not(.dark) .hover\:bg-red-950:hover { background-color: #fee2e2; }
+
+html:not(.dark) .bg-amber-950\/50 { background-color: #fffbeb; }
+html:not(.dark) .border-amber-800 { border-color: #fde68a; }
+html:not(.dark) .text-amber-300,
+html:not(.dark) .text-amber-400\/80 { color: #b45309; }
+
+/* Violet accents */
+html:not(.dark) .bg-violet-950\/30 { background-color: #f5f3ff; }
+html:not(.dark) .border-violet-900 { border-color: #ddd6fe; }
+html:not(.dark) .text-violet-300,
+html:not(.dark) .text-violet-400,
+html:not(.dark) .hover\:text-violet-300:hover,
+html:not(.dark) .hover\:text-violet-400:hover,
+html:not(.dark) .group:hover .group-hover\:text-violet-300,
+html:not(.dark) .peer:checked ~ .peer-checked\:text-violet-300 { color: #6d28d9; }

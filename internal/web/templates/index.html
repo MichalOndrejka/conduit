@@ -6,8 +6,6 @@
     <p class="text-sm text-slate-400 mt-1">Knowledge sources indexed into Qdrant.</p>
   </div>
   <div class="flex gap-2">
-    <a href="/sources/create" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">New source</a>
-    <a href="/map" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Vector map</a>
     <a href="/export" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Export</a>
     <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
       <input type="file" name="file" accept="application/json,.json" id="import-file" class="hidden"
@@ -15,6 +13,8 @@
       <button type="button" onclick="document.getElementById('import-file').click()"
               class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Import</button>
     </form>
+    <a href="/map" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Vector map</a>
+    <a href="/sources/create" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">New source</a>
   </div>
 </div>
 
@@ -37,8 +37,8 @@
   </label>
   <button type="button" onclick="bulkAction('/sources/sync-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
   <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete</button>
+  <div id="sync-eta" class="hidden ml-auto text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2"></div>
 </div>
-<div id="sync-eta" class="hidden mb-3 text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2"></div>
 <div class="space-y-3">
   {{range .Sources}}
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4" data-source-id="{{.ID}}">
@@ -48,14 +48,19 @@
         <div class="flex items-center gap-2">
           <a href="/sources/{{.ID}}/items" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Type}}</span>
+          {{if eq .VectorCount 0}}
+          <span class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5">No data embedded</span>
+          {{end}}
         </div>
         <div class="text-xs text-slate-500 mt-1">
           {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
         </div>
-        <div data-progress-wrap class="mt-1.5 hidden">
-          <div data-progress class="text-xs text-violet-400 mb-1"></div>
-          <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-            <div data-progress-bar class="h-full bg-violet-500 rounded-full transition-all duration-300" style="width: 0%"></div>
+        <div data-progress-wrap class="overflow-hidden" style="max-height:0;opacity:0;transition:max-height .25s ease,opacity .25s ease">
+          <div class="pt-1.5">
+            <div data-progress class="text-xs text-violet-400 mb-1"></div>
+            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+              <div data-progress-bar class="h-full bg-violet-500 rounded-full transition-all duration-300" style="width: 0%"></div>
+            </div>
           </div>
         </div>
         <div data-error class="text-xs text-red-300 bg-red-950/40 border border-red-900 rounded-lg px-2.5 py-1.5 mt-2 {{if not .SyncError}}hidden{{end}}">
@@ -98,6 +103,7 @@ function bulkAction(url, confirmMsg) {
   form.submit();
 }
 let syncBatchStart = null;
+let wasSyncing = false;
 function formatDuration(ms) {
   const totalSec = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(totalSec / 60);
@@ -121,7 +127,8 @@ function poll() {
         syncingCount++;
         const p = s.progress;
         prog.textContent = p.phase + (p.total ? ` ${p.current}/${p.total}` : '') + (p.message ? ` — ${p.message}` : '');
-        progWrap.classList.remove('hidden');
+        progWrap.style.maxHeight = '4rem';
+        progWrap.style.opacity = '1';
         if (p.total > 0) {
           bar.style.width = Math.min(100, (p.current / p.total) * 100) + '%';
           bar.classList.remove('animate-pulse');
@@ -132,7 +139,8 @@ function poll() {
           bar.classList.add('animate-pulse');
         }
       } else {
-        progWrap.classList.add('hidden');
+        progWrap.style.maxHeight = '0';
+        progWrap.style.opacity = '0';
         bar.classList.remove('animate-pulse');
       }
       const errBox = card.querySelector('[data-error]');
@@ -164,7 +172,15 @@ function poll() {
     } else {
       syncBatchStart = null;
       etaBox.classList.add('hidden');
+      if (wasSyncing) {
+        // A sync just finished — reload so "Last synced" and the "No data
+        // embedded" badge (rendered server-side, not part of this JSON) pick
+        // up their new values.
+        location.reload();
+        return;
+      }
     }
+    wasSyncing = anySyncing;
     setTimeout(poll, anySyncing ? 1500 : 5000);
   }).catch(() => setTimeout(poll, 5000));
 }

@@ -50,6 +50,17 @@
 #plotWrap::-webkit-scrollbar-corner {
   background: #0f172a;
 }
+html:not(.dark) #plotWrap {
+  scrollbar-color: #94a3b8 #f1f5f9;
+}
+html:not(.dark) #plotWrap::-webkit-scrollbar-track,
+html:not(.dark) #plotWrap::-webkit-scrollbar-corner {
+  background: #f1f5f9;
+}
+html:not(.dark) #plotWrap::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-color: #f1f5f9;
+}
 </style>
 
 <script>
@@ -130,8 +141,9 @@ fetch('/api/map-data').then(r => r.json()).then(data => {
   const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
   const minX = Math.min(...xs), maxX = Math.max(...xs);
   const minY = Math.min(...ys), maxY = Math.max(...ys);
-  const sx = x => 30 + (maxX === minX ? 0.5 : (x - minX) / (maxX - minX)) * 740;
-  const sy = y => 30 + (maxY === minY ? 0.5 : (y - minY) / (maxY - minY)) * 460;
+  const PAD = 40;
+  const sx = x => PAD + (maxX === minX ? 0.5 : (x - minX) / (maxX - minX)) * (VB_W - 2 * PAD);
+  const sy = y => PAD + (maxY === minY ? 0.5 : (y - minY) / (maxY - minY)) * (VB_H - 2 * PAD);
 
   const sourceNames = [...new Set(pts.map(p => p.source))];
   const sourceColors = {};

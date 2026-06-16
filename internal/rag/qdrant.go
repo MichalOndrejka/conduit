@@ -303,7 +303,10 @@ func (v *VectorStore) DeleteByIDs(ctx context.Context, collection string, ids []
 }
 
 func (v *VectorStore) Count(ctx context.Context, collection string, filter *Filter) int {
-	body := map[string]any{"exact": false}
+	// exact: true — Conduit creates no payload indexes, so Qdrant's
+	// approximate count for a filtered query is always 0, which would make
+	// every source look like it has no embedded data.
+	body := map[string]any{"exact": true}
 	if filter != nil {
 		body["filter"] = filter
 	}

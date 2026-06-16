@@ -1,6 +1,7 @@
 {{define "base"}}<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
+  <script>if (localStorage.getItem('theme') === 'light') document.documentElement.classList.remove('dark');</script>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{block "title" .}}Conduit{{end}}</title>
@@ -11,7 +12,7 @@
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans min-h-screen">
   <div class="flex min-h-screen">
-    <aside class="w-56 shrink-0 border-r border-slate-800 bg-slate-900/60 p-4 hidden md:flex md:flex-col">
+    <aside class="w-56 shrink-0 border-r border-slate-800 bg-slate-900/60 p-4 hidden md:flex md:flex-col sticky top-0 h-screen">
       <a href="/" class="flex items-center gap-2 mb-8">
         <span class="inline-block h-8 w-8 rounded-lg bg-violet-600 text-white grid place-items-center font-bold">C</span>
         <span class="text-lg font-semibold text-white">Conduit</span>
@@ -22,6 +23,23 @@
         <a href="/credentials" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "credentials"}}bg-slate-800 text-white{{end}}">Credentials</a>
         <a href="/settings" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "settings"}}bg-slate-800 text-white{{end}}">Settings</a>
       </nav>
+      <button id="theme-toggle" type="button"
+              class="flex items-center justify-between w-full rounded-lg px-3 py-2 mb-1 text-sm text-slate-400 hover:bg-slate-800 hover:text-white transition-colors">
+        <span id="theme-label">Light mode</span>
+        <span class="relative w-4 h-4 shrink-0">
+          <svg id="icon-sun" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               class="absolute inset-0 w-4 h-4" style="transition:opacity .3s,transform .3s">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+          </svg>
+          <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+               class="absolute inset-0 w-4 h-4" style="transition:opacity .3s,transform .3s;opacity:0;transform:rotate(90deg) scale(.5)">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </span>
+      </button>
       <form method="post" action="/logout">
         <button type="submit" class="w-full text-left rounded-lg px-3 py-2 text-sm text-slate-400 hover:bg-slate-800 hover:text-white">Sign out</button>
       </form>
@@ -30,5 +48,31 @@
       {{block "content" .}}{{end}}
     </main>
   </div>
+  <script>
+    (function () {
+      var sun = document.getElementById('icon-sun');
+      var moon = document.getElementById('icon-moon');
+      var label = document.getElementById('theme-label');
+
+      function setTheme(dark) {
+        document.documentElement.classList.toggle('dark', dark);
+        localStorage.setItem('theme', dark ? 'dark' : 'light');
+        if (dark) {
+          sun.style.opacity = '1'; sun.style.transform = 'rotate(0deg) scale(1)';
+          moon.style.opacity = '0'; moon.style.transform = 'rotate(90deg) scale(.5)';
+          label.textContent = 'Light mode';
+        } else {
+          sun.style.opacity = '0'; sun.style.transform = 'rotate(-90deg) scale(.5)';
+          moon.style.opacity = '1'; moon.style.transform = 'rotate(0deg) scale(1)';
+          label.textContent = 'Dark mode';
+        }
+      }
+
+      setTheme(document.documentElement.classList.contains('dark'));
+      document.getElementById('theme-toggle').addEventListener('click', function () {
+        setTheme(!document.documentElement.classList.contains('dark'));
+      });
+    })();
+  </script>
 </body>
 </html>{{end}}

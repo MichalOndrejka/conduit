@@ -68,6 +68,12 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSettingsEmbedding(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
+	dims, dimsOK := atoiStrict(r.FormValue("dimensions"))
+	maxTokens, maxTokensOK := atoiStrict(r.FormValue("max_input_tokens"))
+	if !dimsOK || dims <= 0 || !maxTokensOK || maxTokens <= 0 {
+		http.Redirect(w, r, "/settings?notice=embedding_invalid", http.StatusSeeOther)
+		return
+	}
 	old := s.cfg.Embedding
 	ec := embeddingFromForm(r)
 
@@ -102,9 +108,15 @@ func (s *Server) handleSettingsEmbedding(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleSettingsQdrant(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
+	host := strings.TrimSpace(r.FormValue("qdrant_host"))
+	port, portOK := atoiStrict(r.FormValue("qdrant_port"))
+	if host == "" || !portOK || port < 1 || port > 65535 {
+		http.Redirect(w, r, "/settings?notice=qdrant_invalid", http.StatusSeeOther)
+		return
+	}
 	s.cfg.Qdrant = config.QdrantConfig{
-		Host:   r.FormValue("qdrant_host"),
-		Port:   atoiOr(r.FormValue("qdrant_port"), 6333),
+		Host:   host,
+		Port:   port,
 		HTTPS:  r.FormValue("qdrant_https") == "on",
 		APIKey: r.FormValue("qdrant_api_key"),
 	}
@@ -276,4 +288,11 @@ func atoiOr(s string, def int) int {
 		return n
 	}
 	return def
+}
+
+// atoiStrict parses s as a base-10 integer, returning ok=false for empty or
+// non-numeric input (unlike atoiOr, which silently falls back to a default).
+func atoiStrict(s string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	return n, err == nil
 }
