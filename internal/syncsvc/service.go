@@ -194,13 +194,21 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	}
 }
 
-// SyncSelected syncs the given source IDs in parallel.
+// maxConcurrentSyncs caps how many sources sync simultaneously, preventing
+// the embedding endpoint and external APIs from being overloaded when the
+// user selects many sources at once.
+const maxConcurrentSyncs = 4
+
+// SyncSelected syncs the given source IDs in parallel, capped at maxConcurrentSyncs.
 func (s *Service) SyncSelected(ctx context.Context, ids []string) {
+	sem := make(chan struct{}, maxConcurrentSyncs)
 	var wg sync.WaitGroup
 	for _, id := range ids {
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(id string) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			s.Sync(ctx, id)
 		}(id)
 	}

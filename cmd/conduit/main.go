@@ -43,6 +43,11 @@ func main() {
 	memorySvc := memory.NewService(vectors, embedding)
 	sourceStore := store.NewSourceConfigStore(cfg.SourcesFilePath)
 
+	// Reset any source left in "syncing" by a previous crash or container restart.
+	if err := sourceStore.ReconcileStaleSync(); err != nil {
+		log.Printf("warning: could not reconcile stale sync state: %v", err)
+	}
+
 	// ── Sync engine (generic sources: API + manual) ────────────────────────
 	chunker := rag.NewTextChunker(cfg)
 	indexer := rag.NewDocumentIndexer(vectors, embedding, chunker)

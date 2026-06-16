@@ -27,53 +27,58 @@ import (
 // sync with chunker.go.
 const charsPerToken = 2
 
+// EmbeddingService reads its configuration from *config.AppConfig on every
+// call, so embedding model changes made via the Settings page take effect on
+// the next sync without requiring a restart.
 type EmbeddingService struct {
-	url   string
-	azure bool
-	// Azure resolves the API key per request (azureCredential → secrets
-	// store, falling back to AZURE_OPENAI_API_KEY) so rotating the
-	// credential in the UI takes effect without a restart.
-	azureCredential string
-	secrets         secrets.Reader
-	model           string
-	maxTokens       int
-	maxChars        int
-	httpClient      *http.Client
+	cfg        *config.AppConfig
+	secrets    secrets.Reader
+	httpClient *http.Client
 }
 
 func NewEmbeddingService(cfg *config.AppConfig, store secrets.Reader) *EmbeddingService {
-	ec := cfg.Embedding
-	s := &EmbeddingService{
+	return &EmbeddingService{
+		cfg:        cfg,
 		secrets:    store,
-		maxTokens:  ec.MaxInputTokens,
-		maxChars:   ec.MaxInputTokens * charsPerToken,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 	}
+}
+
+func (s *EmbeddingService) isAzure() bool {
+	return s.cfg.Embedding.Provider == "azure-openai"
+}
+
+func (s *EmbeddingService) embeddingURL() string {
+	ec := s.cfg.Embedding
 	if ec.Provider == "azure-openai" {
-		s.azure = true
-		s.azureCredential = ec.AzureAPIKeyCredential
-		s.model = ec.AzureDeployment
-		if s.model == "" {
-			s.model = ec.Model
+		model := ec.AzureDeployment
+		if model == "" {
+			model = ec.Model
 		}
-		s.url = fmt.Sprintf(
+		return fmt.Sprintf(
 			"%s/openai/deployments/%s/embeddings?api-version=%s",
-			strings.TrimRight(ec.AzureEndpoint, "/"), s.model, ec.AzureAPIVersion,
+			strings.TrimRight(ec.AzureEndpoint, "/"), model, ec.AzureAPIVersion,
 		)
-	} else {
-		s.model = ec.Model
-		s.url = strings.TrimRight(ec.BaseURL, "/") + "/embeddings"
 	}
-	return s
+	return strings.TrimRight(ec.BaseURL, "/") + "/embeddings"
+}
+
+func (s *EmbeddingService) embeddingModel() string {
+	ec := s.cfg.Embedding
+	if ec.Provider == "azure-openai" && ec.AzureDeployment != "" {
+		return ec.AzureDeployment
+	}
+	return ec.Model
 }
 
 // apiKey resolves the credential at call time, not construction time.
 func (s *EmbeddingService) apiKey() string {
-	if !s.azure {
+	ec := s.cfg.Embedding
+	if ec.Provider != "azure-openai" {
 		return "ollama" // matches Python: api_key="ollama"
 	}
-	if s.azureCredential != "" && s.secrets != nil {
-		if key := s.secrets.GetValue(s.azureCredential); key != "" {
+	if ec.AzureAPIKeyCredential != "" && s.secrets != nil {
+		if key := s.secrets.GetValue(ec.AzureAPIKeyCredential); key != "" {
 			return key
 		}
 	}
@@ -83,34 +88,37 @@ func (s *EmbeddingService) apiKey() string {
 // Embed returns the embedding vector for text, truncating over-long input the
 // same way app/rag/embedding.py does.
 func (s *EmbeddingService) Embed(ctx context.Context, text string) ([]float32, error) {
-	if len(text) > s.maxChars {
+	ec := s.cfg.Embedding
+	maxChars := ec.MaxInputTokens * charsPerToken
+
+	if len(text) > maxChars {
 		log.Printf(
 			"warning: truncating input from %d to %d chars before embedding (model limit: %d tokens × %d chars/token estimate)",
-			len(text), s.maxChars, s.maxTokens, charsPerToken,
+			len(text), maxChars, ec.MaxInputTokens, charsPerToken,
 		)
 		// Back the cut off to a rune boundary — Go slices bytes, and cutting
 		// a multi-byte UTF-8 rune in half would send invalid UTF-8 downstream.
-		cut := s.maxChars
+		cut := maxChars
 		for cut > 0 && !utf8.RuneStart(text[cut]) {
 			cut--
 		}
 		truncated := text[:cut]
-		if lastNL := strings.LastIndex(truncated, "\n"); lastNL > s.maxChars/2 {
+		if lastNL := strings.LastIndex(truncated, "\n"); lastNL > maxChars/2 {
 			truncated = truncated[:lastNL]
 		}
 		text = truncated
 	}
 
-	reqBody, err := json.Marshal(map[string]any{"model": s.model, "input": text})
+	reqBody, err := json.Marshal(map[string]any{"model": s.embeddingModel(), "input": text})
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(reqBody))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.embeddingURL(), bytes.NewReader(reqBody))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if s.azure {
+	if s.isAzure() {
 		req.Header.Set("api-key", s.apiKey())
 	} else {
 		req.Header.Set("Authorization", "Bearer "+s.apiKey())

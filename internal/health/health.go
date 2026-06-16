@@ -35,6 +35,7 @@ type ProbeState struct {
 }
 
 type Monitor struct {
+	cfg       *config.AppConfig
 	mu        sync.RWMutex
 	qdrant    ProbeState
 	embedding ProbeState
@@ -43,12 +44,9 @@ type Monitor struct {
 // Start launches the probes in the background and returns immediately.
 func Start(cfg *config.AppConfig, vectors *rag.VectorStore, embedding *rag.EmbeddingService) *Monitor {
 	m := &Monitor{
-		qdrant: ProbeState{Status: "pending"},
-		embedding: ProbeState{
-			Status:   "pending",
-			Provider: cfg.Embedding.Provider,
-			Model:    cfg.Embedding.Model,
-		},
+		cfg:       cfg,
+		qdrant:    ProbeState{Status: "pending"},
+		embedding: ProbeState{Status: "pending"},
 	}
 
 	go m.probe(func(ctx context.Context) error {
@@ -102,8 +100,6 @@ func (m *Monitor) setQdrant(s ProbeState) {
 func (m *Monitor) setEmbedding(s ProbeState) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	prev := m.embedding
-	s.Provider, s.Model = prev.Provider, prev.Model
 	m.embedding = s
 }
 
@@ -116,7 +112,10 @@ func (m *Monitor) Qdrant() ProbeState {
 func (m *Monitor) Embedding() ProbeState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.embedding
+	s := m.embedding
+	s.Provider = m.cfg.Embedding.Provider
+	s.Model = m.cfg.Embedding.Model
+	return s
 }
 
 // IsReady reports whether Qdrant is usable (gates destructive operations,

@@ -171,6 +171,29 @@ func (s *SourceConfigStore) Import(data []byte) (int, error) {
 	return imported, nil
 }
 
+// ReconcileStaleSync resets any source stuck in "syncing" to "idle". Call
+// this once at startup: a process crash or container restart can leave sources
+// in "syncing" with no goroutine to resolve them.
+func (s *SourceConfigStore) ReconcileStaleSync() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sources, err := s.read()
+	if err != nil {
+		return err
+	}
+	changed := false
+	for i := range sources {
+		if sources[i].SyncStatus == "syncing" {
+			sources[i].SyncStatus = "idle"
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.write(sources)
+}
+
 // ResetAllSyncStatus sets every source's sync status (clearing any error),
 // used by the Settings danger-zone embedding cleanups. Mirrors
 // reset_all_sync_status in app/store/source_config.py.
