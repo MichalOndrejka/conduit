@@ -1,20 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-*.egg
-*.egg-info/
-dist/
-build/
-.eggs/
-*.whl
-
-# Virtual environments
-.venv/
-venv/
-env/
-.env
+# Go build artifacts
+/conduit
+/conduit.exe
+/tmp/
 
 # Runtime / secrets
 conduit-sources.json
@@ -25,11 +12,7 @@ conduit-embedding.json
 credentials.enc.json
 .jwt_secret
 owner.json
-
-# Go build artifacts
-/conduit
-/conduit.exe
-/tmp/
+.env
 
 # Node (Tailwind build)
 node_modules/
@@ -55,8 +38,3 @@ Desktop.ini
 # Test results
 TestResults/
 coverage/
-*.coverage
-.pytest_cache/
-htmlcov/
-
-**/*.pyc

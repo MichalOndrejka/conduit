@@ -1,25 +1,21 @@
-FROM python:3.12-slim
+# Conduit (Go) — multi-stage build producing a ~25 MB distroless image
+# (vs the ~1–2 GB Python image), idling at ~20–50 MB RSS.
+# Named Dockerfile.golang (not .go) so the Go toolchain doesn't try to compile it.
+FROM golang:1.26 AS build
+WORKDIR /src
 
-WORKDIR /app
+# Cache module downloads separately from source changes
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Install uv for fast, reliable dependency installation
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /conduit ./cmd/conduit
 
-# Copy manifest files first to leverage layer caching
-COPY pyproject.toml .
-# Stub the package so uv can resolve deps without the full source tree
-RUN mkdir -p app && touch app/__init__.py
-RUN uv pip install --system --no-cache .
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /conduit /conduit
 
-# Now copy the real application code (overwrites stub)
-COPY app/ ./app/
-
-# Sources file is stored in the named volume at /data
-VOLUME ["/data"]
-
+VOLUME /data
 ENV CONDUIT_DATA_DIR=/data
-ENV PYTHONUNBUFFERED=1
-
 EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/conduit"]
