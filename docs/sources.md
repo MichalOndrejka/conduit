@@ -1,314 +1,100 @@
-# Source Configuration Reference (legacy Python backend)
+# Source Configuration Reference
 
-> **Legacy** — this page documents the Python backend's provider-specific
-> sources (notably Azure DevOps). The Go backend replaces them with a single
-> generic HTTP API provider configured per source; see
-> [go-port.md](go-port.md) and the README's source-configuration section.
-> The Python backend remains the only way to sync the multi-step ADO source
-> types (WIQL, git zip + code parsing) until it is retired.
-
-Every source in Conduit has a **type** (which Qdrant collection it targets) and a **provider** (which backend fetches the data). The provider is selected using the tab switcher on the configure page.
+Every source in Conduit has a **type** (which Qdrant collection it targets, see the table below) and a **provider** (which backend fetches the data). The backend is intentionally provider-agnostic — there is no ADO/Jira/GitHub-specific code. Any JSON-over-HTTP API is expressed as configuration through the single generic **HTTP API** provider; the **Manual** provider embeds pasted or uploaded content directly.
 
 ## Providers
 
-### Azure DevOps
+### HTTP API
 
-Fetches data from an ADO REST API — cloud or on-premise TFS/VSTS.
-
-**Connection fields**
+Fetches from any endpoint that returns JSON. Configured via `internal/sources/api.go`.
 
 | Field | Config key | Description |
 |-------|-----------|-------------|
-| Base URL | `BaseUrl` | Full project URL, e.g. `https://dev.azure.com/org/project` or `https://tfs.company.com/DefaultCollection/MyProject` |
-| Auth type | `AuthType` | `pat` \| `bearer` \| `ntlm` \| `negotiate` \| `apikey` \| `none` |
-| API version | `ApiVersion` | Defaults to `7.1`. Change only if your TFS requires an older version. |
-
-**Auth type details**
-
-| Auth type | Credential fields | Plain-text fields | Notes |
-|-----------|------------------|-------------------|-------|
-| `pat` | `Pat` | — | Personal Access Token. Recommended for ADO cloud. |
-| `bearer` | `Token` | — | Bearer token. Suitable for service principals. |
-| `ntlm` | `Password` | `Username`, `Domain` | On-premise TFS with Windows/NTLM auth. |
-| `negotiate` | `Password` | `Username`, `Domain` | Kerberos/NTLM negotiate. Falls back to NTLM if `requests-negotiate-sspi` is not installed. |
-| `apikey` | `ApiKeyValue` | `ApiKeyHeader` | Sends a custom header, e.g. `X-Api-Key: <value>`. |
-| `none` | — | — | No authentication. For open endpoints or when auth is handled at network level. |
-
-**Credential fields** (`Pat`, `Token`, `Password`, `ApiKeyValue`) show a dropdown populated from the [credential library](/credentials). Select the named credential that holds the secret value. The credential name is stored in `conduit-sources.json`; the actual secret is looked up from the encrypted store at sync time.
-
-Add and manage credentials at `/credentials` in the web UI before configuring sources that require authentication.
-
----
-
-### Custom API
-
-Fetches from any HTTP endpoint that returns JSON.
-
-| Field | Config key | Description |
-|-------|-----------|-------------|
-| URL | `Url` | Full endpoint URL. Required. |
+| URL | `Url` | Endpoint returning JSON. Required. |
 | HTTP method | `HttpMethod` | `GET` (default) or `POST`. |
-| Auth type | `AuthType` | `none` (default) \| `bearer` \| `apikey` |
-| Token | `Token` | Credential name (selected from `/credentials`). Used for bearer auth. |
-| API key header | `ApiKeyHeader` | Header name for API key auth, e.g. `X-Api-Key`. |
-| API key value | `ApiKeyValue` | Credential name (selected from `/credentials`). Used for API-key auth. |
-| Items path | `ItemsPath` | Dot-notation path into the response JSON to the array of items, e.g. `data.records`. Leave empty if the root is an array. |
-| Title field | `TitleField` | Field name used as the document title. Defaults to `title`. |
-| Content fields | `ContentFields` | Comma-separated field names to include in the document body. Leave empty to include all fields. |
+| Body | `Body` | Raw JSON request body, for `POST` endpoints. |
+| Headers | `Headers` | Extra request headers, one `Name: value` per line. |
+| Auth type | `AuthType` | `none` (default) \| `bearer` \| `basic` \| `apikey` |
+| Token | `Token` | Credential name (from `/credentials`). Used for bearer auth. |
+| Username | `Username` | Plain-text username for basic auth. May be empty — e.g. Azure DevOps PATs go in the password slot with a blank username. |
+| Password | `Password` | Credential name. Used as the basic-auth password. |
+| API key header | `ApiKeyHeader` | Header name for API-key auth. Defaults to `X-Api-Key`. |
+| API key value | `ApiKeyValue` | Credential name. Used as the API-key header value. |
+| Items path | `ItemsPath` | Dot-notation path into the response JSON to the array of items, e.g. `value` or `data.records`. Leave empty if the root is the array. |
+| ID field | `IdField` | Item field used to build stable document IDs. Defaults to the item's position in the response. |
+| Title field | `TitleField` | Field used as the document title. Defaults to `title`. |
+| Content fields | `ContentFields` | Comma-separated field names to include in the document body. Leave empty to include every field except the title field. |
+| Next page path | `NextUrlPath` | Dot-notation path to a full next-page URL in the response, for pagination. |
+| Top | `Top` | Maximum items to fetch across all pages. Default `500`. |
+| Verify SSL | `VerifySSL` | Set to `false` to skip TLS verification (self-hosted instances with private CAs). |
+
+Credential fields (`Token`, `Password`, `ApiKeyValue`) hold a **name**, not the secret itself — the actual value lives in the encrypted [credential library](/credentials) and is looked up at sync time.
 
 **How item mapping works**
 
-1. Response JSON is navigated to `ItemsPath` (or the root if empty).
+1. The response JSON is navigated to `ItemsPath` (or the root if empty).
 2. If the result is a single object rather than an array, it is wrapped in a list.
-3. For each item, `TitleField` becomes the document title.
-4. If `ContentFields` is set, only those fields appear in the body text. Otherwise all fields except `TitleField` are included.
-5. Document IDs are `{source_id}_capi_{index}`.
+3. For each item, `TitleField` becomes the document title; falls back to `IdField`'s value, then to a positional `Item N`.
+4. If `ContentFields` is set, only those fields appear in the body text. Otherwise every field except the title field is included.
+5. Document IDs are `{source_id}_capi_{IdField value or position}`.
+6. If `NextUrlPath` resolves to a string, that URL is fetched next — up to 50 pages or `Top` items, whichever comes first.
 
----
+Constraint accepted by this generic design: multi-step fetch flows (e.g. an ADO WIQL query followed by a batch fetch, or downloading a git repo as a zip and parsing source files into code units) aren't expressible — only single-endpoint JSON APIs are.
 
 ### Manual
 
-Embeds content without any external connection.
+Embeds content without any external connection. Set `Title` and `Content` directly (or upload a `.pdf`/`.txt`/`.md` file in the web UI, which extracts `Content` for you). The extracted text is stored in `conduit-sources.json` so preview and re-sync work without re-uploading.
 
-| Sub-tab | Config keys | Description |
-|---------|------------|-------------|
-| Text | `Title`, `Content` | Paste a title and body text directly. |
-| File upload | `Title`, `Content` (extracted) | Upload a `.pdf`, `.txt`, or `.md` file. Drag-and-drop supported. |
+On **export**, document content is replaced with a `__DOCUMENT_REQUIRED__` placeholder — anyone importing the config must open the source and provide the content again before syncing.
 
-The extracted text is stored locally in `conduit-sources.json` so preview and re-sync work without re-uploading. On **export**, document content is replaced with a `__DOCUMENT_REQUIRED__` placeholder — anyone importing the config must open the source and provide the document content again before syncing.
+## Source types and collections
 
----
+The source **type** only decides which Qdrant collection a source's documents land in — it has no effect on how documents are fetched (that's the provider's job).
 
-## Source types and their ADO data
+| Source Type | Collection |
+|-------------|------------|
+| Work Items | `conduit_workitems` |
+| Requirements | `conduit_requirements` |
+| Test Cases | `conduit_testcases` |
+| Test Results | `conduit_testresults` |
+| Git Commits | `conduit_commits` |
+| Source Code | `conduit_code` |
+| Test Code | `conduit_testcode` |
+| Documentation | `conduit_documentation` |
+| Build Results | `conduit_builds` |
 
-### Work Items (`workitem`)
+Manual-provider sources always land in `conduit_documentation` regardless of type.
 
-Fetches work items via WIQL query.
+## Platform presets (UI convenience, not backend code)
 
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Query` | Full WIQL query. If set, overrides all other filters. | — |
-| `ItemTypes` | Comma-separated work item types, e.g. `Bug, Task, User Story`. | `Epic, Feature, User Story, Bug, Defect` |
-| `AreaPath` | Limit to items under this area path (UNDER clause). | — |
-| `IterationPath` | Limit to items under this iteration path, e.g. `MyProject\Sprint 1`. | — |
-| `Fields` | Comma-separated fields to fetch, e.g. `System.Title, System.State`. | All fields |
+The **Sources → Create** flow offers a friendly **Azure DevOps** tab alongside the generic **Custom API** tab. It's a frontend-only preset: filling in org/project/PAT/resource fields compiles them into the generic API keys above on submit (`Url`, `AuthType=basic`, `Password=<credential>`, `ItemsPath=value`, …). The source is stored as an ordinary generic API source; the backend has no ADO-specific code path. A few UI-only metadata keys (`Platform`, `AdoOrg`, `AdoProject`, `AdoApiVersion`, `AdoResource`, `AdoQuery`) are persisted alongside the generic keys purely so the editor can re-open a source in the right tab, pre-filled.
 
-Document shape:
-- ID: `{source_id}_wi_{item_id}`
-- Text starts with `Work Item {id}: {title}`
-- Tags: `work_item_type`, `state`
-- Properties: `id`, `title`, `url`
+Examples expressible as pure configuration:
 
----
-
-### Requirements (`requirements`)
-
-Indexes requirement artefacts. Supports three sub-tabs depending on where requirements are stored.
-
-**Filters sub-tab** — fetches requirement work items via auto-generated WIQL
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `ReqType` | Active sub-tab: `filters` \| `custom` \| `repo` | `filters` |
-| `ItemTypes` | Comma-separated work item types. | `Product Requirement, Software Requirement, Risk` |
-| `AreaPath` | Limit to items under this area path. | — |
-| `IterationPath` | Limit to items under this iteration path. | — |
-
-**Custom WIQL sub-tab** — full WIQL query override
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Query` | Full WIQL query. | — |
-| `Fields` | Comma-separated fields to fetch. | All fields |
-
-**Repo Files sub-tab** — fetches requirement documents from a git repository (markdown spec files, etc.)
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch from. | — |
-| `GlobPatterns` | Glob patterns for requirement documents. | `**/*.md` |
-
----
-
-### Test Cases (`test-case`)
-
-Indexes test case artefacts. Supports three sub-tabs.
-
-**Filters sub-tab** — fetches test case work items via auto-generated WIQL. XML tags are stripped from test steps.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `TcType` | Active sub-tab: `filters` \| `custom` \| `repo` | `filters` |
-| `ItemTypes` | Comma-separated work item types. | `Test Case` |
-| `AreaPath` | Limit to items under this area path. | — |
-| `IterationPath` | Limit to items under this iteration path. | — |
-
-**Custom WIQL sub-tab** — full WIQL query override
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Query` | Custom WIQL query. | — |
-| `Fields` | Comma-separated fields to fetch. | All fields |
-
-**Repo Files sub-tab** — fetches spec/feature files from a git repository.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch from. | — |
-| `GlobPatterns` | Glob patterns for spec files. | `**/*.md` |
-
-Document shape (WIQL):
-- ID: `{source_id}_tc_{item_id}`
-- Text starts with `Test Case {id}: {title}`; steps follow with XML stripped
-- Tags: `automation_status`, `state`
-
----
-
-### Test Results (`test-results`)
-
-Fetches test run results including outcomes, error messages, and stack traces.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `LastNRuns` | Number of recent test runs to fetch. | `10` |
-| `ResultsPerRun` | Maximum results to fetch per run. | `200` |
-
-Document shape:
-- ID: `{source_id}_tr_{run_id}_{result_id}`
-- Text includes test name, run name, outcome, error message (if any), stack trace (if any)
-- Tags: `outcome`, `run_name`
-
----
-
-### Git Commits (`git-commits`)
-
-Fetches commit history from a git repository.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch commits from. | `main` |
-| `LastNCommits` | Number of recent commits to fetch. | `100` |
-
-Document shape:
-- ID: `{source_id}_commit_{short_id}` (first 8 chars of commit SHA)
-- Text includes commit message, author, date, change counts (if available)
-- Tags: `author`, `repository`
-
----
-
-### Source Code (`code`)
-
-Fetches source files from a git repository and parses them into code units (classes, methods, functions).
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch from. | — |
-| `GlobPatterns` | Comma-separated glob patterns, e.g. `**/*.cs, **/*.ts`. | `**/*.cs` |
-
-Files are downloaded as a repository zip for efficiency. Supported languages: C#, TypeScript, Go, PowerShell, Markdown. Unrecognised file types are indexed as plain text.
-
-Document shape:
-- ID: `{source_id}_{file_path}_{slug}` where slug is derived from the code unit name
-- Text is the `enriched_text` format: namespace, kind, signature, language, file path, docs, then full source
-- Tags: `language`, `kind`
-- Properties: `title` (unit name), `file_path`, `repository`
-
----
-
-### Test Code (`testcode`)
-
-Fetches test files from a git repository and parses them into code units (test classes, test methods, spec functions). Uses the same language-aware parsers as Source Code but indexes into `conduit_testcode` so production and test code are searched separately.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch from. | — |
-| `GlobPatterns` | Comma-separated glob patterns, e.g. `**/*.Tests/**/*.cs, **/*.spec.ts`. | `**/*.cs` |
-
-Supported languages: C#, TypeScript, Go, PowerShell, Markdown. Unrecognised file types are indexed as plain text.
-
-Document shape:
-- ID: `{source_id}_{file_path}_{slug}` where slug is derived from the code unit name
-- Text is the `enriched_text` format: namespace, kind, signature, language, file path, docs, then full source
-- Tags: `language`, `kind`
-- Properties: `title` (unit name), `file_path`, `repository`
-
----
-
-### Documentation (`documentation`)
-
-Fetches documentation from multiple sources. Supports three sub-cards.
-
-**ADO Wiki sub-tab**
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `DocType` | Active sub-tab: `wiki` \| `repo` | `wiki` |
-| `WikiName` | Wiki name to target. Falls back to the first wiki if not found. | First wiki in project |
-| `PathFilter` | Fetch only pages under this path. | `/` (all pages) |
-
-Wiki pages are parsed by the Markdown parser into sections. Sub-pages are recursed automatically.
-
-Document shape:
-- ID: `{source_id}_{page_path}_{slug}`
-- Text is the section's full text
-- Tags: `wiki_name`, `section`
-
-**Repo Files sub-tab**
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `Repository` | Repository name. | — |
-| `Branch` | Branch to fetch from. | — |
-| `GlobPatterns` | Glob patterns for documentation files. | `**/*.md` |
-
----
-
-### Build Results (`pipeline-build`)
-
-Indexes CI/CD pipeline results. Supports two sub-cards.
-
-**Build Pipeline sub-card** — fetches recent CI builds. For failed or partially succeeded builds, the task timeline is fetched to surface which tasks failed.
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `BuildType` | Active sub-card: `build` \| `release` | `build` |
-| `PipelineId` | Build pipeline definition ID (numeric). | — |
-| `LastNBuilds` | Number of recent builds to fetch. | `5` |
-
-Document shape:
-- ID: `{source_id}_build_{build_id}`
-- Text includes build number, result, pipeline ID, finish time, and failed task names
-- Tags: `pipeline_id`, `build_result`, `status`
-
-**Release Pipeline sub-card** — fetches recent CD releases from the ADO Release API (`_apis/release/releases`).
-
-| Config key | Description | Default |
-|-----------|-------------|---------|
-| `ReleaseDefinitionId` | Release pipeline definition ID (numeric). | — |
-| `LastNReleases` | Number of recent releases to fetch. | `5` |
-
-Document shape:
-- ID: `{source_id}_release_{release_id}`
-- Text includes release name, status, created date, description, and environment outcomes
-- Tags: `definition_id`, `release_status`
-
----
+- **Azure DevOps**: `https://dev.azure.com/{org}/{project}/_apis/wit/workitems?ids=...` with `AuthType=basic`, empty username, PAT as the password credential, `ItemsPath=value`
+- **Jira**: `https://you.atlassian.net/rest/api/3/search` with `AuthType=basic`, `ItemsPath=issues`
+- **GitHub**: `https://api.github.com/repos/{owner}/{repo}/issues` with `AuthType=bearer`
 
 ## Common patterns
 
-### Targeting multiple repositories
+### Targeting multiple sources of the same type
 
-Create one source per repository. Use the `source_name` filter on MCP search tools to limit results to a specific repository.
+Create one source per system/repository. Use the `source_name` filter on MCP search tools to limit results to a specific one.
 
-### On-premise TFS with Windows auth
+### Paginated APIs
 
-Set `AuthType` to `ntlm` and `BaseUrl` to your TFS collection URL, e.g. `https://tfs.company.com/DefaultCollection/MyProject`. Create a credential at `/credentials` with your Windows password and select it in the `Password` dropdown on the source form.
+Set `NextUrlPath` to the response field holding the next page's full URL (many APIs, including ADO's continuation-token endpoints reshaped as a URL, and GitHub's `Link`-less JSON-body pagination, expose this). Set `Top` to cap total items fetched.
 
-### Private API with no standard auth
+### Private API with a custom auth header
 
-Use the Custom API provider with `AuthType: apikey`. Set `ApiKeyHeader` to the header name your API expects, then create a credential at `/credentials` containing the key value and select it in the `ApiKeyValue` dropdown.
+Set `AuthType` to `apikey`, `ApiKeyHeader` to the header name your API expects (e.g. `X-Api-Key`), and create a credential at `/credentials` holding the key value for `ApiKeyValue`.
+
+## What's not expressible
+
+Because the backend is a single generic HTTP-JSON provider, some fetch patterns are out of reach by design:
+
+- Multi-step flows — e.g. a WIQL query followed by a batch fetch of matching items.
+- Downloading a git repository as a zip and parsing individual files into code units (classes, methods, functions).
+- Recursive wiki/tree-walk fetches.
+
+These require dedicated provider code, which the Go backend deliberately does not have (see [go-port.md](go-port.md) for the rationale).

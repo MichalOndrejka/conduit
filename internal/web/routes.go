@@ -1,5 +1,4 @@
-// HTTP routes — Go port of the read-only slice of app/web/routes.py, plus the
-// n8n-style login/setup/logout pages.
+// HTTP routes — Go port of the read-only slice of app/web/routes.py.
 package web
 
 import (
@@ -9,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/health"
@@ -45,8 +43,6 @@ const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
 
 type Server struct {
 	cfg     *config.AppConfig
-	auth    *AuthService
-	owners  *OwnerStore
 	sources *store.SourceConfigStore
 	vectors *rag.VectorStore
 	memory  *memory.Service
@@ -54,8 +50,6 @@ type Server struct {
 	sync    *syncsvc.Service
 	health  *health.Monitor
 
-	loginTmpl      *template.Template
-	setupTmpl      *template.Template
 	indexTmpl      *template.Template
 	itemsTmpl      *template.Template
 	experienceTmpl *template.Template
@@ -68,8 +62,6 @@ type Server struct {
 
 func NewServer(
 	cfg *config.AppConfig,
-	auth *AuthService,
-	owners *OwnerStore,
 	sourceStore *store.SourceConfigStore,
 	vectors *rag.VectorStore,
 	mem *memory.Service,
@@ -82,16 +74,12 @@ func NewServer(
 	}
 	return &Server{
 		cfg:            cfg,
-		auth:           auth,
-		owners:         owners,
 		sources:        sourceStore,
 		vectors:        vectors,
 		memory:         mem,
 		secrets:        secretsStore,
 		sync:           syncSvc,
 		health:         healthMon,
-		loginTmpl:      template.Must(template.ParseFS(templateFS, "templates/login.html")),
-		setupTmpl:      template.Must(template.ParseFS(templateFS, "templates/setup.html")),
 		indexTmpl:      page("index.html"),
 		itemsTmpl:      page("items.html"),
 		experienceTmpl: page("experience.html"),
@@ -104,7 +92,7 @@ func NewServer(
 }
 
 // Routes registers all handlers on mux. The MCP handler is mounted separately
-// in main so it can share the auth middleware.
+// in main.
 func (s *Server) Routes(mux *http.ServeMux) {
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.HandleFunc("GET /favicon.svg", s.handleFaviconSVG)
@@ -113,12 +101,6 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /status", s.handleStatus)
-
-	mux.HandleFunc("GET /login", s.handleLoginGet)
-	mux.HandleFunc("POST /login", s.handleLoginPost)
-	mux.HandleFunc("GET /setup", s.handleSetupGet)
-	mux.HandleFunc("POST /setup", s.handleSetupPost)
-	mux.HandleFunc("POST /logout", s.handleLogout)
 
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /sources/{id}/items", s.handleSourceItems)
@@ -205,76 +187,6 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		out = append(out, st)
 	}
 	writeJSON(w, out)
-}
-
-// ── Auth pages ──────────────────────────────────────────────────────────────
-
-func (s *Server) handleLoginGet(w http.ResponseWriter, r *http.Request) {
-	if !s.owners.HasOwner() {
-		http.Redirect(w, r, "/setup", http.StatusFound)
-		return
-	}
-	s.render(w, s.loginTmpl, "login.html", map[string]any{"Error": ""})
-}
-
-func (s *Server) handleLoginPost(w http.ResponseWriter, r *http.Request) {
-	if !s.auth.limiter.allow(r.RemoteAddr) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		s.render(w, s.loginTmpl, "login.html", map[string]any{
-			"Error": "Too many attempts — wait a moment and try again.",
-		})
-		return
-	}
-	email := r.FormValue("email")
-	password := r.FormValue("password")
-	if !s.owners.Verify(email, password) {
-		w.WriteHeader(http.StatusUnauthorized)
-		s.render(w, s.loginTmpl, "login.html", map[string]any{
-			"Error": "Invalid email or password.",
-		})
-		return
-	}
-	token, err := s.auth.issueToken(s.owners.Email(), time.Now())
-	if err != nil {
-		httpError(w, err)
-		return
-	}
-	s.auth.setSessionCookie(w, token)
-	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
-	if s.owners.HasOwner() {
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
-	}
-	s.render(w, s.setupTmpl, "setup.html", map[string]any{"Error": ""})
-}
-
-func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
-	if s.owners.HasOwner() {
-		http.Redirect(w, r, "/login", http.StatusFound)
-		return
-	}
-	email := r.FormValue("email")
-	password := r.FormValue("password")
-	if err := s.owners.Setup(email, password); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		s.render(w, s.setupTmpl, "setup.html", map[string]any{"Error": err.Error()})
-		return
-	}
-	token, err := s.auth.issueToken(s.owners.Email(), time.Now())
-	if err != nil {
-		httpError(w, err)
-		return
-	}
-	s.auth.setSessionCookie(w, token)
-	http.Redirect(w, r, "/", http.StatusFound)
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	s.auth.clearSessionCookie(w)
-	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 // ── UI pages ────────────────────────────────────────────────────────────────

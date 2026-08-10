@@ -4,14 +4,14 @@ Conduit exposes its search and memory capabilities as MCP tools that any MCP-com
 
 ## Connecting
 
-The MCP endpoint is `http://localhost:5000/mcp`. For clients that use a JSON config file:
+The MCP endpoint is `http://localhost:8000/mcp`. For clients that use a JSON config file:
 
 ```json
 {
   "mcpServers": {
     "conduit": {
       "type": "http",
-      "url": "http://localhost:5000/mcp"
+      "url": "http://localhost:8000/mcp"
     }
   }
 }

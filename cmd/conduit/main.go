@@ -1,5 +1,5 @@
 // Conduit (Go) — entrypoint. Port of app/main.py's lifespan wiring: config,
-// secrets, RAG services, MCP server, web routes, auth middleware.
+// secrets, RAG services, MCP server, web routes.
 package main
 
 import (
@@ -67,16 +67,6 @@ func main() {
 		return
 	}
 
-	// ── Auth (n8n-style: bcrypt owner + JWT cookie; Bearer key for MCP) ────
-	owners, err := web.NewOwnerStore(dataDir)
-	if err != nil {
-		log.Fatalf("owner store: %v", err)
-	}
-	auth, err := web.NewAuthService(dataDir, owners)
-	if err != nil {
-		log.Fatalf("auth: %v", err)
-	}
-
 	// ── MCP server (streamable HTTP at /mcp) ───────────────────────────────
 	mcpServer := server.NewMCPServer("Conduit", version)
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
@@ -84,7 +74,7 @@ func main() {
 
 	// ── HTTP wiring ─────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
-	webServer := web.NewServer(cfg, auth, owners, sourceStore, vectors, memorySvc, secretsStore, syncSvc, healthMon)
+	webServer := web.NewServer(cfg, sourceStore, vectors, memorySvc, secretsStore, syncSvc, healthMon)
 	webServer.Routes(mux)
 	mux.Handle("/mcp", mcpHTTP)
 
@@ -104,7 +94,7 @@ func main() {
 	addr := host + ":" + port
 	log.Printf("Conduit (Go) listening on %s — qdrant=%s:%d embedding=%s/%s",
 		addr, cfg.Qdrant.Host, cfg.Qdrant.Port, cfg.Embedding.Provider, cfg.Embedding.Model)
-	if err := http.ListenAndServe(addr, auth.Middleware(mux)); err != nil {
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}
 }

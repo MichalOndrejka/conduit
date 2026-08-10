@@ -1,11 +1,5 @@
 # Configuration Reference
 
-> **Note** — written for the legacy Python backend. The Go backend reads the
-> same `config.json` and the same `QDRANT_*` / `EMBEDDING_*` /
-> `AZURE_OPENAI_*` / `CONDUIT_*` environment variables, with two differences:
-> LLM preprocessing is not supported, and auth uses the owner login +
-> `CONDUIT_API_KEY` bearer model (see the README's configuration table).
-
 Conduit stores its runtime configuration in `config.json` (location controlled by `CONDUIT_CONFIG` env var). All settings are also editable via the **Settings** page in the web UI.
 
 ## Full schema
@@ -32,6 +26,22 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
   "chunking": {
     "max_chunk_size": 2000,
     "overlap": 200
+  },
+  "preprocessing": {
+    "enabled": false,
+    "provider": "openai-compatible",
+    "base_url": "",
+    "model": "",
+    "system_prompt": "",
+    "source_types": {
+      "workitem": true, "requirements": true, "test-case": true,
+      "test-results": true, "git-commits": false, "code": false,
+      "testcode": false, "pipeline-build": true, "documentation": true
+    },
+    "azure_endpoint": "",
+    "azure_deployment": "",
+    "azure_api_version": "2024-02-01",
+    "azure_api_key_credential": ""
   },
   "sources_file_path": "conduit-sources.json"
 }
@@ -88,8 +98,7 @@ Azure OpenAI REST API version. Default `2024-02-01`. Override with `AZURE_OPENAI
 
 Name of a credential in the [credential library](#credential-library) holding
 the Azure OpenAI API key. If empty, falls back to the `AZURE_OPENAI_API_KEY`
-environment variable — useful for deployments where the key is supplied as a
-platform secret (see the [conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy) repo).
+environment variable — useful when the key is supplied as a platform secret.
 
 | Recommended model | Dimensions |
 |------------------|------------|
@@ -114,9 +123,8 @@ Qdrant connection details. Override with `QDRANT_HOST` / `QDRANT_PORT` environme
 
 ### `https`
 
-Connect to Qdrant over TLS. Needed for Qdrant Cloud, or when reaching Qdrant
-through an Azure Container Apps internal ingress (use `port: 443`). Override
-with `QDRANT_HTTPS=true`.
+Connect to Qdrant over TLS. Needed for Qdrant Cloud. Override with
+`QDRANT_HTTPS=true`.
 
 ### `api_key`
 
@@ -135,6 +143,32 @@ Maximum characters per chunk. The chunker splits at sentence boundaries or newli
 ### `overlap`
 
 Characters of overlap between consecutive chunks. Overlap preserves context at chunk boundaries. Default `200`. Set to `0` to disable.
+
+---
+
+## Preprocessing (optional LLM summarization)
+
+Configured on the **Settings** page; no env var overrides. Runs at sync time, per source type, before chunking/embedding.
+
+### `enabled`
+
+Master switch. Default `false`.
+
+### `provider`
+
+`openai-compatible` (any OpenAI-compatible chat endpoint, e.g. Ollama) or `azure-openai`. Same provider split as `embedding.provider`.
+
+### `base_url` / `model` / `system_prompt`
+
+Chat endpoint, model name, and system prompt used to summarize documents. `system_prompt` defaults to a built-in technical-summarization prompt if left empty.
+
+### `source_types`
+
+Map of source type key (`workitem`, `requirements`, `test-case`, `test-results`, `git-commits`, `code`, `testcode`, `pipeline-build`, `documentation`) → whether preprocessing runs for that type. A type absent from the map defaults to enabled. Documents shorter than 200 characters are always passed through unsummarized.
+
+### `azure_endpoint` / `azure_deployment` / `azure_api_version` / `azure_api_key_credential`
+
+Same shape as the `embedding` block's Azure OpenAI fields, used only when `provider: "azure-openai"`.
 
 ---
 
@@ -164,29 +198,16 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `AZURE_OPENAI_DEPLOYMENT` | Overrides `embedding.azure_deployment`. |
 | `AZURE_OPENAI_API_VERSION` | Overrides `embedding.azure_api_version`. |
 | `AZURE_OPENAI_API_KEY` | Fallback API key for `provider: "azure-openai"` when `azure_api_key_credential` is empty. |
-| `CONDUIT_API_KEY` | If set, requires this shared secret on every request (web UI, settings, credentials, `/mcp`). Accepted via `Authorization: Bearer <key>` or HTTP Basic auth (any username, key as password). Unset by default — only the open local/dev mode skips auth. |
-
-For a full Azure Container Apps deployment that wires these together with
-Azure OpenAI and an internal Qdrant container app, see the
-[conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy) repo.
 
 ---
 
-## Securing a public deployment
+## No built-in authentication
 
-Conduit has no built-in user accounts — anyone who can reach the app can view
-and change settings, manage credentials and sources, trigger syncs, and query
-indexed data via `/mcp`. If Conduit is reachable from outside your local
-machine (e.g. exposed via `docker run -p`, a reverse proxy, or Azure Container
-Apps with `external: true` ingress), set `CONDUIT_API_KEY` to a long random
-value. Every request then requires either:
-
-- `Authorization: Bearer <CONDUIT_API_KEY>`, or
-- HTTP Basic auth with the key as the password (any username) — browsers will
-  prompt for this automatically.
-
-Without `CONDUIT_API_KEY` set, Conduit remains open with no authentication —
-the correct setting for `localhost`-only use.
+Conduit has no login or access control — anyone who can reach the app can
+view and change settings, manage credentials and sources, trigger syncs, and
+query indexed data via `/mcp`. It's designed to run as a local container
+reachable only from `localhost` or a trusted network; don't expose it
+directly to the internet.
 
 ---
 
@@ -218,11 +239,11 @@ docker-compose -f docker-compose.hub.yml up
 
 Both compose files mount a volume at `/data` and set `CONDUIT_DATA_DIR=/data`, so source definitions, config, and credentials all persist across container restarts.
 
-To keep the credential encryption key stable across container recreation, add `CONDUIT_SECRET_KEY` to your environment or a `.env` file:
+To keep the credential encryption key stable across container recreation, add `CONDUIT_SECRET_KEY` to your environment or a `.env` file. It must be a base64url-encoded 32-byte key (Fernet format) — generate one with OpenSSL:
 
 ```bash
 # generate once and store safely
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+openssl rand -base64 32 | tr '+/' '-_'
 ```
 
 Then set it in your shell or `.env`:

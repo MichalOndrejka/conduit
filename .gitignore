@@ -10,8 +10,6 @@ conduit-embedding.json
 *.local.json
 .secret_key
 credentials.enc.json
-.jwt_secret
-owner.json
 .env
 
 # Node (Tailwind build)

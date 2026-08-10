@@ -14,7 +14,6 @@ Conduit is a single ~13 MB Go binary (≈25 MB distroless image) backed by Qdran
 - **Provider-agnostic sources** — connect any JSON API through configuration (URL, auth, field mappings, pagination); no provider-specific code. Azure DevOps, Jira, GitHub, internal tools — all just configuration
 - **Persistent memory** across sessions via the Experience store (`remember` / `retrieve_experience`)
 - **Web UI** for managing sources, credentials, triggering syncs, and a PCA vector map
-- **Account login** (n8n-style) — bcrypt-hashed owner account, JWT session cookie; Bearer API key for headless MCP clients
 - **Encrypted credential library** — secrets stored Fernet-encrypted, referenced by name; never in config files or exports
 - **Sync controls** — pause, resume, or cancel a running sync with live progress
 - **Transactional indexing** — failed syncs leave existing data intact
@@ -92,10 +91,11 @@ ollama pull nomic-embed-text-v2-moe
 go run ./cmd/conduit
 ```
 
-- Web UI: `http://localhost:8000` — first visit opens the **owner setup** page
-- MCP endpoint: `http://localhost:8000/mcp` (authenticate with `Authorization: Bearer <CONDUIT_API_KEY>`)
+- Web UI: `http://localhost:8000`
+- MCP endpoint: `http://localhost:8000/mcp`
 
-For local plain-HTTP runs set `CONDUIT_SECURE_COOKIE=false` (the session cookie is `Secure` by default).
+Conduit has no built-in authentication — it's meant to run as a local
+container reachable only from `localhost` or a trusted network.
 
 Then: add credentials at `/credentials`, create a source at `/sources/create`, hit **Sync**, and point your MCP client at `/mcp`:
 
@@ -104,8 +104,7 @@ Then: add credentials at `/credentials`, create a source at `/sources/create`, h
   "mcpServers": {
     "conduit": {
       "type": "http",
-      "url": "http://localhost:8000/mcp",
-      "headers": { "Authorization": "Bearer <your CONDUIT_API_KEY>" }
+      "url": "http://localhost:8000/mcp"
     }
   }
 }
@@ -126,12 +125,6 @@ and credentials persist across restarts. Ollama must be reachable from the
 container — point `EMBEDDING_BASE_URL` at `http://host.docker.internal:11434/v1`,
 or use Azure OpenAI.
 
-## Deployment
-
-Production deployment configuration (single-VM Caddy/TLS stack and Azure
-Container Apps via Bicep) lives in a separate repo:
-**[conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy)**.
-
 ## Configuration
 
 `config.json` (auto-created with Ollama defaults) plus environment overrides:
@@ -145,11 +138,7 @@ Container Apps via Bicep) lives in a separate repo:
 | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` / `AZURE_OPENAI_API_KEY` | Azure OpenAI embeddings |
 | `CONDUIT_CONFIG` | Path to `config.json` |
 | `CONDUIT_DATA_DIR` | Directory for sources, credentials, and keys. **Required in Docker.** |
-| `CONDUIT_SECRET_KEY` | Base64url Fernet key for `credentials.enc.json`. Pin in production. |
-| `CONDUIT_OWNER_EMAIL` / `CONDUIT_OWNER_PASSWORD` | Seed the owner account (otherwise first-run `/setup`) |
-| `CONDUIT_JWT_SECRET` | Session-signing secret (auto-generated to `.jwt_secret` if unset) |
-| `CONDUIT_SECURE_COOKIE` | Set `false` only for plain-HTTP local runs |
-| `CONDUIT_API_KEY` | Bearer key for headless MCP/API clients |
+| `CONDUIT_SECRET_KEY` | Base64url Fernet key for `credentials.enc.json`. Pin so credentials survive container recreation. |
 
 ## Project structure
 
@@ -167,8 +156,8 @@ internal/
   syncctl/          pause/cancel control + progress stores
   health/           background connectivity probes
   store/            conduit-sources.json store
-  web/              routes, templates, n8n-style auth
-Dockerfile.golang        multi-stage distroless build
+  web/              routes, templates
+Dockerfile          multi-stage distroless build
 ```
 
 ## Running tests
@@ -178,20 +167,9 @@ go test ./...
 ```
 
 Includes a cross-language fixture test proving the Go Fernet store decrypts
-credentials written by the legacy Python app, and integration tests running
-the full sync pipeline against an in-memory fake Qdrant.
-
-## Legacy Python implementation
-
-The original Python/FastAPI implementation lives in `app/` (run with
-`uv run uvicorn app.main:app`, tests with `uv run pytest`). It remains in the
-repo until the Go demo is validated against production data, and it is the
-only tool that can sync the legacy multi-step Azure DevOps source types
-(WIQL queries, git zip downloads with code parsing). The Go backend reads the
-same Qdrant collections, `conduit-sources.json`, and `credentials.enc.json`,
-so both can run against the same data. See [docs/go-port.md](docs/go-port.md)
-for the migration details; legacy docs: [sources](docs/sources.md),
-[configuration](docs/configuration.md).
+credentials written by the original Python implementation (see
+[docs/go-port.md](docs/go-port.md)), and integration tests running the full
+sync pipeline against an in-memory fake Qdrant.
 
 ## Contributing
 
@@ -205,3 +183,5 @@ MIT
 
 - [Go port architecture & migration](docs/go-port.md)
 - [MCP tools reference](docs/mcp-tools.md) — tool signatures, search parameters, experience store
+- [Source configuration reference](docs/sources.md) — HTTP API / Manual providers, field mappings, platform presets
+- [Configuration reference](docs/configuration.md) — full `config.json` schema, env vars, preprocessing

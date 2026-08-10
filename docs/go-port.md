@@ -1,9 +1,11 @@
 # Go port — status and architecture
 
-Conduit is being rewritten from Python (FastAPI) to Go for a dramatically
-smaller deploy footprint: a ~25 MB distroless image idling at ~20–50 MB RSS,
-versus the ~1–2 GB Python image idling at 200–400 MB. Request latency is
-unchanged — the workload is network-bound on the embedding API and Qdrant.
+Conduit was rewritten from Python (FastAPI) to Go for a dramatically smaller
+deploy footprint: a ~25 MB distroless image idling at ~20–50 MB RSS, versus
+the ~1–2 GB Python image idling at 200–400 MB. Request latency is unchanged
+— the workload is network-bound on the embedding API and Qdrant. The Python
+implementation was removed from the repo on 2026-06-16 once the Go rewrite
+was validated; this doc keeps the migration history for context.
 
 ## Layout
 
@@ -20,7 +22,7 @@ internal/syncsvc/       sync orchestration (fetch → index, pause/cancel)
 internal/syncctl/       pause/cancel control + progress stores
 internal/health/        background probes with exponential backoff
 internal/store/         conduit-sources.json store
-internal/web/           routes, templates, n8n-style auth
+internal/web/           routes, templates
 ```
 
 ## Generic sources (deliberate redesign)
@@ -41,46 +43,39 @@ Constraint accepted: multi-step fetch flows (e.g. ADO WIQL → batch fetch, git
 zip downloads with code parsing) are not expressible — single-endpoint JSON
 APIs only.
 
-## Compatibility with the Python app
+## Compatibility with the Python app (historical)
 
-The Go binary is a **drop-in sidegrade** against existing state:
+The Python/FastAPI implementation was removed from this repo on 2026-06-16
+(the Go rewrite is feature-complete and validated). While it still existed
+alongside the Go code, the Go binary was a **drop-in sidegrade** against the
+same on-disk state — a design constraint that still shapes the current code:
 
 - **Credentials**: reads/writes the same Fernet-encrypted `credentials.enc.json`
-  with the same key sources (`CONDUIT_SECRET_KEY` or `.secret_key`). Verified by
-  a cross-language test fixture in `internal/secrets/store_test.go`.
+  format, with the same key sources (`CONDUIT_SECRET_KEY` or `.secret_key`).
+  Verified by a cross-language test fixture in `internal/secrets/store_test.go`
+  (data originally written by the Python app).
 - **Qdrant**: talks the same REST API/port the Python `qdrant-client` used, so
   `QDRANT_HOST/PORT/HTTPS/API_KEY` and existing collections work unchanged.
   (The official Go client is gRPC-only on port 6334 and would have required
   infra changes — deliberately avoided.)
-- **Sources**: reads the same `conduit-sources.json`.
+- **Sources**: reads the same `conduit-sources.json` format.
 - **Env vars**: same `EMBEDDING_*`, `AZURE_OPENAI_*`, `CONDUIT_*` variables.
-
-You can pre-seed Qdrant with the Python app and point the Go binary at the
-same volume.
-
-## Auth (new, n8n-style)
-
-- Owner account: `CONDUIT_OWNER_EMAIL`/`CONDUIT_OWNER_PASSWORD` env seed, or
-  first-run `/setup` page (persists bcrypt hash to `owner.json` in the data dir).
-- Session: JWT in the `conduit-auth` HttpOnly cookie (7-day sliding expiry),
-  signed with `CONDUIT_JWT_SECRET` (auto-generated to `.jwt_secret` if unset).
-- Headless clients (MCP): `Authorization: Bearer <CONDUIT_API_KEY>` still works.
-- `/login` is rate-limited (5 attempts, refill 1/30 s per IP).
-- Set `CONDUIT_SECURE_COOKIE=false` only for plain-HTTP local runs.
 
 ## Ported
 
 - [x] Phase 1 — core search slice (config, models, secrets, qdrant, embedding, chunker, search)
 - [x] Phase 2 — MCP server: 9 search tools + retrieve_experience/remember at `/mcp`
-- [x] Phase 3 — auth + web UI (login/setup, sources, items browse, experience, health/status)
+- [x] Phase 3 — web UI (sources, items browse, experience, health/status)
 - [x] Phase 4 — generic sync engine + sources (API + manual providers, source/credential
       CRUD UI, sync/pause/resume/cancel with live progress, export)
 - [x] Phase 5 — PCA vector map (hand-rolled power iteration, zero deps),
       background health probes with exponential backoff
 
-The Go binary is feature-complete for the demo. Existing ADO sources from the
-Python era keep their data in Qdrant (search/MCP work unchanged); re-syncing
-them requires reconfiguring as generic API sources or running the Python app.
+The Go binary is feature-complete. Existing ADO sources synced by the old
+Python era's multi-step providers (WIQL, git zip downloads) keep their
+already-indexed data in Qdrant (search/MCP work unchanged); re-syncing them
+requires reconfiguring as generic API sources, since the Python app that
+could sync them is no longer in the repo.
 
 ## Build & run
 
@@ -91,11 +86,9 @@ go test ./...                   # unit tests (incl. Fernet cross-compat)
 ./conduit search conduit_workitems "login bug"   # verification CLI
 ```
 
-Production deployment config (Caddy/TLS demo stack, Azure Container Apps Bicep)
-lives in the [conduit-deploy](https://github.com/MichalOndrejka/conduit-deploy)
-repo.
+Conduit runs as a local container with no built-in authentication — expose it
+only on localhost or a trusted network.
 
 ## Known losses (accepted in the plan)
 
-- UMAP map view — PCA-only when Phase 5 lands (no Go UMAP implementation).
-- LLM summarization preprocessor — disabled for the demo.
+- UMAP map view — PCA-only (no Go UMAP implementation).
