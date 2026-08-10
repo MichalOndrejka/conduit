@@ -54,6 +54,7 @@ type SourceDefinition struct {
 	ID             string            `json:"id"`
 	Type           string            `json:"type"`
 	Name           string            `json:"name"`
+	Disabled       bool              `json:"disabled"` // zero value (false) keeps existing sources enabled
 	LastSyncedAt   *time.Time        `json:"last_synced_at"`
 	SyncStatus     string            `json:"sync_status"` // idle | syncing | completed | failed
 	SyncError      *string           `json:"sync_error"`

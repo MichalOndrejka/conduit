@@ -7,13 +7,21 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
+// SourceLister is the slice of store.SourceConfigStore that SearchService
+// needs to keep disabled sources out of results — kept minimal to avoid
+// internal/rag depending on the rest of internal/store's surface.
+type SourceLister interface {
+	ListAll() ([]models.SourceDefinition, error)
+}
+
 type SearchService struct {
 	store     *VectorStore
 	embedding *EmbeddingService
+	sources   SourceLister
 }
 
-func NewSearchService(store *VectorStore, embedding *EmbeddingService) *SearchService {
-	return &SearchService{store: store, embedding: embedding}
+func NewSearchService(store *VectorStore, embedding *EmbeddingService, sources SourceLister) *SearchService {
+	return &SearchService{store: store, embedding: embedding, sources: sources}
 }
 
 func (s *SearchService) Search(
@@ -23,7 +31,17 @@ func (s *SearchService) Search(
 	if err != nil {
 		return nil, err
 	}
-	points, err := s.store.Search(ctx, collection, vector, topK, tags)
+	var excludeSourceIDs []string
+	if s.sources != nil {
+		if all, err := s.sources.ListAll(); err == nil {
+			for _, src := range all {
+				if src.Disabled {
+					excludeSourceIDs = append(excludeSourceIDs, src.ID)
+				}
+			}
+		}
+	}
+	points, err := s.store.Search(ctx, collection, vector, topK, tags, excludeSourceIDs)
 	if err != nil {
 		return nil, err
 	}

@@ -39,9 +39,9 @@ func main() {
 
 	vectors := rag.NewVectorStore(cfg)
 	embedding := rag.NewEmbeddingService(cfg, secretsStore)
-	searchSvc := rag.NewSearchService(vectors, embedding)
-	memorySvc := memory.NewService(vectors, embedding)
 	sourceStore := store.NewSourceConfigStore(cfg.SourcesFilePath)
+	searchSvc := rag.NewSearchService(vectors, embedding, sourceStore)
+	memorySvc := memory.NewService(vectors, embedding)
 
 	// Reset any source left in "syncing" by a previous crash or container restart.
 	if err := sourceStore.ReconcileStaleSync(); err != nil {

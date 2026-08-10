@@ -51,7 +51,7 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 
 	v := storeFor(t, srv)
 	points, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 5,
-		map[string]string{"source_name": "my-source"})
+		map[string]string{"source_name": "my-source"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

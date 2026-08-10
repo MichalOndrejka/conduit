@@ -42,9 +42,12 @@ func NewVectorStore(cfg *config.AppConfig) *VectorStore {
 
 // ── Wire types ──────────────────────────────────────────────────────────────
 
-// Filter is a minimal Qdrant filter: {"must": [{"key": ..., "match": {"value": ...}}]}
+// Filter is a minimal Qdrant filter: {"must": [...], "must_not": [...]}.
+// must_not excludes a record if it matches ANY of the listed conditions —
+// used to OR together multiple disabled source_id exclusions.
 type Filter struct {
-	Must []FieldCondition `json:"must,omitempty"`
+	Must    []FieldCondition `json:"must,omitempty"`
+	MustNot []FieldCondition `json:"must_not,omitempty"`
 }
 
 type FieldCondition struct {
@@ -238,15 +241,28 @@ func (v *VectorStore) Upsert(ctx context.Context, collection string, points []Po
 	return v.do(ctx, http.MethodPut, "/collections/"+collection+"/points?wait=true", body, nil)
 }
 
+// excludeSourceIDs, if non-empty, excludes points tagged with any of those
+// source IDs — used to keep disabled sources out of search results without
+// deleting their vectors (they reappear immediately if the source is
+// re-enabled, no re-sync needed).
 func (v *VectorStore) Search(
-	ctx context.Context, collection string, vector []float32, limit int, tags map[string]string,
+	ctx context.Context, collection string, vector []float32, limit int, tags map[string]string, excludeSourceIDs []string,
 ) ([]ScoredPoint, error) {
 	body := map[string]any{
 		"query":        vector,
 		"limit":        limit,
 		"with_payload": true,
 	}
-	if f := TagFilter(tags); f != nil {
+	f := TagFilter(tags)
+	if len(excludeSourceIDs) > 0 {
+		if f == nil {
+			f = &Filter{}
+		}
+		for _, id := range excludeSourceIDs {
+			f.MustNot = append(f.MustNot, FieldCondition{Key: models.TagKey("source_id"), Match: Match{Value: id}})
+		}
+	}
+	if f != nil {
 		body["filter"] = f
 	}
 	var resp struct {

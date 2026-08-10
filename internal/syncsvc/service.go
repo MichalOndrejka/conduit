@@ -75,6 +75,10 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		log.Printf("error: source not found: %s", sourceID)
 		return
 	}
+	if src.Disabled {
+		log.Printf("source %s is disabled — skipping sync", sourceID)
+		return
+	}
 
 	src.SyncStatus = "syncing"
 	src.SyncError = nil

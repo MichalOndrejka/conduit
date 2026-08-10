@@ -114,6 +114,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sources/{id}/edit", s.handleSourceEditGet)
 	mux.HandleFunc("POST /sources/{id}/edit", s.handleSourceEditPost)
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
+	mux.HandleFunc("POST /sources/{id}/toggle", s.handleSourceToggle)
 	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)
 	mux.HandleFunc("POST /sources/sync-selected", s.handleSyncSelected)
 	mux.HandleFunc("POST /sources/{id}/sync/pause", s.handleSyncPause)

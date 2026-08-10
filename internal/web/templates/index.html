@@ -40,13 +40,16 @@
 </div>
 <div class="space-y-3">
   {{range .Sources}}
-  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4" data-source-id="{{.ID}}">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-opacity {{if .Disabled}}opacity-50 grayscale{{end}}" data-source-id="{{.ID}}">
     <div class="flex items-center gap-4 flex-wrap">
       <input type="checkbox" class="row-check h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600 shrink-0 cursor-pointer" value="{{.ID}}">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <a href="/sources/{{.ID}}/items" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Type}}</span>
+          {{if .Disabled}}
+          <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-600 rounded px-1.5 py-0.5">Disabled</span>
+          {{end}}
           {{if eq .VectorCount 0}}
           <span class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5">No data embedded</span>
           {{end}}
@@ -69,6 +72,9 @@
         <button onclick="syncCtl('{{.ID}}','resume')" data-resume class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Resume</button>
         <button onclick="syncCtl('{{.ID}}','cancel')" data-cancel class="hidden text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Cancel</button>
         <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
+        <form method="post" action="/sources/{{.ID}}/toggle" class="contents">
+          <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+        </form>
       </div>
     </div>
   </div>

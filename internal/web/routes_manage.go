@@ -264,6 +264,26 @@ func (s *Server) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// handleSourceToggle flips a source's disabled flag. A disabled source is
+// skipped by Sync (see syncsvc.Service.Sync) and greyed out in the list.
+func (s *Server) handleSourceToggle(w http.ResponseWriter, r *http.Request) {
+	src, err := s.sources.Get(r.PathValue("id"))
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	if src == nil {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	src.Disabled = !src.Disabled
+	if err := s.sources.Save(*src); err != nil {
+		httpError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 // handleDeleteSelected removes each checked source (and its vectors), for the
 // Sources page's bulk "Delete selected" action.
 func (s *Server) handleDeleteSelected(w http.ResponseWriter, r *http.Request) {
