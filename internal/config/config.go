@@ -36,7 +36,6 @@ type ChunkingConfig struct {
 }
 
 type PreprocessingConfig struct {
-	Enabled      bool            `json:"enabled"`
 	Provider     string          `json:"provider"` // "openai-compatible" (Ollama, etc.) | "azure-openai"
 	BaseURL      string          `json:"base_url"`
 	Model        string          `json:"model"`
@@ -176,5 +175,11 @@ func Save(cfg *AppConfig) error {
 	if err := os.WriteFile(tmp, data, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		// path may be a bind-mounted single file (its own mount point), which
+		// forbids renaming over it (EBUSY) — fall back to an in-place write.
+		_ = os.Remove(tmp)
+		return os.WriteFile(path, data, 0o644)
+	}
+	return nil
 }

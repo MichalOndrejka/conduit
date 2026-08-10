@@ -259,7 +259,6 @@ func preprocessingFromForm(r *http.Request) config.PreprocessingConfig {
 		sourceTypes[t.Key] = r.FormValue(field) == "on"
 	}
 	return config.PreprocessingConfig{
-		Enabled:               r.FormValue("enabled") == "on",
 		Provider:              formOr(r, "provider", "openai-compatible"),
 		BaseURL:               r.FormValue("base_url"),
 		Model:                 r.FormValue("model"),

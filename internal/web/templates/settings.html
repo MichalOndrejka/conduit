@@ -2,7 +2,6 @@
 {{define "content"}}
 <div class="mb-6">
   <h1 class="text-2xl font-semibold text-white">Settings</h1>
-  <p class="text-sm text-slate-400 mt-1">Configure the embedding model, vector store, and preprocessing. Connection changes apply after a restart.</p>
 </div>
 
 <div id="notice" data-notice="{{.Notice}}" class="hidden mb-4 rounded-lg border px-3 py-2 text-sm"></div>
@@ -121,18 +120,10 @@
   <form method="post" action="/settings/preprocessing" id="form-preprocessing" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 lg:col-span-2">
     <div class="flex items-center justify-between mb-1">
       <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing</h2>
-      <label class="relative inline-flex items-center cursor-pointer" title="Enable preprocessing">
-        <input type="checkbox" name="enabled" id="preprocEnabled" value="on" {{if .Cfg.Preprocessing.Enabled}}checked{{end}}
-               onchange="togglePreproc()" class="sr-only peer">
-        <span class="w-11 h-6 rounded-full bg-slate-700 transition-colors peer-checked:bg-violet-600
-                     after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5
-                     after:rounded-full after:bg-white after:shadow after:transition-transform
-                     peer-checked:after:translate-x-5"></span>
-      </label>
     </div>
-    <p class="text-xs text-slate-500 mb-4">Summarize each document with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
+    <p class="text-xs text-slate-500 mb-4">Every synced document is summarized with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
 
-    <div id="preproc-fields" class="{{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">
+    <div id="preproc-fields">
       <div class="mb-4">
         <label class="block text-xs font-medium text-slate-400 mb-1">Provider</label>
         <select name="provider" id="preprocProvider" onchange="togglePreprocProvider()"
@@ -200,7 +191,7 @@
     <div class="flex gap-2 mt-5">
       <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
       <button type="button" id="verify-btn-preprocessing" onclick="verifyService('preprocessing')"
-              class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 {{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">Verify</button>
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Verify</button>
     </div>
   </form>
 </div>
@@ -254,6 +245,21 @@
 </div>
 
 <script>
+// Preserve scroll position across settings form submits — a plain POST causes
+// a full page reload/redirect, which the browser scrolls to the top by
+// default, jarring the user right after they click Save.
+document.querySelectorAll('form').forEach(function (form) {
+  form.addEventListener('submit', function (e) {
+    if (!e.defaultPrevented) sessionStorage.setItem('settingsScrollY', window.scrollY);
+  });
+});
+(function () {
+  var y = sessionStorage.getItem('settingsScrollY');
+  if (y === null) return;
+  sessionStorage.removeItem('settingsScrollY');
+  window.scrollTo(0, parseInt(y, 10));
+})();
+
 // MCP config block
 var mcpConfig = { servers: { conduit: { type: "http", url: window.location.origin + "/mcp" } } };
 document.getElementById('mcp-config').textContent = JSON.stringify(mcpConfig, null, 2);
@@ -324,12 +330,6 @@ function checkEmbeddingDims() {
   } else {
     warning.classList.add('hidden');
   }
-}
-function togglePreproc() {
-  var on = document.getElementById('preprocEnabled').checked;
-  document.getElementById('preproc-fields').classList.toggle('hidden', !on);
-  document.getElementById('verify-btn-preprocessing').classList.toggle('hidden', !on);
-  if (!on) document.getElementById('verify-preprocessing').classList.add('hidden');
 }
 function togglePreprocProvider() {
   var azure = document.getElementById('preprocProvider').value === 'azure-openai';

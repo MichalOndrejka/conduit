@@ -6,7 +6,8 @@ services:
     ports:
       - "6333:6333"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6333/readyz || exit 1"]
+      # The qdrant image has no curl/wget; probe the port with bash's /dev/tcp instead.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,6 +24,8 @@ services:
       - CONDUIT_HOST=0.0.0.0
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
+      # Ollama runs on the host, not in this compose network.
+      - EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1
       # Add your credential env vars here, e.g.:
       # - ADO_PAT=${ADO_PAT}
     depends_on:

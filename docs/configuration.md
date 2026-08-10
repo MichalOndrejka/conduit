@@ -28,7 +28,6 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
     "overlap": 200
   },
   "preprocessing": {
-    "enabled": false,
     "provider": "openai-compatible",
     "base_url": "",
     "model": "",
@@ -146,13 +145,9 @@ Characters of overlap between consecutive chunks. Overlap preserves context at c
 
 ---
 
-## Preprocessing (optional LLM summarization)
+## Preprocessing (LLM summarization)
 
-Configured on the **Settings** page; no env var overrides. Runs at sync time, per source type, before chunking/embedding.
-
-### `enabled`
-
-Master switch. Default `false`.
+Configured on the **Settings** page; no env var overrides. Always runs at sync time, per source type, before chunking/embedding.
 
 ### `provider`
 

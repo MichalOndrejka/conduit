@@ -125,6 +125,16 @@ and credentials persist across restarts. Ollama must be reachable from the
 container — point `EMBEDDING_BASE_URL` at `http://host.docker.internal:11434/v1`,
 or use Azure OpenAI.
 
+### Without cloning the repo
+
+`docker-compose.hub.yml` pulls both images (Qdrant + Conduit) from Docker Hub,
+so you only need that one file — no clone required:
+
+```bash
+curl -O https://raw.githubusercontent.com/MichalOndrejka/conduit/main/docker-compose.hub.yml
+docker compose -f docker-compose.hub.yml up -d
+```
+
 ## Configuration
 
 `config.json` (auto-created with Ollama defaults) plus environment overrides:

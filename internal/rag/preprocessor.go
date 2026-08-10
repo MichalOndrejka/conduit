@@ -1,4 +1,4 @@
-// Document preprocessing — Go port of app/rag/preprocessor.py. Optionally runs
+// Document preprocessing — Go port of app/rag/preprocessor.py. Always runs
 // each fetched document through an OpenAI-compatible chat model (Ollama, etc.)
 // to summarize it before chunking, reducing token usage and noise. Failures
 // degrade gracefully: the original text is kept, never dropped.
@@ -31,7 +31,6 @@ const defaultPreprocessPrompt = "You are a technical documentation assistant. " 
 	"procedure steps. Respond with only the summary — no preamble, no commentary."
 
 type DocumentPreprocessor struct {
-	enabled      bool
 	model        string
 	systemPrompt string
 	sourceTypes  map[string]bool
@@ -64,7 +63,6 @@ func NewDocumentPreprocessor(cfg *config.AppConfig, store secrets.Reader) *Docum
 		prompt = defaultPreprocessPrompt
 	}
 	p := &DocumentPreprocessor{
-		enabled:      pc.Enabled,
 		systemPrompt: prompt,
 		sourceTypes:  pc.SourceTypes,
 		secrets:      store,
@@ -106,11 +104,8 @@ func (p *DocumentPreprocessor) apiKey() string {
 }
 
 // EnabledForType reports whether preprocessing should run for a source type.
-// A type absent from the map defaults to on, matching the Python behavior.
+// Preprocessing always runs; a type absent from the map defaults to on.
 func (p *DocumentPreprocessor) EnabledForType(sourceType string) bool {
-	if !p.enabled {
-		return false
-	}
 	if v, ok := p.sourceTypes[sourceType]; ok {
 		return v
 	}
