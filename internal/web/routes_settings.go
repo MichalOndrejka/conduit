@@ -1,17 +1,16 @@
-// Settings handlers: MCP info, embedding/Qdrant/preprocessing config (persisted
-// to config.json), service verification, and the danger zone. Port of the
-// settings_* handlers in app/web/routes.py.
+// Settings handlers: MCP info, preprocessing config (persisted to
+// config.json), service verification, and the danger zone.
 //
-// Connection-affecting changes (embedding, Qdrant) are written to config.json
-// but only take effect on the next restart, because the RAG services capture
-// their config at construction time (see NewVectorStore / NewEmbeddingService).
+// Embedding and Qdrant connection settings, and the preprocessing LLM
+// connection (provider/base URL/model), are container-managed now — set via
+// EMBEDDING_*/QDRANT_*/PREPROCESSING_* env vars (see internal/config/config.go)
+// rather than edited here. This page only exposes preprocessing knobs with no
+// env-var equivalent: which source types get summarized, and the prompt.
 package web
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -55,83 +54,24 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	s.render(w, s.settingsTmpl, "base", map[string]any{
-		"Active":         "settings",
-		"Cfg":            s.cfg,
-		"ConfigPath":     config.Path(),
-		"Credentials":    s.secrets.ListAll(),
+		"Active":       "settings",
+		"Cfg":          s.cfg,
+		"ConfigPath":   config.Path(),
 		"PreprocTypes": types,
 		"Notice":       r.URL.Query().Get("notice"),
 	})
 }
 
-// ── Save: embedding ─────────────────────────────────────────────────────────
-
-func (s *Server) handleSettingsEmbedding(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-	dims, dimsOK := atoiStrict(r.FormValue("dimensions"))
-	maxTokens, maxTokensOK := atoiStrict(r.FormValue("max_input_tokens"))
-	if !dimsOK || dims <= 0 || !maxTokensOK || maxTokens <= 0 {
-		http.Redirect(w, r, "/settings?notice=embedding_invalid", http.StatusSeeOther)
-		return
-	}
-	old := s.cfg.Embedding
-	ec := embeddingFromForm(r)
-
-	// A change to anything that affects vector shape or the model itself means
-	// existing vectors are stale — drop the collections and flag for reindex.
-	changed := old.Provider != ec.Provider || old.Model != ec.Model ||
-		old.Dimensions != ec.Dimensions || old.BaseURL != ec.BaseURL ||
-		old.AzureEndpoint != ec.AzureEndpoint || old.AzureDeployment != ec.AzureDeployment
-
-	s.cfg.Embedding = ec
-	if err := config.Save(s.cfg); err != nil {
-		httpError(w, err)
-		return
-	}
-
-	notice := "embedding_saved"
-	if changed {
-		for _, col := range models.AllCollections {
-			if s.vectors.CollectionExists(r.Context(), col) {
-				_ = s.vectors.DeleteCollection(r.Context(), col)
-			}
-		}
-		// Keep the experience collection usable (memory upserts don't create it).
-		s.recreateExperience(r.Context())
-		_ = s.sources.ResetAllSyncStatus("needs-reindex")
-		notice = "embedding_saved_dropped"
-	}
-	http.Redirect(w, r, "/settings?notice="+notice, http.StatusSeeOther)
-}
-
-// ── Save: Qdrant ────────────────────────────────────────────────────────────
-
-func (s *Server) handleSettingsQdrant(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-	host := strings.TrimSpace(r.FormValue("qdrant_host"))
-	port, portOK := atoiStrict(r.FormValue("qdrant_port"))
-	if host == "" || !portOK || port < 1 || port > 65535 {
-		http.Redirect(w, r, "/settings?notice=qdrant_invalid", http.StatusSeeOther)
-		return
-	}
-	s.cfg.Qdrant = config.QdrantConfig{
-		Host:   host,
-		Port:   port,
-		HTTPS:  r.FormValue("qdrant_https") == "on",
-		APIKey: r.FormValue("qdrant_api_key"),
-	}
-	if err := config.Save(s.cfg); err != nil {
-		httpError(w, err)
-		return
-	}
-	http.Redirect(w, r, "/settings?notice=qdrant_saved", http.StatusSeeOther)
-}
-
 // ── Save: preprocessing ─────────────────────────────────────────────────────
+//
+// Only SystemPrompt and SourceTypes come from this form — Provider/BaseURL/
+// Model/Azure* have no form fields anymore (env-var only), so they're left
+// untouched on the existing config rather than overwritten with zero values.
 
 func (s *Server) handleSettingsPreprocessing(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	s.cfg.Preprocessing = preprocessingFromForm(r)
+	s.cfg.Preprocessing.SystemPrompt = r.FormValue("system_prompt")
+	s.cfg.Preprocessing.SourceTypes = sourceTypesFromForm(r)
 	if err := config.Save(s.cfg); err != nil {
 		httpError(w, err)
 		return
@@ -141,41 +81,17 @@ func (s *Server) handleSettingsPreprocessing(w http.ResponseWriter, r *http.Requ
 
 // ── Verify ──────────────────────────────────────────────────────────────────
 
+// handleSettingsVerify tests the LLM preprocessing connection using the
+// live, already-loaded config (s.cfg — populated from env vars/config.json
+// at startup), since there's no longer a form carrying connection fields to
+// build a one-off config from.
 func (s *Server) handleSettingsVerify(w http.ResponseWriter, r *http.Request) {
-	// The verify forms are POSTed as multipart/form-data (new FormData(form)).
-	// ParseForm alone would mark r.Form as populated from the (empty) query
-	// string and never read the multipart body, leaving every field blank —
-	// use ParseMultipartForm so r.FormValue actually sees the submitted values.
-	_ = r.ParseMultipartForm(32 << 20)
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 	defer cancel()
 
 	switch r.PathValue("service") {
-	case "embedding":
-		tmp := &config.AppConfig{Embedding: embeddingFromForm(r)}
-		svc := rag.NewEmbeddingService(tmp, s.secrets)
-		vec, err := svc.Embed(ctx, "connection test")
-		if err != nil {
-			writeVerify(w, false, err.Error())
-			return
-		}
-		writeVerify(w, true, fmt.Sprintf("OK — model returned %d-dim vector", len(vec)))
-	case "qdrant":
-		tmp := &config.AppConfig{Qdrant: config.QdrantConfig{
-			Host:   r.FormValue("qdrant_host"),
-			Port:   atoiOr(r.FormValue("qdrant_port"), 6333),
-			HTTPS:  r.FormValue("qdrant_https") == "on",
-			APIKey: r.FormValue("qdrant_api_key"),
-		}}
-		cols, err := rag.NewVectorStore(tmp).ListCollections(ctx)
-		if err != nil {
-			writeVerify(w, false, err.Error())
-			return
-		}
-		writeVerify(w, true, fmt.Sprintf("Connected — %d collection(s)", len(cols)))
 	case "preprocessing":
-		tmp := &config.AppConfig{Preprocessing: preprocessingFromForm(r)}
-		msg, err := rag.NewDocumentPreprocessor(tmp, s.secrets).Verify(ctx)
+		msg, err := rag.NewDocumentPreprocessor(s.cfg, s.secrets).Verify(ctx)
 		if err != nil {
 			writeVerify(w, false, err.Error())
 			return
@@ -238,60 +154,15 @@ func (s *Server) recreateExperience(ctx context.Context) {
 	_ = s.vectors.CreateCollection(ctx, models.CollectionExperience, s.cfg.Embedding.Dimensions)
 }
 
-func embeddingFromForm(r *http.Request) config.EmbeddingConfig {
-	return config.EmbeddingConfig{
-		Provider:              formOr(r, "provider", "openai-compatible"),
-		Model:                 r.FormValue("model"),
-		BaseURL:               r.FormValue("base_url"),
-		Dimensions:            atoiOr(r.FormValue("dimensions"), 768),
-		MaxInputTokens:        atoiOr(r.FormValue("max_input_tokens"), 8192),
-		AzureEndpoint:         r.FormValue("azure_endpoint"),
-		AzureDeployment:       r.FormValue("azure_deployment"),
-		AzureAPIVersion:       formOr(r, "azure_api_version", "2024-02-01"),
-		AzureAPIKeyCredential: r.FormValue("azure_api_key_credential"),
-	}
-}
-
-func preprocessingFromForm(r *http.Request) config.PreprocessingConfig {
+func sourceTypesFromForm(r *http.Request) map[string]bool {
 	sourceTypes := make(map[string]bool, len(preprocSourceTypes))
 	for _, t := range preprocSourceTypes {
 		field := "source_type_" + strings.ReplaceAll(t.Key, "-", "_")
 		sourceTypes[t.Key] = r.FormValue(field) == "on"
 	}
-	return config.PreprocessingConfig{
-		Provider:              formOr(r, "provider", "openai-compatible"),
-		BaseURL:               r.FormValue("base_url"),
-		Model:                 r.FormValue("model"),
-		SystemPrompt:          r.FormValue("system_prompt"),
-		SourceTypes:           sourceTypes,
-		AzureEndpoint:         r.FormValue("azure_endpoint"),
-		AzureDeployment:       r.FormValue("azure_deployment"),
-		AzureAPIVersion:       formOr(r, "azure_api_version", "2024-02-01"),
-		AzureAPIKeyCredential: r.FormValue("azure_api_key_credential"),
-	}
+	return sourceTypes
 }
 
 func writeVerify(w http.ResponseWriter, ok bool, msg string) {
 	writeJSON(w, map[string]any{"ok": ok, "message": msg})
-}
-
-func formOr(r *http.Request, key, def string) string {
-	if v := r.FormValue(key); v != "" {
-		return v
-	}
-	return def
-}
-
-func atoiOr(s string, def int) int {
-	if n, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
-		return n
-	}
-	return def
-}
-
-// atoiStrict parses s as a base-10 integer, returning ok=false for empty or
-// non-numeric input (unlike atoiOr, which silently falls back to a default).
-func atoiStrict(s string) (int, bool) {
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	return n, err == nil
 }
