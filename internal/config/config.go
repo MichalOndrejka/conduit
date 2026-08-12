@@ -132,6 +132,15 @@ func Load() (*AppConfig, error) {
 			cfg.Embedding.MaxInputTokens = n
 		}
 	}
+	if v := os.Getenv("PREPROCESSING_PROVIDER"); v != "" {
+		cfg.Preprocessing.Provider = v
+	}
+	if v := os.Getenv("PREPROCESSING_MODEL"); v != "" {
+		cfg.Preprocessing.Model = v
+	}
+	if v := os.Getenv("PREPROCESSING_BASE_URL"); v != "" {
+		cfg.Preprocessing.BaseURL = v
+	}
 	if v := os.Getenv("AZURE_OPENAI_ENDPOINT"); v != "" {
 		cfg.Embedding.AzureEndpoint = v
 	}

@@ -12,6 +12,37 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"   # optional — lets you `ollama pull`/debug from the host too
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: pulls the configured embedding/LLM models into the ollama
+  # service above, then exits. conduit waits for this to finish so it never
+  # starts syncing against a model that hasn't been downloaded yet.
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      - OLLAMA_HOST=ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    # A single list item so the whole script is one argv element for `-c`
+    # (a plain scalar here gets shell-word-split into separate argv items by
+    # Compose itself, which breaks `-c`'s single-string-argument contract).
+    command:
+      - >
+        ollama pull ${EMBEDDING_MODEL:-nomic-embed-text-v2-moe} &&
+        ollama pull ${PREPROCESSING_MODEL:-llama3.2:3b}
+    depends_on:
+      ollama:
+        condition: service_healthy
+
   conduit:
     image: michalondrejka/conduit:latest
     ports:
@@ -24,14 +55,21 @@ services:
       - CONDUIT_HOST=0.0.0.0
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
-      # Ollama runs on the host, not in this compose network.
-      - EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1
+      # Ollama runs as the compose service above — reached by service name,
+      # not the host, so this works the same on Linux/Mac/Windows.
+      - EMBEDDING_BASE_URL=http://ollama:11434/v1
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-nomic-embed-text-v2-moe}
+      - PREPROCESSING_BASE_URL=http://ollama:11434/v1
+      - PREPROCESSING_MODEL=${PREPROCESSING_MODEL:-llama3.2:3b}
       # Add your credential env vars here, e.g.:
       # - ADO_PAT=${ADO_PAT}
     depends_on:
       qdrant:
         condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
 
 volumes:
   qdrant_data:
   conduit_data:
+  ollama_data:
