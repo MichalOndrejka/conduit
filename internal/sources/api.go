@@ -19,6 +19,13 @@
 //	NextUrlPath    dot-path to a full next-page URL in the response (pagination)
 //	Top            max items to fetch across all pages (default 500)
 //	VerifySSL      "false" to skip TLS verification (self-hosted instances)
+//
+//	FetchDiffs         "true" to enrich each item with its real code diff,
+//	                   fetched from Azure DevOps' Git REST API. Requires Url
+//	                   to be an ADO ".../_apis/git/repositories/{repo}/commits"
+//	                   endpoint and IdField to select the commit id.
+//	MaxFilesPerCommit  cap on changed files diffed per commit (default 20)
+//	MaxDiffChars       cap on total diff text per commit (default 20000)
 package sources
 
 import (
@@ -31,6 +38,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
@@ -41,6 +49,8 @@ import (
 const (
 	defaultTop = 500
 	maxPages   = 50 // hard cap so a cyclic NextUrlPath cannot loop forever
+
+	diffFetchConcurrency = 8 // bounded parallelism for per-commit diff enrichment
 )
 
 type APISource struct {
@@ -89,7 +99,102 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		items = items[:top]
 	}
 
-	return a.itemsToDocuments(items, url), nil
+	docs := a.itemsToDocuments(items, url)
+	if strings.EqualFold(cfg.GetConfig("FetchDiffs"), "true") {
+		if err := a.enrichWithDiffs(ctx, client, url, items, docs, progress); err != nil {
+			return nil, err
+		}
+	}
+	return docs, nil
+}
+
+// diffOutcome is one commit's enrichment result, computed off the main
+// goroutine and applied to its document afterwards.
+type diffOutcome struct {
+	text         string
+	filesChanged int
+	err          error
+}
+
+// enrichWithDiffs appends each commit's real code diff (fetched from Azure
+// DevOps) to its document text. items and docs must be the same length and
+// order, as produced by itemsToDocuments. Diffs are fetched with bounded
+// concurrency since each commit needs several sequential HTTP calls; a
+// single commit's diff failing (rate limit, deleted commit, …) is recorded
+// as a note on that document rather than failing the whole sync — the other
+// commits' documents are still worth keeping.
+func (a *APISource) enrichWithDiffs(ctx context.Context, client *http.Client, commitsURL string, items []any, docs []models.SourceDocument, progress ProgressCallback) error {
+	cfg := a.src
+	repoBase, ok := AdoRepoAPIBase(commitsURL)
+	if !ok {
+		return fmt.Errorf("FetchDiffs requires an Azure DevOps commits API Url (got %q)", commitsURL)
+	}
+	idField := cfg.GetConfig("IdField")
+	if idField == "" {
+		return fmt.Errorf("FetchDiffs requires IdField to identify each commit")
+	}
+	maxFiles := configInt(cfg, "MaxFilesPerCommit", defaultMaxFilesPerCommit)
+	maxChars := configInt(cfg, "MaxDiffChars", defaultMaxDiffChars)
+
+	n := len(items)
+	if len(docs) < n {
+		n = len(docs)
+	}
+	outcomes := make([]diffOutcome, n)
+
+	var wg sync.WaitGroup
+	var progressMu sync.Mutex
+	completed := 0
+	sem := make(chan struct{}, diffFetchConcurrency)
+
+	for i := 0; i < n; i++ {
+		commitID := fieldString(items[i], idField)
+		if commitID == "" {
+			continue // nothing to diff without a commit id; leave the zero-value outcome
+		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, commitID string) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			text, filesChanged, err := a.fetchCommitDiff(ctx, client, repoBase, commitID, maxFiles, maxChars)
+			outcomes[i] = diffOutcome{text: text, filesChanged: filesChanged, err: err}
+
+			progressMu.Lock()
+			completed++
+			if progress != nil {
+				progress(models.SyncProgress{
+					Phase: "fetching", Current: completed, Total: n,
+					Message: fmt.Sprintf("Fetching diff %d/%d", completed, n),
+				})
+			}
+			progressMu.Unlock()
+		}(i, commitID)
+	}
+	wg.Wait()
+
+	for i, out := range outcomes {
+		switch {
+		case out.err != nil:
+			docs[i].Text = strings.TrimSpace(docs[i].Text + fmt.Sprintf("\n\n(diff fetch failed: %v)", out.err))
+			docs[i].Properties["files_changed"] = "0"
+		case out.text != "":
+			docs[i].Text = strings.TrimSpace(docs[i].Text + "\n\n" + out.text)
+			docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
+		default:
+			docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
+		}
+	}
+	return nil
+}
+
+func configInt(cfg *models.SourceDefinition, key string, def int) int {
+	if v := cfg.GetConfig(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }
 
 func (a *APISource) httpClient() *http.Client {

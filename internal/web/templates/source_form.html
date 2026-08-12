@@ -118,6 +118,26 @@
         <input name="ContentFields" value="{{$s.GetConfig `ContentFields`}}"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
+
+      <div class="pt-2 border-t border-slate-800">
+        <label class="flex items-center gap-2 text-sm text-slate-300">
+          <input type="checkbox" name="FetchDiffs" value="true" {{if eq ($s.GetConfig `FetchDiffs`) `true`}}checked{{end}}
+                 class="rounded border-slate-700 bg-slate-950">
+          Fetch code diffs <span class="text-slate-500">(commit resource only — embeds each commit's actual file changes, not just its message)</span>
+        </label>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Max files per commit</label>
+            <input name="MaxFilesPerCommit" type="number" min="1" step="1" value="{{$s.GetConfig `MaxFilesPerCommit`}}" placeholder="20"
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Max diff chars per commit</label>
+            <input name="MaxDiffChars" type="number" min="1" step="1" value="{{$s.GetConfig `MaxDiffChars`}}" placeholder="20000"
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── Custom API ───────────────────────────────────────────────── -->

@@ -53,6 +53,7 @@ var apiConfigKeys = []string{
 	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
 	"ItemsPath", "IdField", "TitleField", "ContentFields",
 	"NextUrlPath", "Top", "VerifySSL",
+	"FetchDiffs", "MaxFilesPerCommit", "MaxDiffChars",
 }
 
 // presetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
@@ -162,6 +163,24 @@ func validateSourceConfig(cfg map[string]string) string {
 		if top := cfg["Top"]; top != "" {
 			if n, err := strconv.Atoi(top); err != nil || n <= 0 {
 				return "Max items must be a positive number."
+			}
+		}
+		if maxFiles := cfg["MaxFilesPerCommit"]; maxFiles != "" {
+			if n, err := strconv.Atoi(maxFiles); err != nil || n <= 0 {
+				return "Max files per commit must be a positive number."
+			}
+		}
+		if maxChars := cfg["MaxDiffChars"]; maxChars != "" {
+			if n, err := strconv.Atoi(maxChars); err != nil || n <= 0 {
+				return "Max diff chars must be a positive number."
+			}
+		}
+		if strings.EqualFold(cfg["FetchDiffs"], "true") {
+			if _, ok := sources.AdoRepoAPIBase(cfg["Url"]); !ok {
+				return "Fetch code diffs requires an Azure DevOps commits API URL (…/_apis/git/repositories/{repo}/commits)."
+			}
+			if cfg["IdField"] == "" {
+				return "Fetch code diffs requires an ID field to identify each commit."
 			}
 		}
 		if body := cfg["Body"]; body != "" && !json.Valid([]byte(body)) {
