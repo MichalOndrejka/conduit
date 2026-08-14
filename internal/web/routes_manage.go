@@ -81,6 +81,25 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 	case src.ID != "" || provider != "":
 		tab = "custom"
 	}
+	// Credential dropdowns list stored credentials, plus (for an existing
+	// source) any name its config references that isn't stored — otherwise
+	// that reference is invisible in the UI and silently dropped on save,
+	// since a <select> with no matching <option> just falls back to "".
+	creds := s.secrets.ListAll()
+	if src.ID != "" {
+		seen := make(map[string]bool, len(creds))
+		for _, c := range creds {
+			seen[c.Name] = true
+		}
+		for _, m := range s.secrets.MissingReferences([]models.SourceDefinition{*src}) {
+			if seen[m.CredentialName] {
+				continue
+			}
+			seen[m.CredentialName] = true
+			creds = append(creds, models.CredentialInfo{Name: m.CredentialName})
+		}
+	}
+
 	s.render(w, s.sourceFormTmpl, "base", map[string]any{
 		"Active":      "sources",
 		"Source":      src,
@@ -88,7 +107,7 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 		"Error":       errMsg,
 		"TypeLabel":   labelForType(src.Type),
 		"Tab":         tab,
-		"Credentials": s.secrets.ListAll(),
+		"Credentials": creds,
 	})
 }
 

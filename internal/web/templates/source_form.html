@@ -69,7 +69,7 @@
           {{$pw := $s.GetConfig `Password`}}
           <select name="Password" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
             <option value="">— select credential —</option>
-            {{range $creds}}<option value="{{.Name}}" {{if eq .Name $pw}}selected{{end}}>{{.Name}}</option>{{end}}
+            {{range $creds}}<option value="{{.Name}}" {{if eq .Name $pw}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
           </select>
           <p class="text-xs text-slate-500 mt-1">Add tokens on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
         </div>
@@ -199,7 +199,7 @@
           {{$tok := $s.GetConfig `Token`}}
           <select name="Token" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
             <option value="">— select credential —</option>
-            {{range $creds}}<option value="{{.Name}}" {{if eq .Name $tok}}selected{{end}}>{{.Name}}</option>{{end}}
+            {{range $creds}}<option value="{{.Name}}" {{if eq .Name $tok}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
           </select>
         </div>
         <div id="auth-basic" class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -213,7 +213,7 @@
             {{$pwc := $s.GetConfig `Password`}}
             <select name="Password" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
               <option value="">— select credential —</option>
-              {{range $creds}}<option value="{{.Name}}" {{if eq .Name $pwc}}selected{{end}}>{{.Name}}</option>{{end}}
+              {{range $creds}}<option value="{{.Name}}" {{if eq .Name $pwc}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
             </select>
           </div>
         </div>
@@ -228,7 +228,7 @@
             {{$ak := $s.GetConfig `ApiKeyValue`}}
             <select name="ApiKeyValue" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
               <option value="">— select credential —</option>
-              {{range $creds}}<option value="{{.Name}}" {{if eq .Name $ak}}selected{{end}}>{{.Name}}</option>{{end}}
+              {{range $creds}}<option value="{{.Name}}" {{if eq .Name $ak}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
             </select>
           </div>
         </div>
