@@ -264,3 +264,27 @@ func (s *Store) SourcesUsing(name string, sources []models.SourceDefinition) []s
 	}
 	return result
 }
+
+// MissingReference names a source whose config references a credential name
+// that has no matching entry in the store (e.g. after importing sources
+// whose credentials haven't been set up yet).
+type MissingReference struct {
+	SourceName     string
+	CredentialName string
+}
+
+// MissingReferences returns every source/credential-name pair where a
+// source's config references a credential that isn't in the store.
+func (s *Store) MissingReferences(sources []models.SourceDefinition) []MissingReference {
+	var result []MissingReference
+	for _, src := range sources {
+		for _, f := range secretFields {
+			name := src.Config[f]
+			if name == "" || s.Has(name) {
+				continue
+			}
+			result = append(result, MissingReference{SourceName: src.Name, CredentialName: name})
+		}
+	}
+	return result
+}

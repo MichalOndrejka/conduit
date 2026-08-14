@@ -441,6 +441,7 @@ func (s *Server) renderCredentials(w http.ResponseWriter, errMsg string) {
 	s.render(w, s.credsTmpl, "base", map[string]any{
 		"Active":      "credentials",
 		"Credentials": views,
+		"Missing":     s.secrets.MissingReferences(srcs),
 		"Error":       errMsg,
 	})
 }
