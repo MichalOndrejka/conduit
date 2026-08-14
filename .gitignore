@@ -18,6 +18,10 @@ node_modules/
 # Qdrant local storage
 qdrant_storage/
 
+# Corporate/proxy root CA certs for Ollama (device-specific, never commit)
+certs/*
+!certs/.gitkeep
+
 # OS
 .DS_Store
 Thumbs.db

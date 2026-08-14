@@ -18,8 +18,14 @@ services:
     restart: unless-stopped
     volumes:
       - ollama_data:/root/.ollama
+      # Drop extra trusted root CAs here (e.g. a corporate TLS-interception
+      # proxy cert) if `ollama pull` fails with an x509 verification error —
+      # additive to the image's default trust store, doesn't replace it.
+      - ./certs:/usr/local/share/ca-certificates-extra:ro
     ports:
       - "11434:11434"   # optional — lets you `ollama pull`/debug from the host too
+    environment:
+      SSL_CERT_DIR: /usr/local/share/ca-certificates-extra
     healthcheck:
       test: ["CMD-SHELL", "ollama list || exit 1"]
       interval: 10s
@@ -31,8 +37,11 @@ services:
   # starts syncing against a model that hasn't been downloaded yet.
   ollama-pull:
     image: ollama/ollama:latest
+    volumes:
+      - ./certs:/usr/local/share/ca-certificates-extra:ro
     environment:
       OLLAMA_HOST: ollama:11434
+      SSL_CERT_DIR: /usr/local/share/ca-certificates-extra
     entrypoint: ["/bin/sh", "-c"]
     # A single list item so the whole script is one argv element for `-c`
     # (a plain scalar here gets shell-word-split into separate argv items by
