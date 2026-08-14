@@ -54,6 +54,10 @@ services:
 
   conduit:
     image: michalondrejka/conduit:latest
+    # :latest is mutable and rebuilt often — without this, `up -d` reuses
+    # whatever was cached locally on first pull and never checks the
+    # registry again, silently running a stale build.
+    pull_policy: always
     ports:
       - "8000:8000"
     volumes:
