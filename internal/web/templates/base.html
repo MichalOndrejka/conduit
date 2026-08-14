@@ -9,12 +9,56 @@
   <link rel="stylesheet" href="/static/app.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script>
+    // Global toast notifications — top-right of the viewport (fixed, so it
+    // stays put regardless of page scroll), used for one-off flash messages
+    // (save confirmations, errors) that pages would otherwise render as
+    // static banners easy to miss. Defined in <head> (rather than at the end
+    // of <body>) so it exists before any inline showToast(...) call in a
+    // page's own content runs — document order matters since <script> tags
+    // execute as they're parsed. #toast-container itself (in <body>, before
+    // <main>) is always parsed by the time content scripts run.
+    var TOAST_STYLES = {
+      ok: 'border-emerald-800 bg-emerald-950/95 text-emerald-300',
+      warn: 'border-amber-800 bg-amber-950/95 text-amber-300',
+      error: 'border-red-800 bg-red-950/95 text-red-300',
+    };
+    function showToast(message, type) {
+      if (!message) return;
+      var container = document.getElementById('toast-container');
+      var toast = document.createElement('div');
+      toast.className = 'pointer-events-auto rounded-lg border px-3 py-2 text-sm shadow-lg transition-all duration-300 ' +
+        (TOAST_STYLES[type] || TOAST_STYLES.ok);
+      toast.style.opacity = '0';
+      toast.style.transform = 'translateX(1rem)';
+      toast.textContent = message;
+      container.appendChild(toast);
+      requestAnimationFrame(function () {
+        toast.style.opacity = '1';
+        toast.style.transform = 'translateX(0)';
+      });
+      setTimeout(function () {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(1rem)';
+        setTimeout(function () { toast.remove(); }, 300);
+      }, type === 'error' ? 6000 : 4000);
+    }
+  </script>
 </head>
 <body class="bg-slate-950 text-slate-200 font-sans min-h-screen">
+  <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col items-end gap-2 w-full max-w-sm pointer-events-none"></div>
   <div class="flex min-h-screen">
     <aside class="w-56 shrink-0 border-r border-slate-800 bg-slate-900/60 p-4 hidden md:flex md:flex-col sticky top-0 h-screen">
       <a href="/" class="flex items-center gap-2 mb-8">
-        <span class="inline-block h-8 w-8 rounded-lg bg-violet-600 text-white grid place-items-center font-bold">C</span>
+        <svg class="h-8 w-8 shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <defs><linearGradient id="logo-g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#8b5cf6"/>
+            <stop offset="100%" stop-color="#6d28d9"/>
+          </linearGradient></defs>
+          <rect width="24" height="24" rx="5" fill="url(#logo-g)"/>
+          <path d="M13 10V3L4 14h7v7l9-11h-7z" fill="none" stroke="white"
+                stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
         <span class="text-lg font-semibold text-white">Conduit</span>
       </a>
       <nav class="space-y-1 text-sm flex-1">

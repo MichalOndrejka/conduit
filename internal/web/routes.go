@@ -33,8 +33,8 @@ var staticFS embed.FS
 // faviconSVG matches _FAVICON_SVG in app/web/routes.py.
 const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">` +
 	`<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
-	`<stop offset="0%" stop-color="#0da2e7"/>` +
-	`<stop offset="100%" stop-color="#7c3aed"/>` +
+	`<stop offset="0%" stop-color="#8b5cf6"/>` +
+	`<stop offset="100%" stop-color="#6d28d9"/>` +
 	`</linearGradient></defs>` +
 	`<rect width="24" height="24" rx="5" fill="url(#g)"/>` +
 	`<path d="M13 10V3L4 14h7v7l9-11h-7z" fill="none" stroke="white"` +
@@ -50,14 +50,16 @@ type Server struct {
 	sync    *syncsvc.Service
 	health  *health.Monitor
 
-	indexTmpl      *template.Template
-	itemsTmpl      *template.Template
-	experienceTmpl *template.Template
-	sourceNewTmpl  *template.Template
-	sourceFormTmpl *template.Template
-	credsTmpl      *template.Template
-	mapTmpl        *template.Template
-	settingsTmpl   *template.Template
+	indexTmpl         *template.Template
+	itemsTmpl         *template.Template
+	experienceTmpl    *template.Template
+	experienceNewTmpl *template.Template
+	sourceNewTmpl     *template.Template
+	sourceFormTmpl    *template.Template
+	credsTmpl         *template.Template
+	credsNewTmpl      *template.Template
+	mapTmpl           *template.Template
+	settingsTmpl      *template.Template
 }
 
 func NewServer(
@@ -73,21 +75,23 @@ func NewServer(
 		return template.Must(template.ParseFS(templateFS, "templates/base.html", "templates/"+name))
 	}
 	return &Server{
-		cfg:            cfg,
-		sources:        sourceStore,
-		vectors:        vectors,
-		memory:         mem,
-		secrets:        secretsStore,
-		sync:           syncSvc,
-		health:         healthMon,
-		indexTmpl:      page("index.html"),
-		itemsTmpl:      page("items.html"),
-		experienceTmpl: page("experience.html"),
-		sourceNewTmpl:  page("source_new.html"),
-		sourceFormTmpl: page("source_form.html"),
-		credsTmpl:      page("credentials.html"),
-		mapTmpl:        page("map.html"),
-		settingsTmpl:   page("settings.html"),
+		cfg:               cfg,
+		sources:           sourceStore,
+		vectors:           vectors,
+		memory:            mem,
+		secrets:           secretsStore,
+		sync:              syncSvc,
+		health:            healthMon,
+		indexTmpl:         page("index.html"),
+		itemsTmpl:         page("items.html"),
+		experienceTmpl:    page("experience.html"),
+		experienceNewTmpl: page("experience_new.html"),
+		sourceNewTmpl:     page("source_new.html"),
+		sourceFormTmpl:    page("source_form.html"),
+		credsTmpl:         page("credentials.html"),
+		credsNewTmpl:      page("credential_new.html"),
+		mapTmpl:           page("map.html"),
+		settingsTmpl:      page("settings.html"),
 	}
 }
 
@@ -105,7 +109,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.handleIndex)
 	mux.HandleFunc("GET /sources/{id}/items", s.handleSourceItems)
 	mux.HandleFunc("GET /experience", s.handleExperience)
-	mux.HandleFunc("POST /experience/add", s.handleExperienceAdd)
+	mux.HandleFunc("GET /experience/create", s.handleExperienceCreateGet)
+	mux.HandleFunc("POST /experience/create", s.handleExperienceAdd)
 	mux.HandleFunc("POST /experience/{id}/delete", s.handleExperienceDelete)
 
 	// Source management + sync (see routes_manage.go)
@@ -116,6 +121,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
 	mux.HandleFunc("POST /sources/{id}/toggle", s.handleSourceToggle)
 	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)
+	mux.HandleFunc("POST /sources/disable-selected", s.handleDisableSelected)
 	mux.HandleFunc("POST /sources/sync-selected", s.handleSyncSelected)
 	mux.HandleFunc("POST /sources/{id}/sync/pause", s.handleSyncPause)
 	mux.HandleFunc("POST /sources/{id}/sync/resume", s.handleSyncResume)
@@ -125,6 +131,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 
 	// Credentials
 	mux.HandleFunc("GET /credentials", s.handleCredentials)
+	mux.HandleFunc("GET /credentials/create", s.handleCredentialCreateGet)
 	mux.HandleFunc("POST /credentials/create", s.handleCredentialCreate)
 	mux.HandleFunc("POST /credentials/{name}/edit", s.handleCredentialEdit)
 	mux.HandleFunc("POST /credentials/{name}/delete", s.handleCredentialDelete)
@@ -136,7 +143,6 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	// Settings (see routes_settings.go)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("POST /settings/preprocessing", s.handleSettingsPreprocessing)
-	mux.HandleFunc("POST /settings/verify/{service}", s.handleSettingsVerify)
 	mux.HandleFunc("POST /settings/delete-all-sources", s.handleDeleteAllSources)
 	mux.HandleFunc("POST /settings/delete-all-experiences", s.handleDeleteAllExperiences)
 	mux.HandleFunc("POST /settings/clean-source-embeddings", s.handleCleanSourceEmbeddings)
@@ -279,16 +285,38 @@ func (s *Server) handleExperience(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleExperienceCreateGet shows the "Add experience" form, the Experience
+// page's equivalent of /sources/create.
+func (s *Server) handleExperienceCreateGet(w http.ResponseWriter, r *http.Request) {
+	s.render(w, s.experienceNewTmpl, "base", map[string]any{
+		"Active": "experience",
+	})
+}
+
 // handleExperienceAdd stores a manually-entered experience entry — the same
 // situation→guidance memory the MCP `remember` tool writes. Port of
 // experience_add in app/web/routes.py.
 func (s *Server) handleExperienceAdd(w http.ResponseWriter, r *http.Request) {
 	situation := strings.TrimSpace(r.FormValue("situation"))
 	guidance := strings.TrimSpace(r.FormValue("guidance"))
-	if situation != "" && guidance != "" {
-		if _, err := s.memory.Remember(r.Context(), situation, guidance); err != nil {
-			log.Printf("experience add failed: %v", err) // e.g. Qdrant offline
-		}
+	if situation == "" || guidance == "" {
+		s.render(w, s.experienceNewTmpl, "base", map[string]any{
+			"Active":    "experience",
+			"Error":     "Situation and guidance are required.",
+			"Situation": situation,
+			"Guidance":  guidance,
+		})
+		return
+	}
+	if _, err := s.memory.Remember(r.Context(), situation, guidance); err != nil {
+		log.Printf("experience add failed: %v", err) // e.g. Qdrant offline
+		s.render(w, s.experienceNewTmpl, "base", map[string]any{
+			"Active":    "experience",
+			"Error":     "Failed to save experience: " + err.Error(),
+			"Situation": situation,
+			"Guidance":  guidance,
+		})
+		return
 	}
 	http.Redirect(w, r, "/experience", http.StatusSeeOther)
 }

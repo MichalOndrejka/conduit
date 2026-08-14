@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/sources"
@@ -303,6 +304,28 @@ func (s *Server) handleSourceToggle(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// handleDisableSelected marks each checked source as disabled, for the
+// Sources page's bulk "Disable selected" action.
+func (s *Server) handleDisableSelected(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	for _, id := range r.Form["ids"] {
+		src, err := s.sources.Get(id)
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+		if src == nil || src.Disabled {
+			continue
+		}
+		src.Disabled = true
+		if err := s.sources.Save(*src); err != nil {
+			httpError(w, err)
+			return
+		}
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
 // handleDeleteSelected removes each checked source (and its vectors), for the
 // Sources page's bulk "Delete selected" action.
 func (s *Server) handleDeleteSelected(w http.ResponseWriter, r *http.Request) {
@@ -426,10 +449,21 @@ func (s *Server) handleCredentials(w http.ResponseWriter, _ *http.Request) {
 	s.renderCredentials(w, "")
 }
 
+// handleCredentialCreateGet shows the "Add credential" form, the Credentials
+// page's equivalent of /sources/create.
+func (s *Server) handleCredentialCreateGet(w http.ResponseWriter, r *http.Request) {
+	s.render(w, s.credsNewTmpl, "base", map[string]any{
+		"Active": "credentials",
+	})
+}
+
 func (s *Server) handleCredentialCreate(w http.ResponseWriter, r *http.Request) {
 	err := s.secrets.Create(r.FormValue("name"), r.FormValue("value"))
 	if err != nil {
-		s.renderCredentials(w, err.Error())
+		s.render(w, s.credsNewTmpl, "base", map[string]any{
+			"Active": "credentials",
+			"Error":  err.Error(),
+		})
 		return
 	}
 	http.Redirect(w, r, "/credentials", http.StatusSeeOther)
@@ -463,13 +497,27 @@ func (s *Server) handleCredentialDelete(w http.ResponseWriter, r *http.Request) 
 
 // ── Vector map (PCA) ────────────────────────────────────────────────────────
 
-func (s *Server) handleMap(w http.ResponseWriter, _ *http.Request) {
-	// The map lives under Sources now — keep that nav item highlighted.
-	s.render(w, s.mapTmpl, "base", map[string]any{"Active": "sources"})
+func (s *Server) handleMap(w http.ResponseWriter, r *http.Request) {
+	data := map[string]any{
+		"Active":    "sources",
+		"Kind":      "sources",
+		"BackHref":  "/",
+		"BackLabel": "Sources",
+		"EmptyText": "No completed sources with vectors yet.",
+	}
+	if r.URL.Query().Get("kind") == "experience" {
+		data["Active"] = "experience"
+		data["Kind"] = "experience"
+		data["BackHref"] = "/experience"
+		data["BackLabel"] = "Experience"
+		data["EmptyText"] = "No experience entries with vectors yet."
+	}
+	s.render(w, s.mapTmpl, "base", data)
 }
 
-// handleMapData ports /api/map-data: samples vectors per completed source,
-// projects them to 2D with PCA (UMAP intentionally dropped — no Go impl).
+// handleMapData ports /api/map-data: samples vectors per completed source (or,
+// with ?kind=experience, the experience collection instead), and projects
+// them to 2D with PCA (UMAP intentionally dropped — no Go impl).
 func (s *Server) handleMapData(w http.ResponseWriter, r *http.Request) {
 	type mapPoint struct {
 		X      float64 `json:"x"`
@@ -487,41 +535,60 @@ func (s *Server) handleMapData(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	srcs, err := s.sources.ListAll()
-	if err != nil {
-		httpError(w, err)
-		return
-	}
 	var vectors [][]float32
 	var meta []mapPoint
 
-	const samplesPerSource = 200
-	for i := range srcs {
-		src := &srcs[i]
-		if src.SyncStatus != "completed" {
-			continue
-		}
-		collection := sources.CollectionFor(src)
-		filter := &rag.Filter{Must: []rag.FieldCondition{{
-			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-		}}}
-		points, _, err := s.vectors.Scroll(r.Context(), collection, filter, samplesPerSource, nil, true)
+	if r.URL.Query().Get("kind") == "experience" {
+		const maxSamples = 500
+		points, _, err := s.vectors.Scroll(r.Context(), memory.Collection, nil, maxSamples, nil, true)
 		if err != nil {
-			continue
+			httpError(w, err)
+			return
 		}
 		for _, p := range points {
 			vec := decodeVector(p.Vector)
 			if vec == nil {
 				continue
 			}
-			title, _ := p.Payload[models.PropKey("title")].(string)
-			if title == "" {
-				if text, ok := p.Payload[models.PayloadText].(string); ok {
-					title = firstLine(text, 80)
-				}
-			}
+			situation, _ := p.Payload[models.PayloadText].(string)
 			vectors = append(vectors, vec)
-			meta = append(meta, mapPoint{Source: src.Name, Title: title})
+			meta = append(meta, mapPoint{Source: "Experience", Title: firstLine(situation, 80)})
+		}
+	} else {
+		srcs, err := s.sources.ListAll()
+		if err != nil {
+			httpError(w, err)
+			return
+		}
+
+		const samplesPerSource = 200
+		for i := range srcs {
+			src := &srcs[i]
+			if src.SyncStatus != "completed" {
+				continue
+			}
+			collection := sources.CollectionFor(src)
+			filter := &rag.Filter{Must: []rag.FieldCondition{{
+				Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
+			}}}
+			points, _, err := s.vectors.Scroll(r.Context(), collection, filter, samplesPerSource, nil, true)
+			if err != nil {
+				continue
+			}
+			for _, p := range points {
+				vec := decodeVector(p.Vector)
+				if vec == nil {
+					continue
+				}
+				title, _ := p.Payload[models.PropKey("title")].(string)
+				if title == "" {
+					if text, ok := p.Payload[models.PayloadText].(string); ok {
+						title = firstLine(text, 80)
+					}
+				}
+				vectors = append(vectors, vec)
+				meta = append(meta, mapPoint{Source: src.Name, Title: title})
+			}
 		}
 	}
 

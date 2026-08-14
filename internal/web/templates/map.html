@@ -1,7 +1,7 @@
 {{define "title"}}Vector map — Conduit{{end}}
 {{define "content"}}
 <div class="mb-6">
-  <a href="/" class="text-sm text-slate-400 hover:text-violet-400">&larr; Sources</a>
+  <a href="{{.BackHref}}" class="text-sm text-slate-400 hover:text-violet-400">&larr; {{.BackLabel}}</a>
   <h1 class="text-2xl font-semibold text-white mt-2">Vector map</h1>
 </div>
 
@@ -21,7 +21,7 @@
   </div>
 </div>
 <div id="empty" class="hidden rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
-  No completed sources with vectors yet.
+  {{.EmptyText}}
 </div>
 <div id="tooltip" class="hidden fixed z-50 max-w-xs rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-xs shadow-xl pointer-events-none"></div>
 
@@ -126,7 +126,7 @@ function moveTooltip(e) {
   tooltip.style.top = top + 'px';
 }
 
-fetch('/api/map-data').then(r => r.json()).then(data => {
+fetch('/api/map-data?kind={{.Kind}}').then(r => r.json()).then(data => {
   const pts = data.points || [];
   if (data.qdrant_error) {
     document.getElementById('qdrant-warning-detail').textContent = `(${data.qdrant_error})`;

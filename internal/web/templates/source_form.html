@@ -14,7 +14,7 @@
 </div>
 
 {{if .Error}}
-<div class="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">{{.Error}}</div>
+<script>showToast({{.Error}}, 'error');</script>
 {{end}}
 
 <form id="source-form" method="post" onsubmit="return prepareSubmit()" class="max-w-3xl space-y-6">

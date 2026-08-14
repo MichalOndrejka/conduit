@@ -17,11 +17,8 @@
   </div>
 </div>
 
-{{if .ImportMessage}}
-<div class="mb-4 rounded-lg border border-emerald-800 bg-emerald-950/50 px-3 py-2 text-sm text-emerald-300">{{.ImportMessage}}</div>
-{{end}}
-{{if .ImportError}}
-<div class="mb-4 rounded-lg border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">{{.ImportError}}</div>
+{{if or .ImportMessage .ImportError}}
+<script>showToast({{.ImportMessage}} || {{.ImportError}}, {{if .ImportError}}'error'{{else}}'ok'{{end}});</script>
 {{end}}
 
 {{if not .Sources}}
@@ -35,6 +32,7 @@
     Select all
   </label>
   <button type="button" onclick="bulkAction('/sources/sync-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
+  <button type="button" onclick="bulkAction('/sources/disable-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Disable</button>
   <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete</button>
   <div id="sync-eta" class="ml-auto text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2" style="visibility:hidden">&nbsp;</div>
 </div>

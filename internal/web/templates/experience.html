@@ -1,43 +1,12 @@
 {{define "title"}}Experience — Conduit{{end}}
 {{define "content"}}
-<div class="mb-6">
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
   <h1 class="text-2xl font-semibold text-white">Experience</h1>
+  <div class="flex items-center gap-3">
+    <a href="/map?kind=experience" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Vector map</a>
+    <a href="/experience/create" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">New experience</a>
+  </div>
 </div>
-
-<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 mb-6">
-  <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Add experience</h2>
-  <form method="post" action="/experience/add" class="space-y-3" onsubmit="return startAddExperience()">
-    <div>
-      <label class="block text-xs font-medium text-slate-400 mb-1">Situation <span class="text-slate-500">(when this applies — used for semantic match)</span></label>
-      <textarea name="situation" required rows="2" placeholder="e.g. When syncing an Azure DevOps work-item source…"
-                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"></textarea>
-    </div>
-    <div>
-      <label class="block text-xs font-medium text-slate-400 mb-1">Guidance <span class="text-slate-500">(what to do)</span></label>
-      <textarea name="guidance" required rows="3" placeholder="e.g. Use Basic auth with an empty username and the PAT as the password."
-                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"></textarea>
-    </div>
-    <button type="submit" id="add-experience-btn"
-            class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2">
-      <svg id="add-experience-spinner" class="hidden h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-      </svg>
-      <span id="add-experience-label">Add experience</span>
-    </button>
-  </form>
-</div>
-
-<script>
-// Embedding the new entry can take a few seconds — give immediate feedback
-// since the form does a normal full-page submit (no AJAX).
-function startAddExperience() {
-  document.getElementById('add-experience-btn').disabled = true;
-  document.getElementById('add-experience-spinner').classList.remove('hidden');
-  document.getElementById('add-experience-label').textContent = 'Adding…';
-  return true;
-}
-</script>
 
 {{if not .Entries}}
 <div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
@@ -49,7 +18,6 @@ function startAddExperience() {
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
     <div class="flex items-start justify-between gap-3">
       <div class="min-w-0">
-        <div class="text-xs text-slate-500 mb-2">{{.CreatedAt}}</div>
         <div class="text-sm font-medium text-white mb-1">{{.Situation}}</div>
         <div class="text-sm text-slate-300">{{.Guidance}}</div>
       </div>

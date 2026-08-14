@@ -4,8 +4,6 @@
   <h1 class="text-2xl font-semibold text-white">Settings</h1>
 </div>
 
-<div id="notice" data-notice="{{.Notice}}" class="hidden mb-4 rounded-lg border px-3 py-2 text-sm"></div>
-
 <!-- MCP server -->
 <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 mb-5">
   <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">MCP server</h2>
@@ -22,7 +20,7 @@
   <div class="flex items-center justify-between mb-1">
     <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing</h2>
   </div>
-  <p class="text-xs text-slate-500 mb-4">Every synced document is summarized with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text. The LLM connection itself (provider/URL/model) is configured via environment variables, not here — see docker-compose.yml.</p>
+  <p class="text-xs text-slate-500 mb-4">Every synced document is summarized with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
 
   <div id="preproc-fields">
     <div>
@@ -43,15 +41,11 @@
       </div>
     </div>
   </div>
-  <div id="verify-preprocessing" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
   <div class="flex gap-2 mt-5">
     <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
-    <button type="button" id="verify-btn-preprocessing" onclick="verifyService('preprocessing')"
-            class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Verify connection</button>
   </div>
 </form>
 
-<p class="text-xs text-slate-500 mt-4">Config file: <span class="font-mono text-slate-400">{{.ConfigPath}}</span></p>
 
 <!-- Danger zone -->
 <div class="mt-8">
@@ -126,26 +120,7 @@ function copyMcp() {
   });
 }
 
-function verifyService(service) {
-  var form = document.getElementById('form-' + service);
-  var box = document.getElementById('verify-' + service);
-  box.className = 'mt-3 text-xs px-3 py-2 rounded-lg border border-slate-700 bg-slate-950 text-slate-300';
-  box.textContent = 'Verifying…';
-  fetch('/settings/verify/' + service, { method: 'POST', body: new FormData(form) })
-    .then(function (r) { return r.json(); })
-    .then(function (d) {
-      box.className = 'mt-3 text-xs px-3 py-2 rounded-lg border ' + (d.ok
-        ? 'border-emerald-800 bg-emerald-950/50 text-emerald-300'
-        : 'border-red-800 bg-red-950/50 text-red-300');
-      box.textContent = d.message;
-    })
-    .catch(function (e) {
-      box.className = 'mt-3 text-xs px-3 py-2 rounded-lg border border-red-800 bg-red-950/50 text-red-300';
-      box.textContent = 'Request failed: ' + e;
-    });
-}
-
-// Notice banner from ?notice=...
+// Notice toast from ?notice=...
 (function () {
   var NOTICES = {
     preprocessing_saved: ['ok', 'Preprocessing settings saved.'],
@@ -154,16 +129,9 @@ function verifyService(service) {
     source_embeddings_cleaned: ['warn', 'Source embeddings cleared. All sources are marked for re-index.'],
     experience_embeddings_cleaned: ['ok', 'Experience embeddings cleared.'],
   };
-  var el = document.getElementById('notice');
-  var n = NOTICES[el.dataset.notice];
+  var n = NOTICES[{{.Notice}}];
   if (!n) return;
-  el.classList.remove('hidden');
-  el.className = 'mb-4 rounded-lg border px-3 py-2 text-sm ' + (n[0] === 'warn'
-    ? 'border-amber-800 bg-amber-950/50 text-amber-300'
-    : n[0] === 'error'
-    ? 'border-red-800 bg-red-950/50 text-red-300'
-    : 'border-emerald-800 bg-emerald-950/50 text-emerald-300');
-  el.textContent = n[1];
+  showToast(n[1], n[0]);
   history.replaceState(null, '', window.location.pathname);
 })();
 </script>

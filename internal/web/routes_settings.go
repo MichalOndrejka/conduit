@@ -1,5 +1,5 @@
 // Settings handlers: MCP info, preprocessing config (persisted to
-// config.json), service verification, and the danger zone.
+// config.json), and the danger zone.
 //
 // Embedding and Qdrant connection settings, and the preprocessing LLM
 // connection (provider/base URL/model), are container-managed now — set via
@@ -12,7 +12,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
@@ -56,7 +55,6 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, s.settingsTmpl, "base", map[string]any{
 		"Active":       "settings",
 		"Cfg":          s.cfg,
-		"ConfigPath":   config.Path(),
 		"PreprocTypes": types,
 		"Notice":       r.URL.Query().Get("notice"),
 	})
@@ -77,29 +75,6 @@ func (s *Server) handleSettingsPreprocessing(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	http.Redirect(w, r, "/settings?notice=preprocessing_saved", http.StatusSeeOther)
-}
-
-// ── Verify ──────────────────────────────────────────────────────────────────
-
-// handleSettingsVerify tests the LLM preprocessing connection using the
-// live, already-loaded config (s.cfg — populated from env vars/config.json
-// at startup), since there's no longer a form carrying connection fields to
-// build a one-off config from.
-func (s *Server) handleSettingsVerify(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-
-	switch r.PathValue("service") {
-	case "preprocessing":
-		msg, err := rag.NewDocumentPreprocessor(s.cfg, s.secrets).Verify(ctx)
-		if err != nil {
-			writeVerify(w, false, err.Error())
-			return
-		}
-		writeVerify(w, true, msg)
-	default:
-		http.NotFound(w, r)
-	}
 }
 
 // ── Danger zone ─────────────────────────────────────────────────────────────
@@ -161,8 +136,4 @@ func sourceTypesFromForm(r *http.Request) map[string]bool {
 		sourceTypes[t.Key] = r.FormValue(field) == "on"
 	}
 	return sourceTypes
-}
-
-func writeVerify(w http.ResponseWriter, ok bool, msg string) {
-	writeJSON(w, map[string]any{"ok": ok, "message": msg})
 }

@@ -1,0 +1,45 @@
+{{define "title"}}Add experience — Conduit{{end}}
+{{define "content"}}
+<div class="mb-6">
+  <a href="/experience" class="text-sm text-slate-400 hover:text-white">&larr; Experience</a>
+  <h1 class="text-2xl font-semibold text-white mt-2">Add experience</h1>
+</div>
+
+{{if .Error}}
+<script>showToast({{.Error}}, 'error');</script>
+{{end}}
+
+<div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 max-w-2xl">
+  <form method="post" action="/experience/create" class="space-y-3" onsubmit="return startAddExperience()">
+    <div>
+      <label class="block text-xs font-medium text-slate-400 mb-1">Situation</label>
+      <textarea name="situation" required rows="2" placeholder="e.g. When syncing an Azure DevOps work-item source…"
+                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">{{.Situation}}</textarea>
+    </div>
+    <div>
+      <label class="block text-xs font-medium text-slate-400 mb-1">Guidance</label>
+      <textarea name="guidance" required rows="3" placeholder="e.g. Use Basic auth with an empty username and the PAT as the password."
+                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">{{.Guidance}}</textarea>
+    </div>
+    <button type="submit" id="add-experience-btn"
+            class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center gap-2">
+      <svg id="add-experience-spinner" class="hidden h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+      <span id="add-experience-label">Add experience</span>
+    </button>
+  </form>
+</div>
+
+<script>
+// Embedding the new entry can take a few seconds — give immediate feedback
+// since the form does a normal full-page submit (no AJAX).
+function startAddExperience() {
+  document.getElementById('add-experience-btn').disabled = true;
+  document.getElementById('add-experience-spinner').classList.remove('hidden');
+  document.getElementById('add-experience-label').textContent = 'Adding…';
+  return true;
+}
+</script>
+{{end}}
