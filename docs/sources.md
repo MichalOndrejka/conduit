@@ -78,9 +78,9 @@ The generic API config keys aren't tied to Azure DevOps — the backend runs any
 
 Work Items sources on the Azure DevOps tab don't use a hand-built URL at all: Conduit runs a WIQL query scoped to the configured project, then batch-fetches each matching work item's fields directly from Azure DevOps' Work Item Tracking API. The **Work item types** checkboxes (Bug, Task, User Story, …) restrict which types the WIQL query matches — `WorkItemTypes` config key, comma-separated; at least one type must be selected. **Area paths** further scopes the query to one or more team areas — `AreaPaths` config key, comma-separated (e.g. `MyProject\Team A, MyProject\Team B`), matched with WIQL's `UNDER` operator so sub-areas are included; left blank, every area in the project is fetched. `ContentFields` still narrows which fetched fields get embedded, same as the generic API source.
 
-### Requirements (dual-mode)
+### Requirements and Test Cases (dual-mode)
 
-Requirements sources are the one type that can be fetched either way, since teams keep requirements as repo files (often `.md`) or as Azure DevOps work items interchangeably. The Azure DevOps tab shows a **Fetch as** toggle — `RequirementsMode` config key, `files` (default) or `workitems`:
+Requirements and Test Cases sources can be fetched either way, since teams keep them as repo files (often `.md`) or as Azure DevOps work items interchangeably. The Azure DevOps tab shows a **Fetch as** toggle — `FetchMode` config key, `files` (default) or `workitems`:
 
 - **Files in a repo** — same as Documentation: **Resource path** + **File filter** point at a repo items endpoint, and Conduit fetches real file content for each match (best-effort — falls back to raw metadata if the resource isn't a repo, e.g. it points at a wiki instead).
 - **Azure DevOps work items** — identical to the Work Items source above: **Area paths** + **Work item types** drive a WIQL query, `WorkItemTypes` requires at least one type selected.

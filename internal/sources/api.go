@@ -48,11 +48,12 @@
 //	one or more team area paths (comma-separated, e.g. "Proj\\Team A") and
 //	their sub-areas; left blank, every area in the project is fetched.
 //
-//	Sources of type requirements are dual-mode, chosen by the RequirementsMode
-//	config field: "files" (default) treats it like a Documentation source —
-//	real file content fetched from a repo, best-effort if Url isn't an ADO
-//	repo-items endpoint; "workitems" treats it like a workitem source — a
-//	WIQL query + batch fetch, with the same WorkItemTypes/AreaPaths fields.
+//	Sources of type requirements or test-case are dual-mode, chosen by the
+//	FetchMode config field: "files" (default) treats it like a Documentation
+//	source — real file content fetched from a repo, best-effort if Url isn't
+//	an ADO repo-items endpoint; "workitems" treats it like a work-item
+//	source — a WIQL query + batch fetch, with the same WorkItemTypes/AreaPaths
+//	fields.
 package sources
 
 import (
@@ -86,15 +87,16 @@ type APISource struct {
 }
 
 // isWorkItemQuery reports whether cfg should be fetched via the WIQL
-// query-then-batch path rather than a single URL GET: workitem sources
-// always are; requirements sources are when explicitly set to "workitems"
-// mode (they default to "files", the Documentation-style file-content path).
+// query-then-batch path rather than a single URL GET: work-item sources
+// always are; requirements and test-case sources are when explicitly set to
+// "workitems" mode (they default to "files", the Documentation-style
+// file-content path).
 func isWorkItemQuery(cfg *models.SourceDefinition) bool {
 	switch cfg.Type {
 	case models.SourceWorkItemQuery:
 		return true
-	case models.SourceRequirements:
-		return cfg.GetConfig("RequirementsMode") == "workitems"
+	case models.SourceRequirements, models.SourceTestCase:
+		return cfg.GetConfig("FetchMode") == "workitems"
 	default:
 		return false
 	}
@@ -106,7 +108,7 @@ func isFileContentType(cfg *models.SourceDefinition) bool {
 	switch cfg.Type {
 	case models.SourceCodeRepo, models.SourceTestCodeRepo, models.SourceDocumentation:
 		return true
-	case models.SourceRequirements:
+	case models.SourceRequirements, models.SourceTestCase:
 		return !isWorkItemQuery(cfg)
 	default:
 		return false
@@ -117,7 +119,12 @@ func isFileContentType(cfg *models.SourceDefinition) bool {
 // silently fall back to plain metadata when Url isn't an ADO repo-items
 // endpoint (e.g. a wiki), rather than failing the sync outright.
 func isFileContentBestEffort(cfg *models.SourceDefinition) bool {
-	return cfg.Type == models.SourceDocumentation || cfg.Type == models.SourceRequirements
+	switch cfg.Type {
+	case models.SourceDocumentation, models.SourceRequirements, models.SourceTestCase:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {

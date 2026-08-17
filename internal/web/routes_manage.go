@@ -55,7 +55,7 @@ var apiConfigKeys = []string{
 	"ItemsPath", "IdField", "TitleField", "ContentFields",
 	"NextUrlPath", "Top", "VerifySSL",
 	"MaxFilesPerCommit", "MaxDiffChars", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"RequirementsMode",
+	"FetchMode",
 }
 
 // presetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure

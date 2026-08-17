@@ -39,11 +39,11 @@
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
     <div id="ado-block" class="rounded-b-2xl border border-t-0 border-slate-800 bg-slate-900/60 p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
-      {{$isRequirements := eq $s.Type "requirements"}}
-      {{$reqMode := or ($s.GetConfig `RequirementsMode`) `files`}}
-      {{$reqWorkItems := and $isRequirements (eq $reqMode "workitems")}}
+      {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
+      {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
+      {{$dualWorkItems := and $isDualMode (eq $fetchMode "workitems")}}
       <p class="text-xs text-slate-500">
-        {{if or $isWorkItemType $reqWorkItems}}
+        {{if or $isWorkItemType $dualWorkItems}}
         Fill in your organization, project and a Personal Access Token. Conduit queries work items directly —
         pick which types to embed below.
         {{else}}
@@ -125,22 +125,22 @@
         <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
       </div>
 
-      {{else if $isRequirements}}
+      {{else if $isDualMode}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as</label>
         <div class="flex gap-4 text-sm text-slate-300">
           <label class="flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="RequirementsMode" value="files" {{if ne $reqMode "workitems"}}checked{{end}} onchange="updateReqMode()">
+            <input type="radio" name="FetchMode" value="files" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
             Files in a repo
           </label>
           <label class="flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="RequirementsMode" value="workitems" {{if eq $reqMode "workitems"}}checked{{end}} onchange="updateReqMode()">
+            <input type="radio" name="FetchMode" value="workitems" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
             Azure DevOps work items
           </label>
         </div>
       </div>
 
-      <div id="req-files-fields" class="{{if eq $reqMode "workitems"}}hidden{{end}} space-y-4">
+      <div id="fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} space-y-4">
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Resource path <span class="text-slate-500">(after /_apis/)</span></label>
           <input name="AdoResource" value="{{$s.GetConfig `AdoResource`}}" placeholder="git/repositories/MyRepo/items"
@@ -153,7 +153,7 @@
         </div>
       </div>
 
-      <div id="req-workitems-fields" class="{{if ne $reqMode "workitems"}}hidden{{end}} space-y-4">
+      <div id="fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} space-y-4">
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
           <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
@@ -208,7 +208,7 @@
       <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
         Code diffs are always embedded <span class="text-slate-500">(automatic for Commit History sources — each commit's actual file changes are fetched alongside its message)</span>
       </p>
-      {{else if or (eq $s.Type "code") (eq $s.Type "test-code") (eq $s.Type "documentation") (and $isRequirements (ne $reqMode "workitems"))}}
+      {{else if or (eq $s.Type "code") (eq $s.Type "test-code") (eq $s.Type "documentation") (and $isDualMode (ne $fetchMode "workitems"))}}
       <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
         File contents are always embedded <span class="text-slate-500">(automatic for repository file sources — each matching file's actual content is fetched, not just its metadata)</span>
       </p>
@@ -262,22 +262,23 @@ function setTab(name) {
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
   styleTab('tab-ado', isAdo);
   styleTab('tab-manual', isManual);
-  if (isAdo) updateReqMode();
+  if (isAdo) updateFetchMode();
 }
 
-function currentReqMode() {
-  var el = document.querySelector('input[name="RequirementsMode"]:checked');
+function currentFetchMode() {
+  var el = document.querySelector('input[name="FetchMode"]:checked');
   return el ? el.value : 'files';
 }
 
-// Requirements sources render both the file-glob and work-item field sets in
-// the DOM (see req-files-fields / req-workitems-fields) and toggle between
-// them client-side, instead of reloading the page like the tab switch above.
-function updateReqMode() {
-  if (!document.getElementById('req-files-fields')) return;
-  var mode = currentReqMode();
-  toggleBlock('req-files-fields', mode !== 'workitems');
-  toggleBlock('req-workitems-fields', mode === 'workitems');
+// Dual-mode sources (Requirements, Test Cases) render both the file-glob and
+// work-item field sets in the DOM (see fetch-files-fields /
+// fetch-workitems-fields) and toggle between them client-side, instead of
+// reloading the page like the tab switch above.
+function updateFetchMode() {
+  if (!document.getElementById('fetch-files-fields')) return;
+  var mode = currentFetchMode();
+  toggleBlock('fetch-files-fields', mode !== 'workitems');
+  toggleBlock('fetch-workitems-fields', mode === 'workitems');
 }
 
 function adoVal(name) {
@@ -291,7 +292,7 @@ function prepareSubmit() {
     var org = adoVal('AdoOrg').replace(/\/+$/, '');
     var proj = encodeURIComponent(adoVal('AdoProject'));
     var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
-      (SOURCE_TYPE === 'requirements' && currentReqMode() === 'workitems');
+      ((SOURCE_TYPE === 'requirements' || SOURCE_TYPE === 'test-case') && currentFetchMode() === 'workitems');
     if (isWorkItemMode) {
       // Work items are fetched by a server-side WIQL query + batch fetch
       // (see fetchAdoWorkItems), not a single GET — this URL is only stored
