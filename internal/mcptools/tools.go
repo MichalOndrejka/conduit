@@ -43,10 +43,13 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			if results == nil {
-				results = []models.SearchResult{}
+			var payload any
+			if len(results) == 0 {
+				payload = map[string]any{"results": []any{}, "note": "No data embedded for this query — the source may not be synced yet, or nothing matched."}
+			} else {
+				payload = map[string]any{"results": results}
 			}
-			data, err := json.Marshal(results)
+			data, err := json.Marshal(payload)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

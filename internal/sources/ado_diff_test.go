@@ -16,6 +16,12 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
+// commitSrc builds a commit-history-typed source, since diff enrichment is now
+// driven entirely by Type rather than a config flag.
+func commitSrc(cfg map[string]string) *models.SourceDefinition {
+	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: models.SourceGitCommits, Config: cfg}
+}
+
 func TestTruncateRuneSafeDoesNotSplitMultiByteRune(t *testing.T) {
 	// "€" is 3 bytes (E2 82 AC); cutting at byte 4 of "ab€cd" (a=1,b=1,€=3)
 	// would land inside the € rune without rune-aware trimming.
@@ -222,13 +228,12 @@ func TestFetchDocumentsWithFetchDiffsEnriches(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &APISource{src: src(map[string]string{
+	s := &APISource{src: commitSrc(map[string]string{
 		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
 		"ItemsPath":     "value",
 		"IdField":       "commitId",
 		"TitleField":    "comment",
 		"ContentFields": "comment",
-		"FetchDiffs":    "true",
 	})}
 
 	docs, err := s.FetchDocuments(context.Background(), nil)
@@ -249,14 +254,52 @@ func TestFetchDocumentsWithFetchDiffsEnriches(t *testing.T) {
 	}
 }
 
+// A source of any other type — even one pointed at an ADO commits URL that
+// would otherwise qualify — must never get diff enrichment. Diff fetching is
+// driven solely by Type == commit-history, not by config.
+func TestFetchDocumentsNonCommitsTypeNeverGetsDiffs(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"value": []map[string]any{
+					{"commitId": "abc123", "comment": "Fix login bug"},
+				},
+			})
+		default:
+			http.Error(w, "diff enrichment should never be attempted for a non-commits source type: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: src(map[string]string{
+		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
+		"ItemsPath":     "value",
+		"IdField":       "commitId",
+		"TitleField":    "comment",
+		"ContentFields": "comment",
+	})}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("got %d docs", len(docs))
+	}
+	if strings.Contains(docs[0].Text, "@@") {
+		t.Errorf("non-commits source unexpectedly got a diff appended: %q", docs[0].Text)
+	}
+}
+
 func TestFetchDocumentsFetchDiffsRequiresAdoURL(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "1"}})
 	}))
 	defer srv.Close()
 
-	s := &APISource{src: src(map[string]string{
-		"Url": srv.URL, "IdField": "id", "FetchDiffs": "true",
+	s := &APISource{src: commitSrc(map[string]string{
+		"Url": srv.URL, "IdField": "id",
 	})}
 	if _, err := s.FetchDocuments(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "Azure DevOps") {
 		t.Errorf("expected ADO URL error, got %v", err)
@@ -336,13 +379,12 @@ func TestFetchDocumentsGracefullyDegradesOnPerCommitDiffFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &APISource{src: src(map[string]string{
+	s := &APISource{src: commitSrc(map[string]string{
 		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
 		"ItemsPath":     "value",
 		"IdField":       "commitId",
 		"TitleField":    "comment",
 		"ContentFields": "comment",
-		"FetchDiffs":    "true",
 	})}
 
 	docs, err := s.FetchDocuments(context.Background(), nil)
@@ -418,13 +460,12 @@ func TestFetchDocumentsWithFetchDiffsConcurrentOrderingIsCorrect(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	s := &APISource{src: src(map[string]string{
+	s := &APISource{src: commitSrc(map[string]string{
 		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
 		"ItemsPath":     "value",
 		"IdField":       "commitId",
 		"TitleField":    "comment",
 		"ContentFields": "comment",
-		"FetchDiffs":    "true",
 	})}
 
 	docs, err := s.FetchDocuments(context.Background(), nil)

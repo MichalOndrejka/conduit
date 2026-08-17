@@ -9,9 +9,9 @@ authenticated with a PAT via basic auth.
 
 | Source | Type → collection | ADO endpoint |
 |---|---|---|
-| SeeFood API — Commits | `git-commits` | `git/repositories/seefood-api/commits` |
-| SeeFood App — Commits | `git-commits` | `git/repositories/seefood-app/commits` |
-| SeeFood — Work Items | `workitem` | `wit/workitems?ids=13…30` |
+| SeeFood API — Commits | `commit-history` | `git/repositories/seefood-api/commits` |
+| SeeFood App — Commits | `commit-history` | `git/repositories/seefood-app/commits` |
+| SeeFood — Work Items | `work-item` | `wit/workitems?ids=13…30` |
 | SeeFood — Test Cases | `test-case` | `wit/workitems?ids=31…35` |
 | SeeFood — Build Pipelines | `pipeline-build` | `build/definitions` |
 

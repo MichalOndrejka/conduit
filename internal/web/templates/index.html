@@ -69,9 +69,13 @@
         <button onclick="syncCtl('{{.ID}}','pause')" data-pause class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Pause</button>
         <button onclick="syncCtl('{{.ID}}','resume')" data-resume class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Resume</button>
         <button onclick="syncCtl('{{.ID}}','cancel')" data-cancel class="hidden text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Cancel</button>
+        <button onclick="syncOne('{{.ID}}')" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Sync</button>
         <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
         <form method="post" action="/sources/{{.ID}}/toggle" class="contents">
           <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+        </form>
+        <form method="post" action="/sources/{{.ID}}/delete" class="contents" onsubmit="return confirm('Delete this source and its vectors?')">
+          <button type="submit" class="text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
         </form>
       </div>
     </div>
@@ -82,6 +86,13 @@
 <script>
 function syncCtl(id, action) {
   fetch('/sources/' + id + '/sync/' + action, {method: 'POST'}).then(poll);
+}
+function syncOne(id) {
+  fetch('/sources/sync-selected', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+    body: 'ids=' + encodeURIComponent(id)
+  }).then(poll);
 }
 document.getElementById('select-all').addEventListener('change', e => {
   document.querySelectorAll('.row-check').forEach(cb => cb.checked = e.target.checked);

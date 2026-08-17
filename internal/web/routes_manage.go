@@ -30,7 +30,7 @@ var sourceTypes = []struct{ Value, Label, Description string }{
 	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
 	{models.SourceTestResults, "Test Results", "Pass/fail outcomes from recent test runs."},
-	{models.SourceGitCommits, "Git Commits", "Commit history and messages from a repository."},
+	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
 	{models.SourcePipelineBuild, "Build Results", "Build and release pipeline run results."},
@@ -54,7 +54,8 @@ var apiConfigKeys = []string{
 	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
 	"ItemsPath", "IdField", "TitleField", "ContentFields",
 	"NextUrlPath", "Top", "VerifySSL",
-	"FetchDiffs", "MaxFilesPerCommit", "MaxDiffChars",
+	"MaxFilesPerCommit", "MaxDiffChars", "PathFilter", "WorkItemTypes", "AreaPaths",
+	"RequirementsMode",
 }
 
 // presetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
@@ -68,18 +69,11 @@ var presetConfigKeys = []string{
 // ── Source CRUD ─────────────────────────────────────────────────────────────
 
 func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefinition, errMsg string) {
-	provider := src.GetConfig("Provider")
-	// Which provider tab opens first: manual → Manual; the ADO preset → Azure
-	// DevOps; an existing generic source → Custom API; a brand-new source
-	// defaults to Azure DevOps (the common case).
+	// Which provider tab opens first: manual → Manual; everything else →
+	// Azure DevOps (the only API preset the form offers).
 	tab := "ado"
-	switch {
-	case provider == "manual":
+	if src.GetConfig("Provider") == "manual" {
 		tab = "manual"
-	case src.GetConfig("Platform") == "ado":
-		tab = "ado"
-	case src.ID != "" || provider != "":
-		tab = "custom"
 	}
 	// Credential dropdowns list stored credentials, plus (for an existing
 	// source) any name its config references that isn't stored — otherwise
@@ -166,7 +160,7 @@ func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.
 
 // validateSourceConfig checks provider-specific fields after sourceFromForm,
 // returning a user-facing error message, or "" if the config is valid.
-func validateSourceConfig(cfg map[string]string) string {
+func validateSourceConfig(srcType string, cfg map[string]string) string {
 	switch cfg["Provider"] {
 	case "manual":
 		if strings.TrimSpace(cfg["Content"]) == "" {
@@ -195,12 +189,14 @@ func validateSourceConfig(cfg map[string]string) string {
 				return "Max diff chars must be a positive number."
 			}
 		}
-		if strings.EqualFold(cfg["FetchDiffs"], "true") {
+		if srcType == models.SourceGitCommits {
 			if _, ok := sources.AdoRepoAPIBase(cfg["Url"]); !ok {
-				return "Fetch code diffs requires an Azure DevOps commits API URL (…/_apis/git/repositories/{repo}/commits)."
+				return "Commit History sources require an Azure DevOps commits API URL (…/_apis/git/repositories/{repo}/commits) — diffs are always fetched for this source type."
 			}
-			if cfg["IdField"] == "" {
-				return "Fetch code diffs requires an ID field to identify each commit."
+		}
+		if srcType == models.SourceCodeRepo || srcType == models.SourceTestCodeRepo {
+			if _, ok := sources.AdoItemsAPIBase(cfg["Url"]); !ok {
+				return fmt.Sprintf("%s sources require an Azure DevOps items API URL (…/_apis/git/repositories/{repo}/items) — file content is always fetched for this source type.", labelForType(srcType))
 			}
 		}
 		if body := cfg["Body"]; body != "" && !json.Valid([]byte(body)) {
@@ -222,7 +218,7 @@ func (s *Server) handleSourceCreatePost(w http.ResponseWriter, r *http.Request) 
 		s.renderSourceForm(w, src, "Name is required.")
 		return
 	}
-	if msg := validateSourceConfig(src.Config); msg != "" {
+	if msg := validateSourceConfig(src.Type, src.Config); msg != "" {
 		s.renderSourceForm(w, src, msg)
 		return
 	}
@@ -266,7 +262,7 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 		s.renderSourceForm(w, src, "Name is required.")
 		return
 	}
-	if msg := validateSourceConfig(src.Config); msg != "" {
+	if msg := validateSourceConfig(src.Type, src.Config); msg != "" {
 		s.renderSourceForm(w, src, msg)
 		return
 	}

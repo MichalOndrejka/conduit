@@ -70,7 +70,7 @@ Examples expressible as pure configuration:
 | Requirements | `conduit_requirements` |
 | Test Cases | `conduit_testcases` |
 | Test Results | `conduit_testresults` |
-| Git Commits | `conduit_commits` |
+| Commit History | `conduit_commits` |
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |

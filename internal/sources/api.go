@@ -12,20 +12,47 @@
 //	Password       credential name for basic auth password
 //	ApiKeyHeader   header name for apikey auth (default X-Api-Key)
 //	ApiKeyValue    credential name for apikey auth
-//	ItemsPath      dot-path to the items array in the response (e.g. "value")
+//	ItemsPath      dot-path to the items array in the response (default "value",
+//	               Azure DevOps' own list envelope)
 //	IdField        item field used for stable document IDs (default: position)
 //	TitleField     item field used as the document title (default "title")
 //	ContentFields  comma-separated fields to index (default: all fields)
 //	NextUrlPath    dot-path to a full next-page URL in the response (pagination)
 //	Top            max items to fetch across all pages (default 500)
 //	VerifySSL      "false" to skip TLS verification (self-hosted instances)
+//	PathFilter     comma-separated wildcards (e.g. "*.cs,*.ts") narrowing which
+//	               repo files get their content fetched — commit-history/code/
+//	               test-code/documentation sources only
 //
-//	FetchDiffs         "true" to enrich each item with its real code diff,
-//	                   fetched from Azure DevOps' Git REST API. Requires Url
-//	                   to be an ADO ".../_apis/git/repositories/{repo}/commits"
-//	                   endpoint and IdField to select the commit id.
+//	For sources of type commit-history only, each item is automatically enriched
+//	with its real code diff, fetched from Azure DevOps' Git REST API — not
+//	user-configurable, and never applied to any other source type. Requires
+//	Url to be an ADO ".../_apis/git/repositories/{repo}/commits" endpoint;
+//	IdField defaults to "commitId" if unset.
 //	MaxFilesPerCommit  cap on changed files diffed per commit (default 20)
 //	MaxDiffChars       cap on total diff text per commit (default 20000)
+//
+//	For sources of type code or test-code, each item is automatically enriched
+//	with its real file content (in place of the raw JSON metadata), fetched
+//	from Azure DevOps' Git REST API. Requires Url to be an ADO
+//	".../_apis/git/repositories/{repo}/items" endpoint. Documentation sources
+//	get the same treatment on a best-effort basis, falling back to plain
+//	metadata if Url isn't an ADO repo-items endpoint (e.g. a wiki).
+//
+//	For sources of type work-item built on the Azure DevOps preset (Platform
+//	config field set to "ado"), documents come from a WIQL query + batch
+//	fetch against Azure DevOps' Work Item Tracking API instead of the
+//	single-URL fetch above — not user-configurable via Url. WorkItemTypes
+//	restricts which work item types (e.g. "Bug,Task,User Story") are queried;
+//	left blank, every type in the project is fetched. AreaPaths restricts to
+//	one or more team area paths (comma-separated, e.g. "Proj\\Team A") and
+//	their sub-areas; left blank, every area in the project is fetched.
+//
+//	Sources of type requirements are dual-mode, chosen by the RequirementsMode
+//	config field: "files" (default) treats it like a Documentation source —
+//	real file content fetched from a repo, best-effort if Url isn't an ADO
+//	repo-items endpoint; "workitems" treats it like a workitem source — a
+//	WIQL query + batch fetch, with the same WorkItemTypes/AreaPaths fields.
 package sources
 
 import (
@@ -58,6 +85,41 @@ type APISource struct {
 	secrets secrets.Reader
 }
 
+// isWorkItemQuery reports whether cfg should be fetched via the WIQL
+// query-then-batch path rather than a single URL GET: workitem sources
+// always are; requirements sources are when explicitly set to "workitems"
+// mode (they default to "files", the Documentation-style file-content path).
+func isWorkItemQuery(cfg *models.SourceDefinition) bool {
+	switch cfg.Type {
+	case models.SourceWorkItemQuery:
+		return true
+	case models.SourceRequirements:
+		return cfg.GetConfig("RequirementsMode") == "workitems"
+	default:
+		return false
+	}
+}
+
+// isFileContentType reports whether cfg's items should be enriched with real
+// file content fetched from an ADO repo, in place of raw JSON metadata.
+func isFileContentType(cfg *models.SourceDefinition) bool {
+	switch cfg.Type {
+	case models.SourceCodeRepo, models.SourceTestCodeRepo, models.SourceDocumentation:
+		return true
+	case models.SourceRequirements:
+		return !isWorkItemQuery(cfg)
+	default:
+		return false
+	}
+}
+
+// isFileContentBestEffort reports whether cfg's file-content enrichment may
+// silently fall back to plain metadata when Url isn't an ADO repo-items
+// endpoint (e.g. a wiki), rather than failing the sync outright.
+func isFileContentBestEffort(cfg *models.SourceDefinition) bool {
+	return cfg.Type == models.SourceDocumentation || cfg.Type == models.SourceRequirements
+}
+
 func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
 	cfg := a.src
 	url := cfg.GetConfig("Url")
@@ -72,9 +134,26 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		}
 	}
 
+	// Work Items sources on the Azure DevOps preset query-then-batch instead
+	// of a single GET, so picking work item types works without the caller
+	// hand-crafting a URL with a fixed list of IDs — not applicable to Work
+	// Items sources built on the Custom API tab, which keep the generic path.
+	if isWorkItemQuery(cfg) && cfg.GetConfig("Platform") == "ado" {
+		return a.fetchAdoWorkItems(ctx, a.httpClient(), top, progress)
+	}
+
+	fetchURL := url
+	fileContentType := isFileContentType(cfg)
+	if fileContentType {
+		// ADO's items-list endpoint returns only the repo root without this —
+		// not user-configurable now that the "Extra query" field is gone.
+		fetchURL = withRecursionFull(fetchURL)
+	}
+
 	client := a.httpClient()
+	itemsPath := cfg.GetConfig("ItemsPath")
 	var items []any
-	pageURL := url
+	pageURL := fetchURL
 	for page := 0; page < maxPages && pageURL != "" && len(items) < top; page++ {
 		if progress != nil {
 			progress(models.SyncProgress{
@@ -86,7 +165,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		if err != nil {
 			return nil, err
 		}
-		pageItems := asList(navigate(data, cfg.GetConfig("ItemsPath")))
+		pageItems := resolveItems(data, itemsPath)
 		items = append(items, pageItems...)
 		pageURL = ""
 		if nextPath := cfg.GetConfig("NextUrlPath"); nextPath != "" {
@@ -99,8 +178,32 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		items = items[:top]
 	}
 
+	// File-content enrichment is automatic for code/test-code sources, and
+	// best-effort for documentation sources (which may point at a wiki
+	// instead of a repo) — never a user-configurable option, and never
+	// applied to any other source type.
+	if fileContentType {
+		if repoBase, ok := AdoItemsAPIBase(url); ok {
+			items = filterGitItems(items, parsePathFilter(cfg.GetConfig("PathFilter")))
+			docs := a.itemsToDocuments(items, url)
+			if err := a.enrichWithFileContent(ctx, client, repoBase, items, docs, progress); err != nil {
+				return nil, err
+			}
+			return docs, nil
+		}
+		if !isFileContentBestEffort(cfg) {
+			return nil, fmt.Errorf("%s sources require an Azure DevOps items API Url (…/_apis/git/repositories/{repo}/items)", cfg.Type)
+		}
+		// Documentation and file-mode Requirements: not an ADO repo-items
+		// URL (e.g. a wiki) — fall through to plain metadata handling below.
+	}
+
 	docs := a.itemsToDocuments(items, url)
-	if strings.EqualFold(cfg.GetConfig("FetchDiffs"), "true") {
+	// Diff enrichment is automatic for commit-history sources only — never a
+	// user-configurable option, and never applied to any other source type
+	// (it previously ran for whatever source had FetchDiffs=true in its
+	// config, regardless of type).
+	if cfg.Type == models.SourceGitCommits {
 		if err := a.enrichWithDiffs(ctx, client, url, items, docs, progress); err != nil {
 			return nil, err
 		}
@@ -127,11 +230,11 @@ func (a *APISource) enrichWithDiffs(ctx context.Context, client *http.Client, co
 	cfg := a.src
 	repoBase, ok := AdoRepoAPIBase(commitsURL)
 	if !ok {
-		return fmt.Errorf("FetchDiffs requires an Azure DevOps commits API Url (got %q)", commitsURL)
+		return fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", commitsURL)
 	}
 	idField := cfg.GetConfig("IdField")
 	if idField == "" {
-		return fmt.Errorf("FetchDiffs requires IdField to identify each commit")
+		idField = "commitId" // Azure DevOps' commit list items always key their id this way
 	}
 	maxFiles := configInt(cfg, "MaxFilesPerCommit", defaultMaxFilesPerCommit)
 	maxChars := configInt(cfg, "MaxDiffChars", defaultMaxDiffChars)
@@ -293,8 +396,19 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 	titleField := cfg.GetConfig("TitleField")
 	if titleField == "" {
 		titleField = "title"
+		if isFileContentType(cfg) {
+			titleField = "path"
+		}
 	}
 	idField := cfg.GetConfig("IdField")
+	switch {
+	case idField != "":
+		// user-configured — leave as-is
+	case cfg.Type == models.SourceGitCommits:
+		idField = "commitId" // keep doc IDs stable across syncs, matching enrichWithDiffs' default
+	case isFileContentType(cfg):
+		idField = "path" // ADO repo-items list items key on path, not id
+	}
 	var contentFields []string
 	for _, f := range strings.Split(cfg.GetConfig("ContentFields"), ",") {
 		if f = strings.TrimSpace(f); f != "" {
@@ -381,6 +495,28 @@ func navigate(data any, path string) any {
 		}
 	}
 	return data
+}
+
+// resolveItems extracts the list of items from a page response. With an
+// explicit ItemsPath it's a plain navigate+asList. Left blank (now the case
+// for every Azure DevOps preset field, since ItemsPath is no longer a visible
+// ADO-tab input), it auto-detects: a response that's already a bare array is
+// used as-is; a map is checked for ADO's own "value" envelope; anything else
+// falls back to treating the whole response as a single item, unchanged from
+// the pre-auto-detection behavior.
+func resolveItems(data any, itemsPath string) []any {
+	if itemsPath != "" {
+		return asList(navigate(data, itemsPath))
+	}
+	if list, ok := data.([]any); ok {
+		return list
+	}
+	if m, ok := data.(map[string]any); ok {
+		if v, ok := m["value"].([]any); ok {
+			return v
+		}
+	}
+	return asList(data)
 }
 
 func asList(v any) []any {

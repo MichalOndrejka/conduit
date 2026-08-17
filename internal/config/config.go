@@ -72,9 +72,9 @@ func defaults() AppConfig {
 			Provider:        "openai-compatible",
 			AzureAPIVersion: "2024-02-01",
 			SourceTypes: map[string]bool{
-				"workitem": true, "requirements": true, "test-case": true,
-				"test-results": true, "git-commits": false, "code": false,
-				"testcode": false, "pipeline-build": true, "documentation": true,
+				"work-item": true, "requirements": true, "test-case": true,
+				"test-results": true, "commit-history": false, "code": false,
+				"test-code": false, "pipeline-build": true, "documentation": true,
 			},
 		},
 		SourcesFilePath: "conduit-sources.json",

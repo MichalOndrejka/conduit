@@ -32,15 +32,15 @@ var AllCollections = []string{
 // ── Source types ─────────────────────────────────────────────────────────────
 
 const (
-	SourceWorkItemQuery = "workitem"
+	SourceWorkItemQuery = "work-item"
 	SourceRequirements  = "requirements"
 	SourceTestCase      = "test-case"
 	SourceCodeRepo      = "code"
-	SourceTestCodeRepo  = "testcode"
+	SourceTestCodeRepo  = "test-code"
 	SourcePipelineBuild = "pipeline-build"
 	SourceDocumentation = "documentation"
 	SourceTestResults   = "test-results"
-	SourceGitCommits    = "git-commits"
+	SourceGitCommits    = "commit-history"
 )
 
 // ── Core domain models ────────────────────────────────────────────────────────

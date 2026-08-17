@@ -16,7 +16,7 @@ type fakeSecrets map[string]string
 func (f fakeSecrets) GetValue(name string) string { return f[name] }
 
 func src(cfg map[string]string) *models.SourceDefinition {
-	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: "workitem", Config: cfg}
+	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: "work-item", Config: cfg}
 }
 
 func TestFetchMapsItemsToDocuments(t *testing.T) {

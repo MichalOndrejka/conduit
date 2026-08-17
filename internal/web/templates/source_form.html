@@ -33,16 +33,24 @@
   <div>
     <div class="flex items-end gap-1 border-b border-slate-800">
       <button type="button" id="tab-ado" onclick="setTab('ado')">Azure DevOps</button>
-      <button type="button" id="tab-custom" onclick="setTab('custom')">Custom API</button>
       <button type="button" id="tab-manual" onclick="setTab('manual')">Manual</button>
     </div>
 
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
     <div id="ado-block" class="rounded-b-2xl border border-t-0 border-slate-800 bg-slate-900/60 p-5 space-y-4">
+      {{$isWorkItemType := eq $s.Type "work-item"}}
+      {{$isRequirements := eq $s.Type "requirements"}}
+      {{$reqMode := or ($s.GetConfig `RequirementsMode`) `files`}}
+      {{$reqWorkItems := and $isRequirements (eq $reqMode "workitems")}}
       <p class="text-xs text-slate-500">
+        {{if or $isWorkItemType $reqWorkItems}}
+        Fill in your organization, project and a Personal Access Token. Conduit queries work items directly —
+        pick which types to embed below.
+        {{else}}
         Fill in your organization, project and a Personal Access Token. Conduit builds the
         <span class="font-mono">/_apis/…</span> URL and uses the PAT for basic auth. Point it at any ADO REST list
         endpoint that returns a <span class="font-mono">value</span> array.
+        {{end}}
       </p>
 
       <!-- hidden generic fields composed on submit -->
@@ -80,190 +88,131 @@
         </div>
       </div>
 
+      {{if $isWorkItemType}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
+        <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
+               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Work item types</label>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="checkbox" class="ado-worktype peer sr-only" value="Epic">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Epic</div>
+          </label>
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="checkbox" class="ado-worktype peer sr-only" value="Feature">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Feature</div>
+          </label>
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="checkbox" class="ado-worktype peer sr-only" value="User Story">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">User Story</div>
+          </label>
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="checkbox" class="ado-worktype peer sr-only" value="Bug">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Bug</div>
+          </label>
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="checkbox" class="ado-worktype peer sr-only" value="Task">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Task</div>
+          </label>
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="checkbox" class="ado-worktype peer sr-only" value="Issue">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Issue</div>
+          </label>
+        </div>
+        <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
+      </div>
+
+      {{else if $isRequirements}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as</label>
+        <div class="flex gap-4 text-sm text-slate-300">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="RequirementsMode" value="files" {{if ne $reqMode "workitems"}}checked{{end}} onchange="updateReqMode()">
+            Files in a repo
+          </label>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="radio" name="RequirementsMode" value="workitems" {{if eq $reqMode "workitems"}}checked{{end}} onchange="updateReqMode()">
+            Azure DevOps work items
+          </label>
+        </div>
+      </div>
+
+      <div id="req-files-fields" class="{{if eq $reqMode "workitems"}}hidden{{end}} space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Resource path <span class="text-slate-500">(after /_apis/)</span></label>
+          <input name="AdoResource" value="{{$s.GetConfig `AdoResource`}}" placeholder="git/repositories/MyRepo/items"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">File filter <span class="text-slate-500">(comma-sep wildcards, e.g. "*.md" — empty = all files)</span></label>
+          <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+
+      <div id="req-workitems-fields" class="{{if ne $reqMode "workitems"}}hidden{{end}} space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
+          <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Work item types</label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+              <input type="checkbox" class="ado-worktype peer sr-only" value="Epic">
+              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Epic</div>
+            </label>
+            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+              <input type="checkbox" class="ado-worktype peer sr-only" value="Feature">
+              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Feature</div>
+            </label>
+            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+              <input type="checkbox" class="ado-worktype peer sr-only" value="User Story">
+              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">User Story</div>
+            </label>
+            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+              <input type="checkbox" class="ado-worktype peer sr-only" value="Bug">
+              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Bug</div>
+            </label>
+            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+              <input type="checkbox" class="ado-worktype peer sr-only" value="Task">
+              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Task</div>
+            </label>
+            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+              <input type="checkbox" class="ado-worktype peer sr-only" value="Issue">
+              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Issue</div>
+            </label>
+          </div>
+          <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
+        </div>
+      </div>
+
+      {{else}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Resource path <span class="text-slate-500">(after /_apis/)</span></label>
         <input name="AdoResource" value="{{$s.GetConfig `AdoResource`}}" placeholder="git/repositories/MyRepo/commits"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Extra query <span class="text-slate-500">(optional, without leading ?)</span></label>
-        <input name="AdoQuery" value="{{$s.GetConfig `AdoQuery`}}" placeholder="searchCriteria.$top=100"
+        <label class="block text-sm font-medium text-slate-300 mb-1">File filter <span class="text-slate-500">(comma-sep wildcards, e.g. "*.cs, *.ts" — empty = all files)</span></label>
+        <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.cs, *.ts"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
+      {{end}}
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-slate-800">
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Items path</label>
-          <input name="ItemsPath" value="{{or ($s.GetConfig `ItemsPath`) `value`}}"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Max items</label>
-          <input name="Top" type="number" min="1" step="1" value="{{$s.GetConfig `Top`}}" placeholder="500"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">ID field</label>
-          <input name="IdField" value="{{or ($s.GetConfig `IdField`) `id`}}"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Title field</label>
-          <input name="TitleField" value="{{$s.GetConfig `TitleField`}}" placeholder="name"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Content fields <span class="text-slate-500">(comma-sep; empty = all)</span></label>
-        <input name="ContentFields" value="{{$s.GetConfig `ContentFields`}}"
-               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
-
-      <div class="pt-2 border-t border-slate-800">
-        <label class="flex items-center gap-2 text-sm text-slate-300">
-          <input type="checkbox" name="FetchDiffs" value="true" {{if eq ($s.GetConfig `FetchDiffs`) `true`}}checked{{end}}
-                 class="rounded border-slate-700 bg-slate-950">
-          Fetch code diffs <span class="text-slate-500">(commit resource only — embeds each commit's actual file changes, not just its message)</span>
-        </label>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Max files per commit</label>
-            <input name="MaxFilesPerCommit" type="number" min="1" step="1" value="{{$s.GetConfig `MaxFilesPerCommit`}}" placeholder="20"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Max diff chars per commit</label>
-            <input name="MaxDiffChars" type="number" min="1" step="1" value="{{$s.GetConfig `MaxDiffChars`}}" placeholder="20000"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Custom API ───────────────────────────────────────────────── -->
-    <div id="custom-block" class="hidden rounded-b-2xl border border-t-0 border-slate-800 bg-slate-900/60 p-5 space-y-6">
-      <div class="space-y-4">
-        <h3 class="text-sm font-semibold text-white uppercase tracking-wider">Endpoint</h3>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">URL <span class="text-red-400">*</span></label>
-          <input name="Url" type="url" required value="{{$s.GetConfig `Url`}}" placeholder="https://api.example.com/items?api-version=7.0"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Method</label>
-            {{$method := $s.GetConfig `HttpMethod`}}
-            <select name="HttpMethod" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-              <option value="GET" {{if ne $method `POST`}}selected{{end}}>GET</option>
-              <option value="POST" {{if eq $method `POST`}}selected{{end}}>POST</option>
-            </select>
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Max items</label>
-            <input name="Top" type="number" min="1" step="1" value="{{$s.GetConfig `Top`}}" placeholder="500"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          </div>
-          <div class="flex items-end pb-2">
-            <label class="flex items-center gap-2 text-sm text-slate-300">
-              <input type="checkbox" name="VerifySSL" value="false" {{if eq ($s.GetConfig `VerifySSL`) `false`}}checked{{end}}
-                     class="rounded border-slate-700 bg-slate-950">
-              Skip TLS verification
-            </label>
-          </div>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">POST body <span class="text-slate-500">(raw JSON, optional)</span></label>
-          <textarea name="Body" rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">{{$s.GetConfig `Body`}}</textarea>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Extra headers <span class="text-slate-500">(one "Name: value" per line)</span></label>
-          <textarea name="Headers" rows="2" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">{{$s.GetConfig `Headers`}}</textarea>
-        </div>
-      </div>
-
-      <div class="space-y-4 pt-2 border-t border-slate-800">
-        <h3 class="text-sm font-semibold text-white uppercase tracking-wider">Authentication</h3>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Auth type</label>
-          {{$auth := $s.GetConfig `AuthType`}}
-          <select name="AuthType" id="custom-auth-type" onchange="toggleAuth()"
-                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-            <option value="none" {{if or (eq $auth ``) (eq $auth `none`)}}selected{{end}}>None</option>
-            <option value="bearer" {{if eq $auth `bearer`}}selected{{end}}>Bearer token</option>
-            <option value="basic" {{if eq $auth `basic`}}selected{{end}}>Basic (PATs: leave username empty)</option>
-            <option value="apikey" {{if eq $auth `apikey`}}selected{{end}}>API key header</option>
-          </select>
-        </div>
-        <div id="auth-bearer">
-          <label class="block text-sm font-medium text-slate-300 mb-1">Token credential</label>
-          {{$tok := $s.GetConfig `Token`}}
-          <select name="Token" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-            <option value="">— select credential —</option>
-            {{range $creds}}<option value="{{.Name}}" {{if eq .Name $tok}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
-          </select>
-        </div>
-        <div id="auth-basic" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Username <span class="text-slate-500">(optional)</span></label>
-            <input name="Username" value="{{$s.GetConfig `Username`}}"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Password credential</label>
-            {{$pwc := $s.GetConfig `Password`}}
-            <select name="Password" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-              <option value="">— select credential —</option>
-              {{range $creds}}<option value="{{.Name}}" {{if eq .Name $pwc}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
-            </select>
-          </div>
-        </div>
-        <div id="auth-apikey" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Header name</label>
-            <input name="ApiKeyHeader" value="{{$s.GetConfig `ApiKeyHeader`}}" placeholder="X-Api-Key"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Key credential</label>
-            {{$ak := $s.GetConfig `ApiKeyValue`}}
-            <select name="ApiKeyValue" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-              <option value="">— select credential —</option>
-              {{range $creds}}<option value="{{.Name}}" {{if eq .Name $ak}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="space-y-4 pt-2 border-t border-slate-800">
-        <h3 class="text-sm font-semibold text-white uppercase tracking-wider">Response mapping</h3>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Items path <span class="text-slate-500">(dot path, e.g. "value")</span></label>
-            <input name="ItemsPath" value="{{$s.GetConfig `ItemsPath`}}"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">ID field <span class="text-slate-500">(stable doc IDs)</span></label>
-            <input name="IdField" value="{{$s.GetConfig `IdField`}}" placeholder="id"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Title field</label>
-            <input name="TitleField" value="{{$s.GetConfig `TitleField`}}" placeholder="title"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-          </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Content fields <span class="text-slate-500">(comma-sep; empty = all)</span></label>
-            <input name="ContentFields" value="{{$s.GetConfig `ContentFields`}}"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-          </div>
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Next-page URL path <span class="text-slate-500">(dot path to a full next-page URL)</span></label>
-          <input name="NextUrlPath" value="{{$s.GetConfig `NextUrlPath`}}"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-      </div>
+      {{if eq $s.Type "commit-history"}}
+      <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
+        Code diffs are always embedded <span class="text-slate-500">(automatic for Commit History sources — each commit's actual file changes are fetched alongside its message)</span>
+      </p>
+      {{else if or (eq $s.Type "code") (eq $s.Type "test-code") (eq $s.Type "documentation") (and $isRequirements (ne $reqMode "workitems"))}}
+      <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
+        File contents are always embedded <span class="text-slate-500">(automatic for repository file sources — each matching file's actual content is fetched, not just its metadata)</span>
+      </p>
+      {{end}}
     </div>
 
     <!-- ── Manual ───────────────────────────────────────────────────── -->
@@ -306,42 +255,75 @@ function styleTab(id, on) { document.getElementById(id).className = on ? TAB_ON 
 
 function setTab(name) {
   currentTab = name;
-  var isAdo = name === 'ado', isCustom = name === 'custom', isManual = name === 'manual';
+  var isAdo = name === 'ado', isManual = name === 'manual';
   toggleBlock('ado-block', isAdo);
-  toggleBlock('custom-block', isCustom);
   toggleBlock('manual-block', isManual);
   document.getElementById('f-provider').value = isManual ? 'manual' : 'api';
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
   styleTab('tab-ado', isAdo);
-  styleTab('tab-custom', isCustom);
   styleTab('tab-manual', isManual);
-  if (isCustom) toggleAuth();
+  if (isAdo) updateReqMode();
 }
 
-function toggleAuth() {
-  var t = document.getElementById('custom-auth-type').value;
-  document.getElementById('auth-bearer').style.display = t === 'bearer' ? '' : 'none';
-  document.getElementById('auth-basic').style.display = t === 'basic' ? '' : 'none';
-  document.getElementById('auth-apikey').style.display = t === 'apikey' ? '' : 'none';
+function currentReqMode() {
+  var el = document.querySelector('input[name="RequirementsMode"]:checked');
+  return el ? el.value : 'files';
+}
+
+// Requirements sources render both the file-glob and work-item field sets in
+// the DOM (see req-files-fields / req-workitems-fields) and toggle between
+// them client-side, instead of reloading the page like the tab switch above.
+function updateReqMode() {
+  if (!document.getElementById('req-files-fields')) return;
+  var mode = currentReqMode();
+  toggleBlock('req-files-fields', mode !== 'workitems');
+  toggleBlock('req-workitems-fields', mode === 'workitems');
 }
 
 function adoVal(name) {
   var el = document.querySelector('#ado-block [name="' + name + '"]');
   return el ? el.value.trim() : '';
 }
+var SOURCE_TYPE = document.querySelector('input[name="type"]').value;
+
 function prepareSubmit() {
   if (currentTab === 'ado') {
     var org = adoVal('AdoOrg').replace(/\/+$/, '');
     var proj = encodeURIComponent(adoVal('AdoProject'));
-    var ver = adoVal('AdoApiVersion') || '7.1';
-    var res = adoVal('AdoResource').replace(/^\/+/, '');
-    var q = adoVal('AdoQuery').replace(/^[?&]+/, '');
-    var url = org + '/' + proj + '/_apis/' + res + '?api-version=' + encodeURIComponent(ver);
-    if (q) url += '&' + q;
-    document.getElementById('ado-url').value = url;
+    var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
+      (SOURCE_TYPE === 'requirements' && currentReqMode() === 'workitems');
+    if (isWorkItemMode) {
+      // Work items are fetched by a server-side WIQL query + batch fetch
+      // (see fetchAdoWorkItems), not a single GET — this URL is only stored
+      // so the source re-opens on the right tab, pre-filled.
+      document.getElementById('ado-url').value = org + '/' + proj;
+      var checked = Array.prototype.slice.call(document.querySelectorAll('.ado-worktype:checked'))
+        .map(function (el) { return el.value; });
+      if (checked.length === 0) {
+        alert('Select at least one work item type.');
+        return false;
+      }
+      document.getElementById('ado-worktypes').value = checked.join(',');
+    } else {
+      var ver = adoVal('AdoApiVersion') || '7.1';
+      var res = adoVal('AdoResource').replace(/^\/+/, '');
+      var q = adoVal('AdoQuery').replace(/^[?&]+/, '');
+      var url = org + '/' + proj + '/_apis/' + res + '?api-version=' + encodeURIComponent(ver);
+      if (q) url += '&' + q;
+      document.getElementById('ado-url').value = url;
+    }
   }
   return true;
 }
+
+(function initWorkItemTypes() {
+  var hidden = document.getElementById('ado-worktypes');
+  if (!hidden || !hidden.value) return;
+  var selected = hidden.value.split(',').map(function (s) { return s.trim(); });
+  document.querySelectorAll('.ado-worktype').forEach(function (el) {
+    el.checked = selected.indexOf(el.value) !== -1;
+  });
+})();
 
 setTab(INITIAL_TAB);
 </script>

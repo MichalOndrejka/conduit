@@ -33,9 +33,9 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
     "model": "",
     "system_prompt": "",
     "source_types": {
-      "workitem": true, "requirements": true, "test-case": true,
-      "test-results": true, "git-commits": false, "code": false,
-      "testcode": false, "pipeline-build": true, "documentation": true
+      "work-item": true, "requirements": true, "test-case": true,
+      "test-results": true, "commit-history": false, "code": false,
+      "test-code": false, "pipeline-build": true, "documentation": true
     },
     "azure_endpoint": "",
     "azure_deployment": "",
@@ -159,7 +159,7 @@ Chat endpoint, model name, and system prompt used to summarize documents. `syste
 
 ### `source_types`
 
-Map of source type key (`workitem`, `requirements`, `test-case`, `test-results`, `git-commits`, `code`, `testcode`, `pipeline-build`, `documentation`) → whether preprocessing runs for that type. A type absent from the map defaults to enabled. Documents shorter than 200 characters are always passed through unsummarized.
+Map of source type key (`work-item`, `requirements`, `test-case`, `test-results`, `commit-history`, `code`, `test-code`, `pipeline-build`, `documentation`) → whether preprocessing runs for that type. A type absent from the map defaults to enabled. Documents shorter than 200 characters are always passed through unsummarized.
 
 ### `azure_endpoint` / `azure_deployment` / `azure_api_version` / `azure_api_key_credential`
 
