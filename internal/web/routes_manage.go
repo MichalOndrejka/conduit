@@ -37,6 +37,17 @@ var sourceTypes = []struct{ Value, Label, Description string }{
 	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
 }
 
+// workItemTypePresets seeds the work-item-type tile picker for each
+// dual-purpose source with types relevant to that domain — ADO process
+// templates vary per project, so the picker also lets users add arbitrary
+// custom types beyond these presets (see #worktype-custom-input in
+// source_form.html).
+var workItemTypePresets = map[string][]string{
+	models.SourceWorkItemQuery: {"Epic", "Feature", "User Story", "Bug", "Task", "Issue"},
+	models.SourceRequirements:  {"Product Requirement", "Software Requirements", "Risk", "Architecture Item"},
+	models.SourceTestCase:      {"Test Case"},
+}
+
 func labelForType(t string) string {
 	for _, st := range sourceTypes {
 		if st.Value == t {
@@ -95,13 +106,14 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 	}
 
 	s.render(w, s.sourceFormTmpl, "base", map[string]any{
-		"Active":      "sources",
-		"Source":      src,
-		"IsNew":       src.ID == "",
-		"Error":       errMsg,
-		"TypeLabel":   labelForType(src.Type),
-		"Tab":         tab,
-		"Credentials": creds,
+		"Active":              "sources",
+		"Source":              src,
+		"IsNew":               src.ID == "",
+		"Error":               errMsg,
+		"TypeLabel":           labelForType(src.Type),
+		"Tab":                 tab,
+		"Credentials":         creds,
+		"WorkItemTypePresets": workItemTypePresets[src.Type],
 	})
 }
 

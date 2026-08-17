@@ -76,14 +76,16 @@ The generic API config keys aren't tied to Azure DevOps — the backend runs any
 
 ### Azure DevOps Work Items
 
-Work Items sources on the Azure DevOps tab don't use a hand-built URL at all: Conduit runs a WIQL query scoped to the configured project, then batch-fetches each matching work item's fields directly from Azure DevOps' Work Item Tracking API. The **Work item types** checkboxes (Bug, Task, User Story, …) restrict which types the WIQL query matches — `WorkItemTypes` config key, comma-separated; at least one type must be selected. **Area paths** further scopes the query to one or more team areas — `AreaPaths` config key, comma-separated (e.g. `MyProject\Team A, MyProject\Team B`), matched with WIQL's `UNDER` operator so sub-areas are included; left blank, every area in the project is fetched. `ContentFields` still narrows which fetched fields get embedded, same as the generic API source.
+Work Items sources on the Azure DevOps tab don't use a hand-built URL at all: Conduit runs a WIQL query scoped to the configured project, then batch-fetches each matching work item's fields directly from Azure DevOps' Work Item Tracking API. The **Work item types** checkboxes restrict which types the WIQL query matches — `WorkItemTypes` config key, comma-separated; at least one type must be selected. **Area paths** further scopes the query to one or more team areas — `AreaPaths` config key, comma-separated (e.g. `MyProject\Team A, MyProject\Team B`), matched with WIQL's `UNDER` operator so sub-areas are included; left blank, every area in the project is fetched. `ContentFields` still narrows which fetched fields get embedded, same as the generic API source.
+
+The type picker shows a preset set of tiles per source type — Work Items: Epic, Feature, User Story, Bug, Task, Issue; Requirements: Product Requirement, Software Requirements, Risk, Architecture Item; Test Cases: Test Case — plus an **Add a custom type** input, since ADO process templates vary per project/org. Types added this way aren't limited to the presets; they're stored the same as a preset selection and re-appear as their own tile when the source is reopened for editing.
 
 ### Requirements and Test Cases (dual-mode)
 
 Requirements and Test Cases sources can be fetched either way, since teams keep them as repo files (often `.md`) or as Azure DevOps work items interchangeably. The Azure DevOps tab shows a **Fetch as** toggle — `FetchMode` config key, `files` (default) or `workitems`:
 
 - **Files in a repo** — same as Documentation: **Resource path** + **File filter** point at a repo items endpoint, and Conduit fetches real file content for each match (best-effort — falls back to raw metadata if the resource isn't a repo, e.g. it points at a wiki instead).
-- **Azure DevOps work items** — identical to the Work Items source above: **Area paths** + **Work item types** drive a WIQL query, `WorkItemTypes` requires at least one type selected.
+- **Azure DevOps work items** — identical to the Work Items source above, including the preset/custom type picker: **Area paths** + **Work item types** drive a WIQL query, `WorkItemTypes` requires at least one type selected.
 
 Switching the toggle swaps which field set is submitted; the other is disabled client-side so its stale values aren't persisted.
 

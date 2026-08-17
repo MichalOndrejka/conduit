@@ -1,4 +1,37 @@
 {{define "title"}}{{if .IsNew}}New source{{else}}Edit source{{end}} — Conduit{{end}}
+
+<!-- Shared by the Work Items tab and the Requirements/Test Cases "workitems"
+     fetch mode: a preset tile picker (see WorkItemTypePresets, set per
+     source type in routes_manage.go) plus a free-text input so users can add
+     types from their own ADO process template beyond the presets. -->
+{{define "worktype-picker"}}
+{{$s := .Source}}
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
+  <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
+         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+</div>
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Work item types</label>
+  <div id="worktype-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    {{range .WorkItemTypePresets}}
+    <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+      <input type="checkbox" class="ado-worktype peer sr-only" value="{{.}}">
+      <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">{{.}}</div>
+    </label>
+    {{end}}
+  </div>
+  <div class="flex gap-2 mt-3">
+    <input type="text" id="worktype-custom-input" placeholder="Add a custom type from your process template…"
+           class="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"
+           onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomWorkItemType();}">
+    <button type="button" onclick="addCustomWorkItemType()"
+            class="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800">Add</button>
+  </div>
+  <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
+</div>
+{{end}}
+
 {{define "content"}}
 {{$s := .Source}}
 {{$creds := .Credentials}}
@@ -89,41 +122,7 @@
       </div>
 
       {{if $isWorkItemType}}
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
-        <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
-               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Work item types</label>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="checkbox" class="ado-worktype peer sr-only" value="Epic">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Epic</div>
-          </label>
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="checkbox" class="ado-worktype peer sr-only" value="Feature">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Feature</div>
-          </label>
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="checkbox" class="ado-worktype peer sr-only" value="User Story">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">User Story</div>
-          </label>
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="checkbox" class="ado-worktype peer sr-only" value="Bug">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Bug</div>
-          </label>
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="checkbox" class="ado-worktype peer sr-only" value="Task">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Task</div>
-          </label>
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="checkbox" class="ado-worktype peer sr-only" value="Issue">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Issue</div>
-          </label>
-        </div>
-        <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
-      </div>
+      {{template "worktype-picker" .}}
 
       {{else if $isDualMode}}
       <div>
@@ -154,41 +153,7 @@
       </div>
 
       <div id="fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
-          <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Work item types</label>
-          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-              <input type="checkbox" class="ado-worktype peer sr-only" value="Epic">
-              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Epic</div>
-            </label>
-            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-              <input type="checkbox" class="ado-worktype peer sr-only" value="Feature">
-              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Feature</div>
-            </label>
-            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-              <input type="checkbox" class="ado-worktype peer sr-only" value="User Story">
-              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">User Story</div>
-            </label>
-            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-              <input type="checkbox" class="ado-worktype peer sr-only" value="Bug">
-              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Bug</div>
-            </label>
-            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-              <input type="checkbox" class="ado-worktype peer sr-only" value="Task">
-              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Task</div>
-            </label>
-            <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-              <input type="checkbox" class="ado-worktype peer sr-only" value="Issue">
-              <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Issue</div>
-            </label>
-          </div>
-          <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
-        </div>
+        {{template "worktype-picker" .}}
       </div>
 
       {{else}}
@@ -317,12 +282,52 @@ function prepareSubmit() {
   return true;
 }
 
+function addWorkItemTypeTile(value, checked) {
+  var grid = document.getElementById('worktype-grid');
+  if (!grid) return null;
+  var label = document.createElement('label');
+  label.className = 'group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30';
+  var input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'ado-worktype peer sr-only';
+  input.value = value;
+  input.checked = !!checked;
+  var div = document.createElement('div');
+  div.className = 'text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300';
+  div.textContent = value;
+  label.appendChild(input);
+  label.appendChild(div);
+  grid.appendChild(label);
+  return input;
+}
+
+function addCustomWorkItemType() {
+  var input = document.getElementById('worktype-custom-input');
+  if (!input) return;
+  var value = input.value.trim();
+  if (!value) return;
+  var existing = Array.prototype.slice.call(document.querySelectorAll('.ado-worktype'))
+    .filter(function (el) { return el.value.toLowerCase() === value.toLowerCase(); })[0];
+  if (existing) {
+    existing.checked = true;
+  } else {
+    addWorkItemTypeTile(value, true);
+  }
+  input.value = '';
+}
+
 (function initWorkItemTypes() {
   var hidden = document.getElementById('ado-worktypes');
   if (!hidden || !hidden.value) return;
-  var selected = hidden.value.split(',').map(function (s) { return s.trim(); });
-  document.querySelectorAll('.ado-worktype').forEach(function (el) {
-    el.checked = selected.indexOf(el.value) !== -1;
+  var selected = hidden.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  selected.forEach(function (value) {
+    var existing = Array.prototype.slice.call(document.querySelectorAll('.ado-worktype'))
+      .filter(function (el) { return el.value === value; })[0];
+    if (existing) {
+      existing.checked = true;
+    } else {
+      addWorkItemTypeTile(value, true);
+    }
   });
 })();
 
