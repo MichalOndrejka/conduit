@@ -56,12 +56,10 @@ The source **type** only decides which Qdrant collection a source's documents la
 | Work Items | `conduit_workitems` |
 | Requirements | `conduit_requirements` |
 | Test Cases | `conduit_testcases` |
-| Test Results | `conduit_testresults` |
 | Commit History | `conduit_commits` |
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
-| Build Results | `conduit_builds` |
 
 Manual-provider sources always land in `conduit_documentation` regardless of type.
 

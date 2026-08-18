@@ -69,14 +69,10 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	makeSearchTool(models.CollectionTestCode, "search_test_code",
 		"Semantic search over test code — unit tests, integration tests and specs. "+
 			"Use this to find test coverage, test patterns, or examples of how code is tested.")
-	makeSearchTool(models.CollectionBuilds, "search_builds",
-		"Semantic search over pipeline build results and failure details.")
 	makeSearchTool(models.CollectionTestCases, "search_testcases",
 		"Semantic search over test cases including test steps.")
 	makeSearchTool(models.CollectionDocumentation, "search_documentation",
 		"Semantic search over wiki pages, repo documentation and uploaded documents.")
-	makeSearchTool(models.CollectionTestResults, "search_test_results",
-		"Semantic search over test execution results — outcomes, error messages and stack traces.")
 	makeSearchTool(models.CollectionCommits, "search_commits",
 		"Semantic search over git commit history — messages, authors and change summaries.")
 

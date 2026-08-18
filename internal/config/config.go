@@ -73,8 +73,8 @@ func defaults() AppConfig {
 			AzureAPIVersion: "2024-02-01",
 			SourceTypes: map[string]bool{
 				"work-item": true, "requirements": true, "test-case": true,
-				"test-results": true, "commit-history": false, "code": false,
-				"test-code": false, "pipeline-build": true, "documentation": true,
+				"commit-history": false, "code": false,
+				"test-code": false, "documentation": true,
 			},
 		},
 		SourcesFilePath: "conduit-sources.json",

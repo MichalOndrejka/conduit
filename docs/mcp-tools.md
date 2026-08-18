@@ -69,12 +69,6 @@ Searches test code — unit tests, integration tests, and specs.
 
 Best for: finding existing test coverage, understanding how code is tested, finding test patterns and examples.
 
-### `search_builds`
-
-Searches pipeline build results including failure details.
-
-Best for: diagnosing CI failures, understanding build history, finding which builds broke.
-
 ### `search_testcases`
 
 Searches test case definitions including test steps.
@@ -86,12 +80,6 @@ Best for: finding existing test coverage, understanding expected behaviour, chec
 Searches wiki pages, repo documentation sections, and manually uploaded documents.
 
 Best for: finding architectural decisions, process documentation, onboarding guides, design docs, ADRs.
-
-### `search_test_results`
-
-Searches test execution results — outcomes, error messages, stack traces.
-
-Best for: finding flaky tests, diagnosing test failures, checking historical pass rates for a test.
 
 ### `search_commits`
 

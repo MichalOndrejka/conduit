@@ -4,13 +4,13 @@
 ![Docker](https://img.shields.io/badge/docker-michalondrejka%2Fconduit-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-A **RAG + MCP server** that gives any MCP client semantic search over your data — work items, code, docs, test results from **any JSON-over-HTTP API** — plus a persistent **Experience** store for remembering facts, preferences, and past decisions across sessions.
+A **RAG + MCP server** that gives any MCP client semantic search over your data — work items, code, docs from **any JSON-over-HTTP API** — plus a persistent **Experience** store for remembering facts, preferences, and past decisions across sessions.
 
 Conduit is a single ~13 MB Go binary (≈25 MB distroless image) backed by Qdrant and any OpenAI-compatible embedding endpoint.
 
 ## Features
 
-- **9 MCP search tools** covering work items, requirements, source code, test code, test cases, test results, builds, commits, and documentation
+- **7 MCP search tools** covering work items, requirements, source code, test code, test cases, commits, and documentation
 - **Provider-agnostic sources** — connect any JSON API through configuration (URL, auth, field mappings, pagination); no provider-specific code. Azure DevOps, Jira, GitHub, internal tools — all just configuration
 - **Persistent memory** across sessions via the Experience store (`remember` / `retrieve_experience`)
 - **Web UI** for managing sources, credentials, triggering syncs, and a PCA vector map
@@ -40,10 +40,8 @@ Web UI ──► Sync engine ──► generic API / manual sources
 | `search_requirements` | Requirements — features, user stories, epics |
 | `search_source_code` | Production source code |
 | `search_test_code` | Test code — unit tests, integration tests, specs |
-| `search_builds` | Pipeline build results and failure details |
 | `search_testcases` | Test cases including test steps |
 | `search_documentation` | Wiki pages, repo docs, and uploaded documents |
-| `search_test_results` | Test execution results — outcomes and error messages |
 | `search_commits` | Git commit history — messages, authors, change summaries |
 | `retrieve_experience` | Recall relevant past experience. **Call at the start of every task.** |
 | `remember` | Store information worth retaining across sessions. **Call proactively.** |
@@ -69,12 +67,10 @@ Examples expressible as pure configuration:
 | Work Items | `conduit_workitems` |
 | Requirements | `conduit_requirements` |
 | Test Cases | `conduit_testcases` |
-| Test Results | `conduit_testresults` |
 | Commit History | `conduit_commits` |
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
-| Build Results | `conduit_builds` |
 
 ## Quick start (from source)
 

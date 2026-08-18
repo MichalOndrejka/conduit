@@ -52,16 +52,12 @@ func CollectionFor(src *models.SourceDefinition) string {
 		return models.CollectionRequirements
 	case models.SourceTestCase:
 		return models.CollectionTestCases
-	case models.SourceTestResults:
-		return models.CollectionTestResults
 	case models.SourceGitCommits:
 		return models.CollectionCommits
 	case models.SourceCodeRepo:
 		return models.CollectionCode
 	case models.SourceTestCodeRepo:
 		return models.CollectionTestCode
-	case models.SourcePipelineBuild:
-		return models.CollectionBuilds
 	default:
 		return models.CollectionDocumentation
 	}

@@ -13,10 +13,8 @@ const (
 	CollectionRequirements  = "conduit_requirements"
 	CollectionCode          = "conduit_code"
 	CollectionTestCode      = "conduit_testcode"
-	CollectionBuilds        = "conduit_builds"
 	CollectionTestCases     = "conduit_testcases"
 	CollectionDocumentation = "conduit_documentation"
-	CollectionTestResults   = "conduit_testresults"
 	CollectionCommits       = "conduit_commits"
 	CollectionExperience    = "conduit_experience"
 )
@@ -24,9 +22,13 @@ const (
 // AllCollections mirrors CollectionNames.ALL in app/models.py.
 var AllCollections = []string{
 	CollectionWorkItems, CollectionRequirements, CollectionCode,
-	CollectionTestCode, CollectionBuilds, CollectionTestCases,
-	CollectionDocumentation, CollectionTestResults, CollectionCommits,
+	CollectionTestCode, CollectionTestCases,
+	CollectionDocumentation, CollectionCommits,
 	CollectionExperience,
+	// Legacy collections from the removed Build Results / Test Results
+	// source types: no longer written to, but kept here so "Clean source
+	// embeddings" can still delete any left over from before the removal.
+	"conduit_builds", "conduit_testresults",
 }
 
 // ── Source types ─────────────────────────────────────────────────────────────
@@ -37,9 +39,7 @@ const (
 	SourceTestCase      = "test-case"
 	SourceCodeRepo      = "code"
 	SourceTestCodeRepo  = "test-code"
-	SourcePipelineBuild = "pipeline-build"
 	SourceDocumentation = "documentation"
-	SourceTestResults   = "test-results"
 	SourceGitCommits    = "commit-history"
 )
 

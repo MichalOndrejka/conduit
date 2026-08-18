@@ -29,11 +29,9 @@ var sourceTypes = []struct{ Value, Label, Description string }{
 	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks from a work-tracking system."},
 	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
-	{models.SourceTestResults, "Test Results", "Pass/fail outcomes from recent test runs."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
-	{models.SourcePipelineBuild, "Build Results", "Build and release pipeline run results."},
 	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
 }
 

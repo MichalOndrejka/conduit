@@ -102,31 +102,5 @@
       "ContentFields": "fields",
       "Top": "50"
     }
-  },
-  {
-    "id": "f5d4061e-5172-4e9f-c0a1-b2c3d4e5f607",
-    "type": "pipeline-build",
-    "name": "SeeFood — Build Pipelines",
-    "last_synced_at": null,
-    "sync_status": "idle",
-    "sync_error": null,
-    "sync_error_phase": null,
-    "config": {
-      "Provider": "api",
-      "Platform": "ado",
-      "AdoOrg": "https://dev.azure.com/michalondrejkask",
-      "AdoProject": "SeeFood",
-      "AdoApiVersion": "7.1",
-      "AdoResource": "build/definitions",
-      "AdoQuery": "",
-      "Url": "https://dev.azure.com/michalondrejkask/SeeFood/_apis/build/definitions?api-version=7.1",
-      "AuthType": "basic",
-      "Password": "ado-pat",
-      "ItemsPath": "value",
-      "IdField": "id",
-      "TitleField": "name",
-      "ContentFields": "name,path",
-      "Top": "50"
-    }
   }
 ]

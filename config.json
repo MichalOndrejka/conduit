@@ -29,10 +29,8 @@
       "code": false,
       "documentation": false,
       "commit-history": false,
-      "pipeline-build": false,
       "requirements": false,
       "test-case": false,
-      "test-results": false,
       "test-code": true,
       "work-item": true
     },
