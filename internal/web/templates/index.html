@@ -126,8 +126,6 @@ function poll() {
   fetch('/status').then(r => r.json()).then(list => {
     let anySyncing = false;
     let syncingCount = 0;
-    let totalCurrent = 0;
-    let totalTotal = 0;
     for (const s of list) {
       const card = document.querySelector(`[data-source-id="${s.id}"]`);
       if (!card) continue;
@@ -143,8 +141,6 @@ function poll() {
         if (p.total > 0) {
           bar.style.width = Math.min(100, (p.current / p.total) * 100) + '%';
           bar.classList.remove('animate-pulse');
-          totalCurrent += p.current;
-          totalTotal += p.total;
         } else {
           bar.style.width = '100%';
           bar.classList.add('animate-pulse');
@@ -169,14 +165,7 @@ function poll() {
     if (anySyncing) {
       if (syncBatchStart === null) syncBatchStart = Date.now();
       const elapsed = Date.now() - syncBatchStart;
-      let msg = `Syncing ${syncingCount} source${syncingCount === 1 ? '' : 's'}`;
-      if (totalTotal > 0 && totalCurrent > 0) {
-        const fraction = totalCurrent / totalTotal;
-        const remaining = elapsed * (1 - fraction) / fraction;
-        msg += ` — est. ${formatDuration(remaining)} remaining`;
-      } else {
-        msg += ` — elapsed ${formatDuration(elapsed)}`;
-      }
+      const msg = `Syncing ${syncingCount} source${syncingCount === 1 ? '' : 's'} — elapsed ${formatDuration(elapsed)}`;
       etaBox.textContent = msg;
       etaBox.style.visibility = 'visible';
     } else {
