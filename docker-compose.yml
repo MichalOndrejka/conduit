@@ -26,6 +26,17 @@ services:
       - "11434:11434"   # optional — lets you `ollama pull`/debug from the host too
     environment:
       SSL_CERT_DIR: /usr/local/share/ca-certificates-extra
+      # Lets Ollama actually process concurrent requests instead of queuing
+      # them one at a time — should roughly match conduit's embedding/
+      # preprocessing concurrency (see EMBEDDING_CONCURRENCY below).
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-4}
+      # Keep both the embedding model and the preprocessing/chat model
+      # resident at once — without this, syncing alternates between them and
+      # each switch can evict+reload the other model.
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-2}
+      # Keep a model warm between sync runs instead of unloading it right
+      # after each request.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
     healthcheck:
       test: ["CMD-SHELL", "ollama list || exit 1"]
       interval: 10s
@@ -75,8 +86,12 @@ services:
       # not the host, so this works the same on Linux/Mac/Windows.
       EMBEDDING_BASE_URL: http://ollama:11434/v1
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v2-moe}
+      # Max in-flight embed calls during a sync — keep in step with
+      # OLLAMA_NUM_PARALLEL above so requests aren't queued on either side.
+      EMBEDDING_CONCURRENCY: ${EMBEDDING_CONCURRENCY:-4}
       PREPROCESSING_BASE_URL: http://ollama:11434/v1
       PREPROCESSING_MODEL: ${PREPROCESSING_MODEL:-llama3.2:3b}
+      PREPROCESSING_CONCURRENCY: ${PREPROCESSING_CONCURRENCY:-4}
       # Optional: stable Fernet key for credential encryption (base64url, 44 chars).
       # If not set, a key is auto-generated in the data volume on first start.
       # CONDUIT_SECRET_KEY: ${CONDUIT_SECRET_KEY:-}

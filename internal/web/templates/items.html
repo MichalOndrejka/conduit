@@ -1,28 +1,117 @@
 {{define "title"}}{{.Source.Name}} — items — Conduit{{end}}
+
+{{define "treeNode"}}
+<ul class="pl-4 border-l border-slate-800">
+  {{range .Children}}
+  <li class="py-0.5">
+    {{if .IsLeaf}}
+    <div class="flex items-center justify-between gap-3 text-sm">
+      <span class="font-mono text-slate-300 truncate">{{.Name}}</span>
+      <span class="flex items-center gap-2 shrink-0">
+        <span class="text-xs text-slate-500">{{.Doc.ChunkCount}} chunk{{if ne .Doc.ChunkCount 1}}s{{end}}</span>
+        {{if .Doc.URL}}<a href="{{.Doc.URL}}" target="_blank" rel="noopener" class="text-slate-500 hover:text-white" title="Open source">&#8599;</a>{{end}}
+      </span>
+    </div>
+    {{else}}
+    <details open>
+      <summary class="cursor-pointer text-sm font-medium text-slate-200 select-none">&#128193; {{.Name}}</summary>
+      {{template "treeNode" .}}
+    </details>
+    {{end}}
+  </li>
+  {{end}}
+</ul>
+{{end}}
+
 {{define "content"}}
 <div class="mb-6">
   <a href="/" class="text-sm text-slate-400 hover:text-white">&larr; Sources</a>
   <h1 class="text-2xl font-semibold text-white mt-2">{{.Source.Name}}</h1>
 </div>
 
-{{if not .Items}}
-<div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
-  No indexed items for this source.
+<div class="mb-6 flex gap-2 border-b border-slate-800">
+  <button type="button" id="tab-btn-structure" data-tab="structure"
+          class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-violet-500 text-white">Structure</button>
+  <button type="button" id="tab-btn-chunks" data-tab="chunks"
+          class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-transparent text-slate-400 hover:text-white">Chunks</button>
 </div>
-{{else}}
-<div class="space-y-3">
-  {{range .Items}}
+
+<div id="tab-structure">
+  <div class="mb-3 flex items-baseline justify-between">
+    <span class="text-xs text-slate-500">
+      {{.DocCount}} document{{if ne .DocCount 1}}s{{end}} &middot; {{.Count}} chunk{{if ne .Count 1}}s{{end}} embedded
+      {{if .StructCapped}}(showing first {{.DocCount}} documents){{end}}
+    </span>
+  </div>
+  {{if not .DocCount}}
+  <div class="rounded-2xl border border-dashed border-slate-700 p-6 text-center text-slate-400 text-sm">
+    No indexed documents for this source.
+  </div>
+  {{else if .IsTree}}
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
-    <div class="text-xs font-mono text-slate-500 mb-2">{{.ID}}</div>
-    <pre class="text-sm text-slate-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{{.Text}}</pre>
+    {{template "treeNode" .Tree}}
+  </div>
+  {{else}}
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 divide-y divide-slate-800">
+    {{range .Docs}}
+    <div class="flex items-center justify-between gap-3 px-4 py-2 text-sm">
+      <span class="text-slate-200 truncate">{{.Title}}</span>
+      <span class="flex items-center gap-3 shrink-0 text-xs text-slate-500">
+        {{if .Type}}<span class="rounded-full border border-slate-700 px-2 py-0.5">{{.Type}}{{if .Area}} &middot; {{.Area}}{{end}}</span>{{end}}
+        {{if .FilesChanged}}<span>{{.FilesChanged}} file{{if ne .FilesChanged "1"}}s{{end}} changed</span>{{end}}
+        <span>{{.ChunkCount}} chunk{{if ne .ChunkCount 1}}s{{end}}</span>
+        {{if .URL}}<a href="{{.URL}}" target="_blank" rel="noopener" class="text-slate-500 hover:text-white" title="Open source">&#8599;</a>{{end}}
+      </span>
+    </div>
+    {{end}}
   </div>
   {{end}}
 </div>
-{{if .NextOffset}}
-<div class="mt-6">
-  <a href="/sources/{{.Source.ID}}/items?offset={{.NextOffset}}"
-     class="inline-block rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Next page &rarr;</a>
+
+<div id="tab-chunks" class="hidden">
+  {{if not .Items}}
+  <div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
+    No indexed items for this source.
+  </div>
+  {{else}}
+  <div class="space-y-3">
+    {{range .Items}}
+    <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+      <div class="text-xs font-mono text-slate-500 mb-2">{{.ID}}</div>
+      <pre class="text-sm text-slate-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{{.Text}}</pre>
+    </div>
+    {{end}}
+  </div>
+  {{if .NextOffset}}
+  <div class="mt-6">
+    <a href="/sources/{{.Source.ID}}/items?offset={{.NextOffset}}"
+       class="inline-block rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Next page &rarr;</a>
+  </div>
+  {{end}}
+  {{end}}
 </div>
-{{end}}
-{{end}}
+
+<script>
+  (function () {
+    var panels = { structure: document.getElementById('tab-structure'), chunks: document.getElementById('tab-chunks') };
+    var buttons = document.querySelectorAll('.tab-btn');
+    function activate(name) {
+      buttons.forEach(function (btn) {
+        var active = btn.dataset.tab === name;
+        btn.classList.toggle('border-violet-500', active);
+        btn.classList.toggle('text-white', active);
+        btn.classList.toggle('border-transparent', !active);
+        btn.classList.toggle('text-slate-400', !active);
+      });
+      Object.keys(panels).forEach(function (key) {
+        panels[key].classList.toggle('hidden', key !== name);
+      });
+      if (history.replaceState) history.replaceState(null, '', '#' + name);
+    }
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () { activate(btn.dataset.tab); });
+    });
+    activate(location.hash === '#chunks' ? 'chunks' : 'structure');
+  })();
+</script>
 {{end}}

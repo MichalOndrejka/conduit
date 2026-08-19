@@ -62,15 +62,25 @@
            class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">
   </div>
 
-  <!-- Provider tabs -->
+  <!-- Provider choice — a card picker, same style as the source-type picker
+       (source_new.html) and the work-item-type tiles below, since choosing
+       here swaps out the whole set of visible inputs underneath. -->
   <div>
-    <div class="flex items-end gap-1 border-b border-slate-800">
-      <button type="button" id="tab-ado" onclick="setTab('ado')">Azure DevOps</button>
-      <button type="button" id="tab-manual" onclick="setTab('manual')">Manual</button>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+        <input type="radio" name="ProviderTab" value="ado" class="peer sr-only" {{if ne .Tab "manual"}}checked{{end}} onchange="setTab('ado')">
+        <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Azure DevOps</div>
+        <div class="text-xs text-slate-500 mt-1 leading-relaxed">Connect to an org with a Personal Access Token.</div>
+      </label>
+      <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+        <input type="radio" name="ProviderTab" value="manual" class="peer sr-only" {{if eq .Tab "manual"}}checked{{end}} onchange="setTab('manual')">
+        <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Manual</div>
+        <div class="text-xs text-slate-500 mt-1 leading-relaxed">Paste content directly instead of connecting a live source.</div>
+      </label>
     </div>
 
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
-    <div id="ado-block" class="rounded-b-2xl border border-t-0 border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <div id="ado-block" class="mt-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
       {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
       {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
@@ -127,14 +137,16 @@
       {{else if $isDualMode}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as</label>
-        <div class="flex gap-4 text-sm text-slate-300">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="FetchMode" value="files" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            Files in a repo
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="radio" name="FetchMode" value="files" class="peer sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Files in a repo</div>
+            <div class="text-xs text-slate-500 mt-1 leading-relaxed">Fetch and embed matching files from a repository.</div>
           </label>
-          <label class="flex items-center gap-2 cursor-pointer">
-            <input type="radio" name="FetchMode" value="workitems" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            Azure DevOps work items
+          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
+            <input type="radio" name="FetchMode" value="workitems" class="peer sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Azure DevOps work items</div>
+            <div class="text-xs text-slate-500 mt-1 leading-relaxed">Query work items directly and pick which types to embed.</div>
           </label>
         </div>
       </div>
@@ -181,7 +193,7 @@
     </div>
 
     <!-- ── Manual ───────────────────────────────────────────────────── -->
-    <div id="manual-block" class="hidden rounded-b-2xl border border-t-0 border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <div id="manual-block" class="hidden mt-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Title</label>
         <input name="Title" value="{{$s.GetConfig `Title`}}"
@@ -208,15 +220,12 @@
 <script>
 var INITIAL_TAB = "{{.Tab}}";
 var currentTab = INITIAL_TAB;
-var TAB_ON = 'px-4 py-2 text-sm font-medium text-violet-300 border-b-2 border-violet-500 -mb-px';
-var TAB_OFF = 'px-4 py-2 text-sm font-medium text-slate-400 border-b-2 border-transparent hover:text-slate-200';
 
 function toggleBlock(id, on) {
   var el = document.getElementById(id);
   el.classList.toggle('hidden', !on);
   el.querySelectorAll('input, select, textarea').forEach(function (x) { x.disabled = !on; });
 }
-function styleTab(id, on) { document.getElementById(id).className = on ? TAB_ON : TAB_OFF; }
 
 function setTab(name) {
   currentTab = name;
@@ -225,8 +234,6 @@ function setTab(name) {
   toggleBlock('manual-block', isManual);
   document.getElementById('f-provider').value = isManual ? 'manual' : 'api';
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
-  styleTab('tab-ado', isAdo);
-  styleTab('tab-manual', isManual);
   if (isAdo) updateFetchMode();
 }
 

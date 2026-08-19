@@ -131,6 +131,30 @@ curl -O https://raw.githubusercontent.com/MichalOndrejka/conduit/main/docker-com
 docker compose -f docker-compose.hub.yml up -d
 ```
 
+### Sync performance: concurrency, Ollama tuning, and GPU
+
+Embedding and preprocessing calls run concurrently now (bounded worker pools,
+not one request at a time), controlled by env vars with sane defaults:
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `EMBEDDING_CONCURRENCY` | `4` | Max in-flight embed calls per sync |
+| `PREPROCESSING_CONCURRENCY` | `4` | Max in-flight preprocessing/chat calls per sync |
+| `OLLAMA_NUM_PARALLEL` | `4` | Requests Ollama itself will process in parallel — keep roughly in step with the concurrency vars above |
+| `OLLAMA_MAX_LOADED_MODELS` | `2` | Keeps the embedding model and the preprocessing/chat model both resident, avoiding reload thrashing between sync phases |
+| `OLLAMA_KEEP_ALIVE` | `30m` | Keeps a model warm between sync runs instead of unloading it right after each request |
+
+On a host with an NVIDIA GPU and the `nvidia-container-toolkit` installed,
+layer `docker-compose.gpu.yml` on top to run Ollama on the GPU:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+docker compose -f docker-compose.hub.yml -f docker-compose.gpu.yml up -d   # prebuilt image
+```
+
+Compose can't detect GPU presence automatically, so CPU-only remains the
+default — just omit `-f docker-compose.gpu.yml` on hosts without a GPU.
+
 ## Configuration
 
 `config.json` (auto-created with Ollama defaults) plus environment overrides:

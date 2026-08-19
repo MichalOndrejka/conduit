@@ -16,6 +16,7 @@ type EmbeddingConfig struct {
 	BaseURL        string `json:"base_url"`
 	Dimensions     int    `json:"dimensions"`
 	MaxInputTokens int    `json:"max_input_tokens"` // embedding model's context window in tokens
+	Concurrency    int    `json:"concurrency"`      // max in-flight embed calls during a sync
 	// Azure OpenAI — only used when Provider == "azure-openai"
 	AzureEndpoint         string `json:"azure_endpoint"`
 	AzureDeployment       string `json:"azure_deployment"`
@@ -41,6 +42,7 @@ type PreprocessingConfig struct {
 	Model        string          `json:"model"`
 	SystemPrompt string          `json:"system_prompt"`
 	SourceTypes  map[string]bool `json:"source_types"`
+	Concurrency  int             `json:"concurrency"` // max in-flight summarize calls during a sync
 	// Azure OpenAI — only used when Provider == "azure-openai"
 	AzureEndpoint         string `json:"azure_endpoint"`
 	AzureDeployment       string `json:"azure_deployment"`
@@ -64,12 +66,14 @@ func defaults() AppConfig {
 			BaseURL:         "http://localhost:11434/v1",
 			Dimensions:      768,
 			MaxInputTokens:  8192,
+			Concurrency:     4,
 			AzureAPIVersion: "2024-02-01",
 		},
 		Qdrant:   QdrantConfig{Host: "localhost", Port: 6333},
 		Chunking: ChunkingConfig{MaxChunkSize: 2000, Overlap: 200},
 		Preprocessing: PreprocessingConfig{
 			Provider:        "openai-compatible",
+			Concurrency:     4,
 			AzureAPIVersion: "2024-02-01",
 			SourceTypes: map[string]bool{
 				"work-item": true, "requirements": true, "test-case": true,
@@ -132,6 +136,11 @@ func Load() (*AppConfig, error) {
 			cfg.Embedding.MaxInputTokens = n
 		}
 	}
+	if v := os.Getenv("EMBEDDING_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Embedding.Concurrency = n
+		}
+	}
 	if v := os.Getenv("PREPROCESSING_PROVIDER"); v != "" {
 		cfg.Preprocessing.Provider = v
 	}
@@ -140,6 +149,11 @@ func Load() (*AppConfig, error) {
 	}
 	if v := os.Getenv("PREPROCESSING_BASE_URL"); v != "" {
 		cfg.Preprocessing.BaseURL = v
+	}
+	if v := os.Getenv("PREPROCESSING_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.Preprocessing.Concurrency = n
+		}
 	}
 	if v := os.Getenv("AZURE_OPENAI_ENDPOINT"); v != "" {
 		cfg.Embedding.AzureEndpoint = v

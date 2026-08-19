@@ -189,10 +189,12 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `EMBEDDING_BASE_URL` | Overrides `embedding.base_url`. |
 | `EMBEDDING_DIMENSIONS` | Overrides `embedding.dimensions`. |
 | `EMBEDDING_MAX_INPUT_TOKENS` | Overrides `embedding.max_input_tokens`. |
+| `EMBEDDING_CONCURRENCY` | Overrides `embedding.concurrency` — max in-flight embed calls during a sync. Default: `4`. |
 | `AZURE_OPENAI_ENDPOINT` | Overrides `embedding.azure_endpoint`. |
 | `AZURE_OPENAI_DEPLOYMENT` | Overrides `embedding.azure_deployment`. |
 | `AZURE_OPENAI_API_VERSION` | Overrides `embedding.azure_api_version`. |
 | `AZURE_OPENAI_API_KEY` | Fallback API key for `provider: "azure-openai"` when `azure_api_key_credential` is empty. |
+| `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
 
 ---
 

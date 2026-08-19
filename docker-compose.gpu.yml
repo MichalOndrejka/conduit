@@ -1,0 +1,19 @@
+# Optional GPU override for the ollama service. Layer this on top of either
+# base compose file on a host with an NVIDIA GPU + the nvidia-container-
+# toolkit installed:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#   docker compose -f docker-compose.hub.yml -f docker-compose.gpu.yml up -d
+#
+# Compose can't detect GPU presence and branch conditionally within one
+# file, so CPU-only stays the default: just omit this file (plain
+# `docker compose -f docker-compose.yml up -d`) on hosts without a GPU.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

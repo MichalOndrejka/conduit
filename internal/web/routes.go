@@ -2,6 +2,7 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"html/template"
@@ -259,14 +260,55 @@ func (s *Server) handleSourceItems(w http.ResponseWriter, r *http.Request) {
 		text, _ := p.Payload[models.PayloadText].(string)
 		items = append(items, item{ID: rag.IDString(p.ID), Text: text})
 	}
+
+	structPoints, capped, err := s.scrollForStructure(r.Context(), collection, filter)
+	if err != nil {
+		httpError(w, err)
+		return
+	}
+	docs := buildDocSummaries(structPoints)
+
 	s.render(w, s.itemsTmpl, "base", map[string]any{
-		"Active":     "sources",
-		"Source":     src,
-		"Collection": collection,
-		"Count":      s.vectors.Count(r.Context(), collection, filter),
-		"Items":      items,
-		"NextOffset": offsetParam(next),
+		"Active":       "sources",
+		"Source":       src,
+		"Collection":   collection,
+		"Count":        s.vectors.Count(r.Context(), collection, filter),
+		"Items":        items,
+		"NextOffset":   offsetParam(next),
+		"DocCount":     len(docs),
+		"IsTree":       useTree(collection, docs),
+		"Tree":         buildTree(docs),
+		"Docs":         docs,
+		"StructCapped": capped,
 	})
+}
+
+// structureScanCap bounds how many points scrollForStructure will read to build
+// the document-structure panel, so a very large source can't stall the page —
+// it's metadata-only (no chunk text is rendered from it) but still one point per
+// chunk, so unbounded sources could mean thousands of Qdrant round-trips.
+const structureScanCap = 5000
+
+// scrollForStructure pages through every point for a source (up to
+// structureScanCap) to build the document-structure panel. Unlike the chunk list
+// above, this needs every chunk once — grouping into per-document summaries only
+// works if we've seen the whole collection, not just the current page.
+func (s *Server) scrollForStructure(
+	ctx context.Context, collection string, filter *rag.Filter,
+) ([]rag.ScrolledPoint, bool, error) {
+	var all []rag.ScrolledPoint
+	var offset json.RawMessage
+	for {
+		points, next, err := s.vectors.Scroll(ctx, collection, filter, 200, offset, false)
+		if err != nil {
+			return nil, false, err
+		}
+		all = append(all, points...)
+		if next == nil || len(all) >= structureScanCap {
+			return all, next != nil, nil
+		}
+		offset = next
+	}
 }
 
 func (s *Server) handleExperience(w http.ResponseWriter, r *http.Request) {

@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -36,6 +37,7 @@ type DocumentPreprocessor struct {
 	sourceTypes  map[string]bool
 	url          string
 	httpClient   *http.Client
+	concurrency  int
 
 	// Azure resolves the API key per request (azureCredential → secrets
 	// store, falling back to AZURE_OPENAI_API_KEY), matching EmbeddingService.
@@ -62,11 +64,13 @@ func NewDocumentPreprocessor(cfg *config.AppConfig, store secrets.Reader) *Docum
 	if prompt == "" {
 		prompt = defaultPreprocessPrompt
 	}
+	concurrency := effectiveConcurrency(pc.Concurrency)
 	p := &DocumentPreprocessor{
 		systemPrompt: prompt,
 		sourceTypes:  pc.SourceTypes,
 		secrets:      store,
-		httpClient:   &http.Client{Timeout: 120 * time.Second},
+		httpClient:   &http.Client{Timeout: 120 * time.Second, Transport: pooledTransport(concurrency)},
+		concurrency:  concurrency,
 	}
 	if pc.Provider == "azure-openai" {
 		p.azure = true
@@ -121,21 +125,42 @@ func (p *DocumentPreprocessor) Preprocess(
 	if !p.EnabledForType(sourceType) {
 		return docs, nil
 	}
-	out := make([]models.SourceDocument, 0, len(docs))
+
+	out := make([]models.SourceDocument, len(docs))
+	var (
+		wg   sync.WaitGroup
+		sem  = make(chan struct{}, p.concurrency)
+		mu   sync.Mutex
+		done int
+	)
+
 	for i, doc := range docs {
 		if opts.Checkpoint != nil {
 			if err := opts.Checkpoint(); err != nil {
+				wg.Wait()
 				return nil, err
 			}
 		}
-		if len(doc.Text) >= minPreprocessLength {
-			doc.Text = p.summarize(ctx, doc)
-		}
-		out = append(out, doc)
-		if opts.ProgressCb != nil {
-			opts.ProgressCb(i+1, len(docs))
-		}
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(i int, doc models.SourceDocument) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			if len(doc.Text) >= minPreprocessLength {
+				doc.Text = p.summarize(ctx, doc)
+			}
+			out[i] = doc
+
+			mu.Lock()
+			done++
+			if opts.ProgressCb != nil {
+				opts.ProgressCb(done, len(docs))
+			}
+			mu.Unlock()
+		}(i, doc)
 	}
+	wg.Wait()
 	return out, nil
 }
 

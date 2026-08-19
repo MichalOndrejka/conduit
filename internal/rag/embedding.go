@@ -40,8 +40,39 @@ func NewEmbeddingService(cfg *config.AppConfig, store secrets.Reader) *Embedding
 	return &EmbeddingService{
 		cfg:        cfg,
 		secrets:    store,
-		httpClient: &http.Client{Timeout: 60 * time.Second},
+		httpClient: &http.Client{Timeout: 60 * time.Second, Transport: pooledTransport(effectiveConcurrency(cfg.Embedding.Concurrency))},
 	}
+}
+
+// effectiveConcurrency floors an unset/invalid concurrency config value to 1
+// so a worker pool's semaphore channel is never sized 0 (which would deadlock
+// forever on the first send).
+func effectiveConcurrency(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	return n
+}
+
+// pooledTransport clones http.DefaultTransport with a higher per-host idle
+// connection cap so concurrent embed/preprocess calls to the same Ollama
+// host reuse keep-alive connections instead of each opening a new one — the
+// default cap is 2, which would otherwise bottleneck any concurrency > 2.
+func pooledTransport(concurrency int) *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	maxConns := concurrency * 2
+	if maxConns < 10 {
+		maxConns = 10
+	}
+	t.MaxIdleConnsPerHost = maxConns
+	t.MaxIdleConns = maxConns
+	return t
+}
+
+// concurrency returns the configured max in-flight embed calls, read live so
+// a Settings-page change takes effect on the next sync.
+func (s *EmbeddingService) concurrency() int {
+	return effectiveConcurrency(s.cfg.Embedding.Concurrency)
 }
 
 func (s *EmbeddingService) isAzure() bool {
