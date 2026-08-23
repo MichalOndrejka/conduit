@@ -24,6 +24,16 @@ services:
       - "11434:11434"   # optional — lets you `ollama pull`/debug from the host too
     environment:
       - SSL_CERT_DIR=/usr/local/share/ca-certificates-extra
+      # `ollama pull` (run by the ollama-pull service below) makes its actual
+      # outbound HTTPS request from *this* container, not from ollama-pull —
+      # ollama-pull just tells this server "fetch model X" over the internal
+      # docker network. Set these if pulls fail behind a corporate proxy
+      # (e.g. "error pulling model manifest: 403" from direct egress being
+      # blocked). Leave unset/empty if you're not behind a proxy.
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      # Keep intra-compose and loopback traffic off the proxy.
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,ollama,qdrant,conduit}
       # Lets Ollama actually process concurrent requests instead of queuing
       # them one at a time — should roughly match conduit's embedding/
       # preprocessing concurrency (see EMBEDDING_CONCURRENCY below).
