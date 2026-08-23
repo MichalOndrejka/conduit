@@ -5,6 +5,7 @@
     "base_url": "http://ollama:11434/v1",
     "dimensions": 768,
     "max_input_tokens": 8192,
+    "concurrency": 4,
     "azure_endpoint": "",
     "azure_deployment": "",
     "azure_api_version": "2024-02-01",
@@ -21,19 +22,21 @@
     "overlap": 200
   },
   "preprocessing": {
+    "enabled": false,
     "provider": "openai-compatible",
     "base_url": "http://ollama:11434/v1",
     "model": "llama3.2:3b",
     "system_prompt": "",
     "source_types": {
       "code": false,
-      "documentation": false,
       "commit-history": false,
-      "requirements": false,
+      "documentation": false,
+      "requirements": true,
       "test-case": false,
       "test-code": true,
       "work-item": true
     },
+    "concurrency": 4,
     "azure_endpoint": "",
     "azure_deployment": "",
     "azure_api_version": "2024-02-01",

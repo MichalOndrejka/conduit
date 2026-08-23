@@ -21,6 +21,7 @@ func testPreprocessor(t *testing.T, chatHandler http.HandlerFunc, concurrency in
 	t.Cleanup(srv.Close)
 
 	cfg := &config.AppConfig{}
+	cfg.Preprocessing.Enabled = true
 	cfg.Preprocessing.Provider = "openai-compatible"
 	cfg.Preprocessing.BaseURL = srv.URL
 	cfg.Preprocessing.Model = "llama3.2:3b"
@@ -113,5 +114,14 @@ func TestPreprocessSkipsShortDocuments(t *testing.T) {
 	}
 	if got := atomic.LoadInt64(&calls); got != 1 {
 		t.Errorf("chat endpoint called %d times, want 1 (only the long doc)", got)
+	}
+}
+
+// TestPreprocessDisabledByDefault asserts EnabledForType is false when the
+// master switch is off, even for a source type with no explicit override.
+func TestPreprocessDisabledByDefault(t *testing.T) {
+	p := NewDocumentPreprocessor(&config.AppConfig{}, nil)
+	if p.EnabledForType("documentation") {
+		t.Error("EnabledForType(\"documentation\") = true, want false when Preprocessing.Enabled is unset")
 	}
 }

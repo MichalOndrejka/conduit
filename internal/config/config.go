@@ -37,6 +37,7 @@ type ChunkingConfig struct {
 }
 
 type PreprocessingConfig struct {
+	Enabled      bool            `json:"enabled"`
 	Provider     string          `json:"provider"` // "openai-compatible" (Ollama, etc.) | "azure-openai"
 	BaseURL      string          `json:"base_url"`
 	Model        string          `json:"model"`

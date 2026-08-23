@@ -60,12 +60,14 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 
 // ── Save: preprocessing ─────────────────────────────────────────────────────
 //
-// Only SystemPrompt and SourceTypes come from this form — Provider/BaseURL/
-// Model/Azure* have no form fields anymore (env-var only), so they're left
-// untouched on the existing config rather than overwritten with zero values.
+// Only Enabled/SystemPrompt/SourceTypes come from this form — Provider/
+// BaseURL/Model/Azure* have no form fields anymore (env-var only), so
+// they're left untouched on the existing config rather than overwritten
+// with zero values.
 
 func (s *Server) handleSettingsPreprocessing(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
+	s.cfg.Preprocessing.Enabled = r.FormValue("enabled") == "on"
 	s.cfg.Preprocessing.SystemPrompt = r.FormValue("system_prompt")
 	s.cfg.Preprocessing.SourceTypes = sourceTypesFromForm(r)
 	if err := config.Save(s.cfg); err != nil {

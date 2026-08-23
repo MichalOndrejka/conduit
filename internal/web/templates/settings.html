@@ -19,10 +19,18 @@
 <form method="post" action="/settings/preprocessing" id="form-preprocessing" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
   <div class="flex items-center justify-between mb-1">
     <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing</h2>
+    <label class="relative inline-flex items-center cursor-pointer" title="Enable preprocessing">
+      <input type="checkbox" name="enabled" id="preprocEnabled" value="on" {{if .Cfg.Preprocessing.Enabled}}checked{{end}}
+             onchange="togglePreproc()" class="sr-only peer">
+      <span class="w-11 h-6 rounded-full bg-slate-700 transition-colors peer-checked:bg-violet-600
+                   after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:h-5 after:w-5
+                   after:rounded-full after:bg-white after:shadow after:transition-transform
+                   peer-checked:after:translate-x-5"></span>
+    </label>
   </div>
-  <p class="text-xs text-slate-500 mb-4">Every synced document is summarized with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
+  <p class="text-xs text-slate-500 mb-4">Summarize each document with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
 
-  <div id="preproc-fields">
+  <div id="preproc-fields" class="{{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">
     <div>
       <label class="block text-xs font-medium text-slate-400 mb-1">System prompt</label>
       <textarea name="system_prompt" rows="3" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono resize-y">{{.Cfg.Preprocessing.SystemPrompt}}</textarea>
@@ -118,6 +126,10 @@ function copyMcp() {
     b.textContent = 'Copied!';
     setTimeout(function () { b.textContent = 'Copy'; }, 2000);
   });
+}
+function togglePreproc() {
+  var on = document.getElementById('preprocEnabled').checked;
+  document.getElementById('preproc-fields').classList.toggle('hidden', !on);
 }
 
 // Notice toast from ?notice=...
