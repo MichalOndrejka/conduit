@@ -227,31 +227,48 @@ Re-sync all sources after changing the embedding model.
 
 ## Docker deployment
 
-`docker-compose.yml` starts Qdrant and Conduit together. Ollama must be running on the host:
+Conduit runs as a standalone container and connects out to Qdrant and your
+embedding/LLM endpoint(s), which you run separately — it doesn't bundle or
+manage those services:
 
 ```bash
-docker-compose up
+docker build -t conduit .
+docker run -d --name conduit -p 8000:8000 \
+  -v conduit_data:/data \
+  -e CONDUIT_HOST=0.0.0.0 \
+  -e QDRANT_HOST=host.docker.internal \
+  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
+  conduit
 ```
 
-For colleagues pulling from Docker Hub, use `docker-compose.hub.yml` instead:
+Or pull the prebuilt image instead of building:
 
 ```bash
-docker-compose -f docker-compose.hub.yml up
+docker run -d --name conduit -p 8000:8000 \
+  -v conduit_data:/data \
+  -e CONDUIT_HOST=0.0.0.0 \
+  -e QDRANT_HOST=host.docker.internal \
+  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
+  michalondrejka/conduit:latest
 ```
 
-Both compose files mount a volume at `/data` and set `CONDUIT_DATA_DIR=/data`, so source definitions, config, and credentials all persist across container restarts.
+`host.docker.internal` reaches services running on the host; point the env
+vars at wherever Qdrant/Ollama/Azure OpenAI actually run instead, or skip them
+and set the connection details from the **Settings** page after the container
+starts. The volume at `/data` and `CONDUIT_DATA_DIR=/data` persist source
+definitions, config, and credentials across container restarts.
 
-To keep the credential encryption key stable across container recreation, add `CONDUIT_SECRET_KEY` to your environment or a `.env` file. It must be a base64url-encoded 32-byte key (Fernet format) — generate one with OpenSSL:
+To keep the credential encryption key stable across container recreation, add `CONDUIT_SECRET_KEY` to your environment. It must be a base64url-encoded 32-byte key (Fernet format) — generate one with OpenSSL:
 
 ```bash
 # generate once and store safely
 openssl rand -base64 32 | tr '+/' '-_'
 ```
 
-Then set it in your shell or `.env`:
+Then pass it to `docker run`:
 
-```
-CONDUIT_SECRET_KEY=<generated key>
+```bash
+-e CONDUIT_SECRET_KEY=<generated key>
 ```
 
 Without this, Conduit auto-generates a key saved as `.secret_key` inside `/data`. As long as the volume is preserved, credentials remain readable — but if the volume is deleted and recreated, existing `credentials.enc.json` data will be unreadable.

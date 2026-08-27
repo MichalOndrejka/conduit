@@ -108,52 +108,55 @@ Then: add credentials at `/credentials`, create a source at `/sources/create`, h
 
 ## Running in Docker
 
-`docker-compose.yml` builds Conduit and starts it with Qdrant; for a prebuilt
-image from Docker Hub use `docker-compose.hub.yml`:
+Conduit runs as a single standalone container that connects out to
+prerequisites you run yourself — Qdrant, an embedding endpoint (e.g. Ollama),
+and optionally an LLM for preprocessing. It does not bundle or manage those
+services.
 
 ```bash
-docker compose up                          # build from source
-docker compose -f docker-compose.hub.yml up   # pull michalondrejka/conduit
+docker build -t conduit .
+
+docker run -d --name conduit -p 8000:8000 \
+  -v conduit_data:/data \
+  -e CONDUIT_HOST=0.0.0.0 \
+  -e QDRANT_HOST=host.docker.internal \
+  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
+  conduit
 ```
 
-Both mount a volume at `/data` (`CONDUIT_DATA_DIR=/data`) so sources, config,
-and credentials persist across restarts. Ollama must be reachable from the
-container — point `EMBEDDING_BASE_URL` at `http://host.docker.internal:11434/v1`,
-or use Azure OpenAI.
-
-### Without cloning the repo
-
-`docker-compose.hub.yml` pulls both images (Qdrant + Conduit) from Docker Hub,
-so you only need that one file — no clone required:
+Or pull the prebuilt image from Docker Hub instead of building:
 
 ```bash
-curl -O https://raw.githubusercontent.com/MichalOndrejka/conduit/main/docker-compose.hub.yml
-docker compose -f docker-compose.hub.yml up -d
+docker run -d --name conduit -p 8000:8000 \
+  -v conduit_data:/data \
+  -e CONDUIT_HOST=0.0.0.0 \
+  -e QDRANT_HOST=host.docker.internal \
+  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
+  michalondrejka/conduit:latest
 ```
 
-### Sync performance: concurrency, Ollama tuning, and GPU
+The volume at `/data` (`CONDUIT_DATA_DIR=/data`) persists sources, config, and
+credentials across restarts. `host.docker.internal` reaches services running
+on the host; point `QDRANT_HOST`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL`
+at wherever those services actually run instead (another container, a remote
+host, Azure OpenAI, etc.) — or leave them out and configure the connections
+from the **Settings** page after the container starts.
 
-Embedding and preprocessing calls run concurrently now (bounded worker pools,
-not one request at a time), controlled by env vars with sane defaults:
+### Sync performance: concurrency
+
+Embedding and preprocessing calls run concurrently (bounded worker pools, not
+one request at a time), controlled by env vars with sane defaults:
 
 | Variable | Default | What it does |
 | --- | --- | --- |
 | `EMBEDDING_CONCURRENCY` | `4` | Max in-flight embed calls per sync |
 | `PREPROCESSING_CONCURRENCY` | `4` | Max in-flight preprocessing/chat calls per sync |
-| `OLLAMA_NUM_PARALLEL` | `4` | Requests Ollama itself will process in parallel — keep roughly in step with the concurrency vars above |
-| `OLLAMA_MAX_LOADED_MODELS` | `2` | Keeps the embedding model and the preprocessing/chat model both resident, avoiding reload thrashing between sync phases |
-| `OLLAMA_KEEP_ALIVE` | `30m` | Keeps a model warm between sync runs instead of unloading it right after each request |
 
-On a host with an NVIDIA GPU and the `nvidia-container-toolkit` installed,
-layer `docker-compose.gpu.yml` on top to run Ollama on the GPU:
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-docker compose -f docker-compose.hub.yml -f docker-compose.gpu.yml up -d   # prebuilt image
-```
-
-Compose can't detect GPU presence automatically, so CPU-only remains the
-default — just omit `-f docker-compose.gpu.yml` on hosts without a GPU.
+If you're running Ollama yourself as the embedding/LLM backend, its own
+`OLLAMA_NUM_PARALLEL` / `OLLAMA_MAX_LOADED_MODELS` / `OLLAMA_KEEP_ALIVE`
+settings (and GPU passthrough via the `nvidia-container-toolkit`) are
+configured on that service directly — see the
+[Ollama docs](https://github.com/ollama/ollama/blob/main/docs/faq.md).
 
 ## Configuration
 

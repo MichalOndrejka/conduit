@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -240,6 +242,35 @@ func (h *harness) get(path string) *http.Response {
 func (h *harness) postForm(path string, values url.Values) *http.Response {
 	h.t.Helper()
 	resp, err := h.client.PostForm(h.url(path), values)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return resp
+}
+
+// postMultipart POSTs values as multipart/form-data, for handlers that must
+// use r.ParseMultipartForm rather than r.ParseForm (see handleSettingsVerify's
+// comment on why the verify forms are submitted this way).
+func (h *harness) postMultipart(path string, values url.Values) *http.Response {
+	h.t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for key, vs := range values {
+		for _, v := range vs {
+			if err := mw.WriteField(key, v); err != nil {
+				h.t.Fatal(err)
+			}
+		}
+	}
+	if err := mw.Close(); err != nil {
+		h.t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, h.url(path), &buf)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	resp, err := h.client.Do(req)
 	if err != nil {
 		h.t.Fatal(err)
 	}

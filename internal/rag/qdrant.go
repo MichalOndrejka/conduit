@@ -2,7 +2,7 @@
 //
 // Deliberately uses Qdrant's HTTP API (same port 6333 / HTTPS 443 the Python
 // qdrant-client targets) instead of the official gRPC client, so the existing
-// docker-compose deployment (QDRANT_HOST/PORT/HTTPS/API_KEY) works unchanged.
+// container deployment (QDRANT_HOST/PORT/HTTPS/API_KEY) works unchanged.
 // Only the handful of operations Conduit needs are implemented.
 package rag
 

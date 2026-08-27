@@ -82,7 +82,7 @@ func main() {
 	// Windows "allow this app on public/private networks" firewall prompt,
 	// which only fires for listeners reachable from other interfaces.
 	// Docker needs the container-internal 0.0.0.0 so the port mapping works —
-	// set CONDUIT_HOST=0.0.0.0 there (see docker-compose.yml).
+	// set CONDUIT_HOST=0.0.0.0 there, e.g. `docker run -e CONDUIT_HOST=0.0.0.0 ...`.
 	host := os.Getenv("CONDUIT_HOST")
 	if host == "" {
 		host = "127.0.0.1"

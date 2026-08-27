@@ -143,7 +143,10 @@ func (s *Server) Routes(mux *http.ServeMux) {
 
 	// Settings (see routes_settings.go)
 	mux.HandleFunc("GET /settings", s.handleSettings)
+	mux.HandleFunc("POST /settings/embedding", s.handleSettingsEmbedding)
+	mux.HandleFunc("POST /settings/qdrant", s.handleSettingsQdrant)
 	mux.HandleFunc("POST /settings/preprocessing", s.handleSettingsPreprocessing)
+	mux.HandleFunc("POST /settings/verify/{service}", s.handleSettingsVerify)
 	mux.HandleFunc("POST /settings/delete-all-sources", s.handleDeleteAllSources)
 	mux.HandleFunc("POST /settings/delete-all-experiences", s.handleDeleteAllExperiences)
 	mux.HandleFunc("POST /settings/clean-source-embeddings", s.handleCleanSourceEmbeddings)

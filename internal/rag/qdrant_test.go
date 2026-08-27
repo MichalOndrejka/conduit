@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -143,5 +144,188 @@ func TestTagFilterNilForEmpty(t *testing.T) {
 	f := TagFilter(map[string]string{"source_id": "x"})
 	if f.Must[0].Key != models.TagKey("source_id") {
 		t.Errorf("key = %q", f.Must[0].Key)
+	}
+}
+
+func TestNewVectorStoreUsesHTTPSScheme(t *testing.T) {
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.Host = "qdrant.internal"
+	cfg.Qdrant.Port = 443
+	cfg.Qdrant.HTTPS = true
+	v := NewVectorStore(cfg)
+	if v.baseURL != "https://qdrant.internal:443" {
+		t.Errorf("baseURL = %q, want https scheme", v.baseURL)
+	}
+}
+
+func TestIDStringHandlesIntegerID(t *testing.T) {
+	if got := IDString(json.RawMessage(`42`)); got != "42" {
+		t.Errorf("IDString(42) = %q, want %q", got, "42")
+	}
+}
+
+func TestDoReturnsErrorOnNon2xxStatus(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	err := v.do(context.Background(), http.MethodGet, "/collections", nil, nil)
+	if err == nil {
+		t.Fatal("expected error on HTTP 500")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("error = %v, want it to include response body", err)
+	}
+}
+
+func TestHealthCheckErrorsWhenUnreachable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	srv.Close() // closed before use — connection refused
+
+	v := storeFor(t, srv)
+	if err := v.HealthCheck(context.Background()); err == nil {
+		t.Error("expected error from unreachable Qdrant")
+	}
+}
+
+func TestDeleteCollectionSendsDelete(t *testing.T) {
+	var gotMethod, gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod, gotPath = r.Method, r.URL.Path
+		_, _ = w.Write([]byte(`{"result": true}`))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if err := v.DeleteCollection(context.Background(), "conduit_workitems"); err != nil {
+		t.Fatal(err)
+	}
+	if gotMethod != http.MethodDelete || gotPath != "/collections/conduit_workitems" {
+		t.Errorf("method/path = %s %s", gotMethod, gotPath)
+	}
+}
+
+func TestPointsCount(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result": {"points_count": 7}}`))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if got := v.PointsCount(context.Background(), "c"); got != 7 {
+		t.Errorf("PointsCount = %d, want 7", got)
+	}
+}
+
+func TestPointsCountReturnsZeroOnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if got := v.PointsCount(context.Background(), "missing"); got != 0 {
+		t.Errorf("PointsCount = %d, want 0 on error", got)
+	}
+}
+
+func TestVectorSize(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result": {"config": {"params": {"vectors": {"size": 768}}}}}`))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	size, err := v.VectorSize(context.Background(), "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != 768 {
+		t.Errorf("VectorSize = %d, want 768", size)
+	}
+}
+
+func TestVectorSizePropagatesError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if _, err := v.VectorSize(context.Background(), "missing"); err == nil {
+		t.Error("expected error for missing collection")
+	}
+}
+
+func TestDeleteByFilterSendsFilterBody(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"result": true}`))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	filter := TagFilter(map[string]string{"source_id": "src-1"})
+	if err := v.DeleteByFilter(context.Background(), "c", filter); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/collections/c/points/delete" {
+		t.Errorf("path = %q", gotPath)
+	}
+	if _, ok := gotBody["filter"]; !ok {
+		t.Error("filter missing from request body")
+	}
+}
+
+func TestDeleteByIDsSendsPointsBody(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"result": true}`))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if err := v.DeleteByIDs(context.Background(), "c", []string{"id-1", "id-2"}); err != nil {
+		t.Fatal(err)
+	}
+	pts, ok := gotBody["points"].([]any)
+	if !ok || len(pts) != 2 {
+		t.Errorf("points body = %v, want 2 ids", gotBody["points"])
+	}
+}
+
+func TestCountReturnsExactCount(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_, _ = w.Write([]byte(`{"result": {"count": 3}}`))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if got := v.Count(context.Background(), "c", nil); got != 3 {
+		t.Errorf("Count = %d, want 3", got)
+	}
+	if exact, _ := gotBody["exact"].(bool); !exact {
+		t.Error("expected exact=true in request body")
+	}
+}
+
+func TestCountReturnsZeroOnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if got := v.Count(context.Background(), "c", TagFilter(map[string]string{"source_id": "x"})); got != 0 {
+		t.Errorf("Count = %d, want 0 on error", got)
 	}
 }
