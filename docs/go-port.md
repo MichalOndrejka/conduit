@@ -55,11 +55,10 @@ same on-disk state — a design constraint that still shapes the current code:
   Verified by a cross-language test fixture in `internal/secrets/store_test.go`
   (data originally written by the Python app).
 - **Qdrant**: talks the same REST API/port the Python `qdrant-client` used, so
-  `QDRANT_HOST/PORT/HTTPS/API_KEY` and existing collections work unchanged.
-  (The official Go client is gRPC-only on port 6334 and would have required
-  infra changes — deliberately avoided.)
+  existing collections work unchanged. (The official Go client is gRPC-only
+  on port 6334 and would have required infra changes — deliberately avoided.)
 - **Sources**: reads the same `conduit-sources.json` format.
-- **Env vars**: same `EMBEDDING_*`, `AZURE_OPENAI_*`, `CONDUIT_*` variables.
+- **Env vars**: same `EMBEDDING_*`, `CONDUIT_*` variables.
 
 ## Ported
 

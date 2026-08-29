@@ -19,51 +19,15 @@
 
   <!-- Embedding -->
   <form method="post" action="/settings/embedding" id="form-embedding" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-    <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Embedding</h2>
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Embedding (Ollama)</h2>
     <div class="space-y-4">
       <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">Provider</label>
-        <select name="provider" id="embeddingProvider" onchange="toggleEmbeddingProvider()"
-                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          <option value="openai-compatible" {{if ne .Cfg.Embedding.Provider "azure-openai"}}selected{{end}}>Local / OpenAI-compatible (Ollama, etc.)</option>
-          <option value="azure-openai" {{if eq .Cfg.Embedding.Provider "azure-openai"}}selected{{end}}>Azure OpenAI</option>
-        </select>
+        <label class="block text-xs font-medium text-slate-400 mb-1">Base URL</label>
+        <input name="base_url" value="{{.Cfg.Embedding.BaseURL}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
-
-      <div id="embedding-local" class="space-y-4 {{if eq .Cfg.Embedding.Provider "azure-openai"}}hidden{{end}}">
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1">Base URL</label>
-          <input name="base_url" value="{{.Cfg.Embedding.BaseURL}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1">Model</label>
-          <input name="model" value="{{.Cfg.Embedding.Model}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-      </div>
-
-      <div id="embedding-azure" class="space-y-4 {{if ne .Cfg.Embedding.Provider "azure-openai"}}hidden{{end}}">
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1">Azure OpenAI endpoint</label>
-          <input name="azure_endpoint" value="{{.Cfg.Embedding.AzureEndpoint}}" placeholder="https://my-resource.openai.azure.com/" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1">Deployment name</label>
-          <input name="azure_deployment" value="{{.Cfg.Embedding.AzureDeployment}}" placeholder="text-embedding-3-small" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1">API version</label>
-          <input name="azure_api_version" value="{{.Cfg.Embedding.AzureAPIVersion}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-slate-400 mb-1">API key credential</label>
-          <select name="azure_api_key_credential" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-            <option value="">— Select credential —</option>
-            {{range .Credentials}}
-            <option value="{{.Name}}" {{if eq $.Cfg.Embedding.AzureAPIKeyCredential .Name}}selected{{end}}>{{.Name}}</option>
-            {{end}}
-          </select>
-          <p class="text-xs text-slate-500 mt-1">Manage on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
-        </div>
+      <div>
+        <label class="block text-xs font-medium text-slate-400 mb-1">Model</label>
+        <input name="model" value="{{.Cfg.Embedding.Model}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
 
       <div class="grid grid-cols-2 gap-3">
@@ -77,7 +41,7 @@
         </div>
       </div>
       <div id="embedding-dims-warning" class="hidden rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-2 text-xs text-amber-300"></div>
-      <p class="text-xs text-slate-500">Changing the provider, model, dimensions, or endpoint drops all collections and marks sources for re-index.</p>
+      <p class="text-xs text-slate-500">Changing the model, dimensions, or endpoint drops all collections and marks sources for re-index.</p>
     </div>
     <div id="verify-embedding" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
     <div class="flex gap-2 mt-5">
@@ -91,17 +55,9 @@
     <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Vector store (Qdrant)</h2>
     <div class="space-y-4">
       <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">Host</label>
-        <input name="qdrant_host" required value="{{.Cfg.Qdrant.Host}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        <label class="block text-xs font-medium text-slate-400 mb-1">URL</label>
+        <input name="qdrant_url" required value="{{.Cfg.Qdrant.URL}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">Port</label>
-        <input name="qdrant_port" type="number" min="1" max="65535" step="1" required value="{{.Cfg.Qdrant.Port}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-      </div>
-      <label class="flex items-center gap-2 text-sm text-slate-300">
-        <input type="checkbox" name="qdrant_https" value="on" {{if .Cfg.Qdrant.HTTPS}}checked{{end}} class="h-4 w-4 rounded border-slate-700 bg-slate-950">
-        Use HTTPS
-      </label>
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1">API key</label>
         <input name="qdrant_api_key" type="password" autocomplete="off" value="{{.Cfg.Qdrant.APIKey}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
@@ -118,7 +74,7 @@
 <!-- Preprocessing -->
 <form method="post" action="/settings/preprocessing" id="form-preprocessing" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
   <div class="flex items-center justify-between mb-1">
-    <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing</h2>
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing (Ollama)</h2>
     <label class="relative inline-flex items-center cursor-pointer" title="Enable preprocessing">
       <input type="checkbox" name="enabled" id="preprocEnabled" value="on" {{if .Cfg.Preprocessing.Enabled}}checked{{end}}
              onchange="togglePreproc()" class="sr-only peer">
@@ -131,16 +87,7 @@
   <p class="text-xs text-slate-500 mb-4">Summarize each document with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
 
   <div id="preproc-fields" class="{{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">
-    <div class="mb-4">
-      <label class="block text-xs font-medium text-slate-400 mb-1">Provider</label>
-      <select name="provider" id="preprocProvider" onchange="togglePreprocProvider()"
-              class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-        <option value="openai-compatible" {{if ne .Cfg.Preprocessing.Provider "azure-openai"}}selected{{end}}>Local / OpenAI-compatible (Ollama, etc.)</option>
-        <option value="azure-openai" {{if eq .Cfg.Preprocessing.Provider "azure-openai"}}selected{{end}}>Azure OpenAI</option>
-      </select>
-    </div>
-
-    <div id="preproc-local" class="grid grid-cols-1 lg:grid-cols-2 gap-4 {{if eq .Cfg.Preprocessing.Provider "azure-openai"}}hidden{{end}}">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1">Base URL</label>
         <input name="base_url" value="{{.Cfg.Preprocessing.BaseURL}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
@@ -148,31 +95,6 @@
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1">Model</label>
         <input name="model" value="{{.Cfg.Preprocessing.Model}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
-    </div>
-
-    <div id="preproc-azure" class="grid grid-cols-1 lg:grid-cols-2 gap-4 {{if ne .Cfg.Preprocessing.Provider "azure-openai"}}hidden{{end}}">
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">Azure OpenAI endpoint</label>
-        <input name="azure_endpoint" value="{{.Cfg.Preprocessing.AzureEndpoint}}" placeholder="https://my-resource.openai.azure.com/" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">Deployment name</label>
-        <input name="azure_deployment" value="{{.Cfg.Preprocessing.AzureDeployment}}" placeholder="gpt-4o-mini" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">API version</label>
-        <input name="azure_api_version" value="{{.Cfg.Preprocessing.AzureAPIVersion}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
-      <div>
-        <label class="block text-xs font-medium text-slate-400 mb-1">API key credential</label>
-        <select name="azure_api_key_credential" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
-          <option value="">— Select credential —</option>
-          {{range .Credentials}}
-          <option value="{{.Name}}" {{if eq $.Cfg.Preprocessing.AzureAPIKeyCredential .Name}}selected{{end}}>{{.Name}}</option>
-          {{end}}
-        </select>
-        <p class="text-xs text-slate-500 mt-1">Manage on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
       </div>
     </div>
 
@@ -280,13 +202,6 @@ function togglePreproc() {
   document.getElementById('preproc-fields').classList.toggle('hidden', !on);
 }
 
-function toggleEmbeddingProvider() {
-  var azure = document.getElementById('embeddingProvider').value === 'azure-openai';
-  document.getElementById('embedding-local').classList.toggle('hidden', azure);
-  document.getElementById('embedding-azure').classList.toggle('hidden', !azure);
-  checkEmbeddingDims();
-}
-
 // Known output dimensions for common embedding models, used to warn when the
 // configured "Dimensions" value doesn't match the selected model. Checked in
 // order, so more specific names (e.g. a versioned variant) come first.
@@ -326,8 +241,7 @@ function knownEmbeddingDims(name) {
 
 function checkEmbeddingDims() {
   var form = document.getElementById('form-embedding');
-  var azure = document.getElementById('embeddingProvider').value === 'azure-openai';
-  var modelField = form.querySelector(azure ? '[name="azure_deployment"]' : '[name="model"]');
+  var modelField = form.querySelector('[name="model"]');
   var model = modelField ? modelField.value : '';
   var dims = parseInt(form.querySelector('[name="dimensions"]').value, 10);
   var known = knownEmbeddingDims(model);
@@ -339,12 +253,6 @@ function checkEmbeddingDims() {
   } else {
     warning.classList.add('hidden');
   }
-}
-
-function togglePreprocProvider() {
-  var azure = document.getElementById('preprocProvider').value === 'azure-openai';
-  document.getElementById('preproc-local').classList.toggle('hidden', azure);
-  document.getElementById('preproc-azure').classList.toggle('hidden', !azure);
 }
 
 function verifyService(service) {
@@ -367,7 +275,7 @@ function verifyService(service) {
 }
 
 // Live-check the embedding model/dimensions warning as the user edits them.
-['model', 'azure_deployment', 'dimensions'].forEach(function (field) {
+['model', 'dimensions'].forEach(function (field) {
   var el = document.querySelector('#form-embedding [name="' + field + '"]');
   if (el) el.addEventListener('input', checkEmbeddingDims);
 });
@@ -380,7 +288,7 @@ checkEmbeddingDims();
     embedding_saved_dropped: ['warn', 'Embedding settings saved. Model changed — all collections dropped and sources marked for re-index.'],
     embedding_invalid: ['error', 'Dimensions and max input tokens must be positive numbers — settings not saved.'],
     qdrant_saved: ['ok', 'Vector store settings saved.'],
-    qdrant_invalid: ['error', 'Host is required and port must be between 1 and 65535 — settings not saved.'],
+    qdrant_invalid: ['error', 'URL is required and must be a valid http:// or https:// address — settings not saved.'],
     preprocessing_saved: ['ok', 'Preprocessing settings saved.'],
     sources_deleted: ['ok', 'All sources and their indexed data have been deleted.'],
     experiences_deleted: ['ok', 'All experiences have been deleted.'],

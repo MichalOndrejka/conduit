@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -67,13 +65,8 @@ func testIndexer(t *testing.T, embedHandler http.HandlerFunc, concurrency int) (
 	qd := &minimalQdrant{}
 	qdSrv := httptest.NewServer(qd.handler())
 	t.Cleanup(qdSrv.Close)
-	qdURL, _ := url.Parse(qdSrv.URL)
-	qdPort, _ := strconv.Atoi(qdURL.Port())
-
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
-	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Qdrant.URL = qdSrv.URL
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 	cfg.Embedding.Concurrency = concurrency
@@ -81,7 +74,7 @@ func testIndexer(t *testing.T, embedHandler http.HandlerFunc, concurrency int) (
 	cfg.Chunking.Overlap = 200
 
 	vectors := NewVectorStore(cfg)
-	embedding := NewEmbeddingService(cfg, nil)
+	embedding := NewEmbeddingService(cfg)
 	indexer := NewDocumentIndexer(vectors, embedding, NewTextChunker(cfg))
 	return indexer, qd
 }
@@ -273,20 +266,15 @@ func TestIndexBatchRecreatesCollectionOnDimensionMismatch(t *testing.T) {
 	qd := &recreatingQdrant{collectionExists: true, existingSize: 1536}
 	qdSrv := httptest.NewServer(qd.handler())
 	defer qdSrv.Close()
-	qdURL, _ := url.Parse(qdSrv.URL)
-	qdPort, _ := strconv.Atoi(qdURL.Port())
-
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
-	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Qdrant.URL = qdSrv.URL
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 	cfg.Chunking.MaxChunkSize = 2000
 	cfg.Chunking.Overlap = 200
 
 	vectors := NewVectorStore(cfg)
-	embedding := NewEmbeddingService(cfg, nil)
+	embedding := NewEmbeddingService(cfg)
 	indexer := NewDocumentIndexer(vectors, embedding, NewTextChunker(cfg))
 
 	docs := []models.SourceDocument{{ID: "doc-1", Text: "hello world"}}
@@ -348,20 +336,15 @@ func TestIndexBatchReplaceSourceIDDeletesOldVectorsBeforeUpsert(t *testing.T) {
 	defer embedSrv.Close()
 	qdSrv := httptest.NewServer(http.HandlerFunc(wrapped))
 	defer qdSrv.Close()
-	qdURL, _ := url.Parse(qdSrv.URL)
-	qdPort, _ := strconv.Atoi(qdURL.Port())
-
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
-	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Qdrant.URL = qdSrv.URL
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 	cfg.Chunking.MaxChunkSize = 2000
 	cfg.Chunking.Overlap = 200
 
 	vectors := NewVectorStore(cfg)
-	embedding := NewEmbeddingService(cfg, nil)
+	embedding := NewEmbeddingService(cfg)
 	indexer := NewDocumentIndexer(vectors, embedding, NewTextChunker(cfg))
 
 	docs := []models.SourceDocument{{ID: "doc-1", Text: "hello world"}}
@@ -440,20 +423,15 @@ func TestIndexBatchRollsBackOnUpsertFailure(t *testing.T) {
 	defer embedSrv.Close()
 	qdSrv := httptest.NewServer(http.HandlerFunc(handler))
 	defer qdSrv.Close()
-	qdURL, _ := url.Parse(qdSrv.URL)
-	qdPort, _ := strconv.Atoi(qdURL.Port())
-
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
-	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Qdrant.URL = qdSrv.URL
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 	cfg.Chunking.MaxChunkSize = 2000
 	cfg.Chunking.Overlap = 200
 
 	vectors := NewVectorStore(cfg)
-	embedding := NewEmbeddingService(cfg, nil)
+	embedding := NewEmbeddingService(cfg)
 	indexer := NewDocumentIndexer(vectors, embedding, NewTextChunker(cfg))
 
 	// 150 docs of one chunk each → two upsert batches of 100 given batchSize=100.

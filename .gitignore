@@ -36,6 +36,7 @@ Desktop.ini
 
 # Claude Code local settings
 .claude/settings.local.json
+.claude/.headroom_wrap_marker.json
 
 # Test results
 TestResults/

@@ -33,8 +33,8 @@ func TestLoadDefaultsWhenNoConfigFile(t *testing.T) {
 	if cfg.Preprocessing.Concurrency != 4 {
 		t.Errorf("Preprocessing.Concurrency = %d, want 4", cfg.Preprocessing.Concurrency)
 	}
-	if cfg.Qdrant.Host != "localhost" || cfg.Qdrant.Port != 6333 {
-		t.Errorf("Qdrant = %+v, want default localhost:6333", cfg.Qdrant)
+	if cfg.Qdrant.URL != "http://localhost:6333" {
+		t.Errorf("Qdrant.URL = %q, want default http://localhost:6333", cfg.Qdrant.URL)
 	}
 	if cfg.Chunking.MaxChunkSize != 2000 || cfg.Chunking.Overlap != 200 {
 		t.Errorf("Chunking = %+v, want default 2000/200", cfg.Chunking)
@@ -65,8 +65,8 @@ func TestLoadPartialConfigFileKeepsRemainingDefaults(t *testing.T) {
 	if cfg.Embedding.Concurrency != 4 {
 		t.Errorf("Embedding.Concurrency = %d, want default 4 preserved", cfg.Embedding.Concurrency)
 	}
-	if cfg.Qdrant.Port != 6333 {
-		t.Errorf("Qdrant.Port = %d, want default 6333 preserved", cfg.Qdrant.Port)
+	if cfg.Qdrant.URL != "http://localhost:6333" {
+		t.Errorf("Qdrant.URL = %q, want default preserved", cfg.Qdrant.URL)
 	}
 }
 
@@ -84,23 +84,16 @@ func TestLoadInvalidJSONErrors(t *testing.T) {
 func TestLoadEnvVarOverrides(t *testing.T) {
 	useConfigFile(t)
 
-	t.Setenv("QDRANT_HOST", "qdrant.internal")
-	t.Setenv("QDRANT_PORT", "7000")
-	t.Setenv("QDRANT_HTTPS", "true")
+	t.Setenv("QDRANT_URL", "https://qdrant.internal:7000")
 	t.Setenv("QDRANT_API_KEY", "qd-key")
-	t.Setenv("EMBEDDING_PROVIDER", "azure-openai")
 	t.Setenv("EMBEDDING_MODEL", "env-model")
 	t.Setenv("EMBEDDING_BASE_URL", "http://env-embed/v1")
 	t.Setenv("EMBEDDING_DIMENSIONS", "1536")
 	t.Setenv("EMBEDDING_MAX_INPUT_TOKENS", "4096")
 	t.Setenv("EMBEDDING_CONCURRENCY", "8")
-	t.Setenv("PREPROCESSING_PROVIDER", "azure-openai")
 	t.Setenv("PREPROCESSING_MODEL", "env-chat-model")
 	t.Setenv("PREPROCESSING_BASE_URL", "http://env-chat/v1")
 	t.Setenv("PREPROCESSING_CONCURRENCY", "6")
-	t.Setenv("AZURE_OPENAI_ENDPOINT", "https://env.openai.azure.com")
-	t.Setenv("AZURE_OPENAI_DEPLOYMENT", "env-deployment")
-	t.Setenv("AZURE_OPENAI_API_VERSION", "2025-01-01")
 
 	cfg, err := Load()
 	if err != nil {
@@ -112,23 +105,16 @@ func TestLoadEnvVarOverrides(t *testing.T) {
 		got  any
 		want any
 	}{
-		{"Qdrant.Host", cfg.Qdrant.Host, "qdrant.internal"},
-		{"Qdrant.Port", cfg.Qdrant.Port, 7000},
-		{"Qdrant.HTTPS", cfg.Qdrant.HTTPS, true},
+		{"Qdrant.URL", cfg.Qdrant.URL, "https://qdrant.internal:7000"},
 		{"Qdrant.APIKey", cfg.Qdrant.APIKey, "qd-key"},
-		{"Embedding.Provider", cfg.Embedding.Provider, "azure-openai"},
 		{"Embedding.Model", cfg.Embedding.Model, "env-model"},
 		{"Embedding.BaseURL", cfg.Embedding.BaseURL, "http://env-embed/v1"},
 		{"Embedding.Dimensions", cfg.Embedding.Dimensions, 1536},
 		{"Embedding.MaxInputTokens", cfg.Embedding.MaxInputTokens, 4096},
 		{"Embedding.Concurrency", cfg.Embedding.Concurrency, 8},
-		{"Preprocessing.Provider", cfg.Preprocessing.Provider, "azure-openai"},
 		{"Preprocessing.Model", cfg.Preprocessing.Model, "env-chat-model"},
 		{"Preprocessing.BaseURL", cfg.Preprocessing.BaseURL, "http://env-chat/v1"},
 		{"Preprocessing.Concurrency", cfg.Preprocessing.Concurrency, 6},
-		{"Embedding.AzureEndpoint", cfg.Embedding.AzureEndpoint, "https://env.openai.azure.com"},
-		{"Embedding.AzureDeployment", cfg.Embedding.AzureDeployment, "env-deployment"},
-		{"Embedding.AzureAPIVersion", cfg.Embedding.AzureAPIVersion, "2025-01-01"},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -151,27 +137,6 @@ func TestLoadInvalidIntEnvVarIgnored(t *testing.T) {
 	}
 	if cfg.Embedding.Concurrency != 4 {
 		t.Errorf("Embedding.Concurrency = %d, want default 4 preserved when env var is unparsable", cfg.Embedding.Concurrency)
-	}
-}
-
-func TestLoadQdrantHTTPSParsing(t *testing.T) {
-	cases := []struct {
-		in   string
-		want bool
-	}{
-		{"true", true}, {"TRUE", true}, {"1", true}, {"yes", true}, {"YES", true},
-		{"false", false}, {"0", false}, {"no", false}, {"garbage", false},
-	}
-	for _, c := range cases {
-		useConfigFile(t)
-		t.Setenv("QDRANT_HTTPS", c.in)
-		cfg, err := Load()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.Qdrant.HTTPS != c.want {
-			t.Errorf("QDRANT_HTTPS=%q => HTTPS = %v, want %v", c.in, cfg.Qdrant.HTTPS, c.want)
-		}
 	}
 }
 
@@ -283,7 +248,7 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	}
 	cfg.Embedding.Model = "round-trip-model"
 	cfg.Embedding.Concurrency = 12
-	cfg.Qdrant.Host = "round-trip-host"
+	cfg.Qdrant.URL = "http://round-trip-host:6333"
 
 	if err := Save(cfg); err != nil {
 		t.Fatal(err)
@@ -299,8 +264,8 @@ func TestSaveThenLoadRoundTrips(t *testing.T) {
 	if reloaded.Embedding.Concurrency != 12 {
 		t.Errorf("Embedding.Concurrency = %d after round-trip, want 12", reloaded.Embedding.Concurrency)
 	}
-	if reloaded.Qdrant.Host != "round-trip-host" {
-		t.Errorf("Qdrant.Host = %q after round-trip, want %q", reloaded.Qdrant.Host, "round-trip-host")
+	if reloaded.Qdrant.URL != "http://round-trip-host:6333" {
+		t.Errorf("Qdrant.URL = %q after round-trip, want %q", reloaded.Qdrant.URL, "http://round-trip-host:6333")
 	}
 }
 

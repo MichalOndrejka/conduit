@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -16,14 +15,8 @@ import (
 
 func storeFor(t *testing.T, srv *httptest.Server) *VectorStore {
 	t.Helper()
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, _ := strconv.Atoi(u.Port())
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = u.Hostname()
-	cfg.Qdrant.Port = port
+	cfg.Qdrant.URL = srv.URL
 	cfg.Qdrant.APIKey = "qd-key"
 	cfg.Embedding.Dimensions = 3
 	return NewVectorStore(cfg)
@@ -164,26 +157,14 @@ func TestVectorStoreReflectsLiveConfigChanges(t *testing.T) {
 	}))
 	defer newSrv.Close()
 
-	oldURL, err := url.Parse(oldSrv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldPort, _ := strconv.Atoi(oldURL.Port())
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = oldURL.Hostname()
-	cfg.Qdrant.Port = oldPort
+	cfg.Qdrant.URL = oldSrv.URL
 	cfg.Qdrant.APIKey = "old-key"
 	v := NewVectorStore(cfg)
 
 	// Simulate a Settings-page save: mutate the same *config.AppConfig the
 	// VectorStore holds, without reconstructing it.
-	newURL, err := url.Parse(newSrv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	newPort, _ := strconv.Atoi(newURL.Port())
-	cfg.Qdrant.Host = newURL.Hostname()
-	cfg.Qdrant.Port = newPort
+	cfg.Qdrant.URL = newSrv.URL
 	cfg.Qdrant.APIKey = "new-key"
 
 	if _, err := v.ListCollections(context.Background()); err != nil {
@@ -194,14 +175,12 @@ func TestVectorStoreReflectsLiveConfigChanges(t *testing.T) {
 	}
 }
 
-func TestNewVectorStoreUsesHTTPSScheme(t *testing.T) {
+func TestNewVectorStoreBaseURLTrimsTrailingSlash(t *testing.T) {
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = "qdrant.internal"
-	cfg.Qdrant.Port = 443
-	cfg.Qdrant.HTTPS = true
+	cfg.Qdrant.URL = "https://qdrant.internal:443/"
 	v := NewVectorStore(cfg)
 	if got := v.baseURL(); got != "https://qdrant.internal:443" {
-		t.Errorf("baseURL() = %q, want https scheme", got)
+		t.Errorf("baseURL() = %q, want trailing slash trimmed", got)
 	}
 }
 

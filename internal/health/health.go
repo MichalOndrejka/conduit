@@ -20,8 +20,8 @@ import (
 const (
 	maxAttempts = 10 // startup grace: stay "pending" for this many failures
 
-	// Re-check cadence once ready. Embedding re-checks are real (billable on
-	// Azure) embed calls, so they run far less often than the local Qdrant ping.
+	// Re-check cadence once ready. Embedding re-checks are real embed calls,
+	// so they run far less often than the local Qdrant ping.
 	qdrantRecheck    = 60 * time.Second
 	embeddingRecheck = 15 * time.Minute
 )
@@ -30,8 +30,7 @@ type ProbeState struct {
 	Status  string `json:"status"` // pending | ready | error
 	Message string `json:"message,omitempty"`
 	// Static info for the UI
-	Provider string `json:"provider,omitempty"`
-	Model    string `json:"model,omitempty"`
+	Model string `json:"model,omitempty"`
 }
 
 type Monitor struct {
@@ -113,7 +112,6 @@ func (m *Monitor) Embedding() ProbeState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	s := m.embedding
-	s.Provider = m.cfg.Embedding.Provider
 	s.Model = m.cfg.Embedding.Model
 	return s
 }

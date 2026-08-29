@@ -38,7 +38,7 @@ func main() {
 	}
 
 	vectors := rag.NewVectorStore(cfg)
-	embedding := rag.NewEmbeddingService(cfg, secretsStore)
+	embedding := rag.NewEmbeddingService(cfg)
 	sourceStore := store.NewSourceConfigStore(cfg.SourcesFilePath)
 	searchSvc := rag.NewSearchService(vectors, embedding, sourceStore)
 	memorySvc := memory.NewService(vectors, embedding)
@@ -92,8 +92,8 @@ func main() {
 		port = p
 	}
 	addr := host + ":" + port
-	log.Printf("Conduit (Go) listening on %s — qdrant=%s:%d embedding=%s/%s",
-		addr, cfg.Qdrant.Host, cfg.Qdrant.Port, cfg.Embedding.Provider, cfg.Embedding.Model)
+	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s",
+		addr, cfg.Qdrant.URL, cfg.Embedding.Model)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatal(err)
 	}

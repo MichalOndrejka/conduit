@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -48,8 +47,7 @@ func TestHandleSettingsEmbeddingSavesUnchangedConfigKeepsCollections(t *testing.
 	h.qd.mu.Unlock()
 
 	resp := h.postForm("/settings/embedding", url.Values{
-		"provider": {"openai-compatible"}, // exercise formOr's non-default branch too
-		"model":    {h.cfg.Embedding.Model}, "base_url": {h.cfg.Embedding.BaseURL},
+		"model": {h.cfg.Embedding.Model}, "base_url": {h.cfg.Embedding.BaseURL},
 		"dimensions": {"3"}, "max_input_tokens": {"8192"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
@@ -131,12 +129,11 @@ func TestHandleSettingsQdrantInvalidInputRedirectsWithNotice(t *testing.T) {
 		name string
 		form url.Values
 	}{
-		{"missing host", url.Values{"qdrant_port": {"6333"}}},
-		{"blank host", url.Values{"qdrant_host": {"   "}, "qdrant_port": {"6333"}}},
-		{"missing port", url.Values{"qdrant_host": {"localhost"}}},
-		{"non-numeric port", url.Values{"qdrant_host": {"localhost"}, "qdrant_port": {"abc"}}},
-		{"port too low", url.Values{"qdrant_host": {"localhost"}, "qdrant_port": {"0"}}},
-		{"port too high", url.Values{"qdrant_host": {"localhost"}, "qdrant_port": {"70000"}}},
+		{"missing url", url.Values{}},
+		{"blank url", url.Values{"qdrant_url": {"   "}}},
+		{"malformed url", url.Values{"qdrant_url": {"://not-a-url"}}},
+		{"no host", url.Values{"qdrant_url": {"http://"}}},
+		{"unsupported scheme", url.Values{"qdrant_url": {"ftp://localhost:6333"}}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -155,8 +152,7 @@ func TestHandleSettingsQdrantInvalidInputRedirectsWithNotice(t *testing.T) {
 func TestHandleSettingsQdrantSavesValidConfig(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/settings/qdrant", url.Values{
-		"qdrant_host": {"new-host"}, "qdrant_port": {"7000"},
-		"qdrant_https": {"on"}, "qdrant_api_key": {"secret-key"},
+		"qdrant_url": {"https://new-host:7000"}, "qdrant_api_key": {"secret-key"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303; body: %s", resp.StatusCode, bodyString(t, resp))
@@ -164,7 +160,7 @@ func TestHandleSettingsQdrantSavesValidConfig(t *testing.T) {
 	if loc := resp.Header.Get("Location"); loc != "/settings?notice=qdrant_saved" {
 		t.Errorf("Location = %q, want qdrant_saved", loc)
 	}
-	want := config.QdrantConfig{Host: "new-host", Port: 7000, HTTPS: true, APIKey: "secret-key"}
+	want := config.QdrantConfig{URL: "https://new-host:7000", APIKey: "secret-key"}
 	if h.cfg.Qdrant != want {
 		t.Errorf("cfg.Qdrant = %+v, want %+v", h.cfg.Qdrant, want)
 	}
@@ -183,7 +179,7 @@ func TestHandleSettingsQdrantSaveFailureReturns500(t *testing.T) {
 	t.Setenv("CONDUIT_CONFIG", filepath.Join(t.TempDir(), "no-such-dir", "config.json"))
 
 	resp := h.postForm("/settings/qdrant", url.Values{
-		"qdrant_host": {"localhost"}, "qdrant_port": {"6333"},
+		"qdrant_url": {"http://localhost:6333"},
 	})
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", resp.StatusCode)
@@ -248,7 +244,7 @@ func TestHandleSettingsVerifyEmbeddingFailureReportsError(t *testing.T) {
 func TestHandleSettingsVerifyQdrantSuccess(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postMultipart("/settings/verify/qdrant", url.Values{
-		"qdrant_host": {h.cfg.Qdrant.Host}, "qdrant_port": {strconv.Itoa(h.cfg.Qdrant.Port)},
+		"qdrant_url": {h.cfg.Qdrant.URL},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -265,7 +261,7 @@ func TestHandleSettingsVerifyQdrantSuccess(t *testing.T) {
 func TestHandleSettingsVerifyQdrantFailureReportsError(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postMultipart("/settings/verify/qdrant", url.Values{
-		"qdrant_host": {"127.0.0.1"}, "qdrant_port": {"1"}, // reserved port, connection refused
+		"qdrant_url": {"http://127.0.0.1:1"}, // reserved port, connection refused
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (errors reported in the JSON body)", resp.StatusCode)

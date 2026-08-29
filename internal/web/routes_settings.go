@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -82,9 +83,8 @@ func (s *Server) handleSettingsEmbedding(w http.ResponseWriter, r *http.Request)
 
 	// A change to anything that affects vector shape or the model itself means
 	// existing vectors are stale — drop the collections and flag for reindex.
-	changed := old.Provider != ec.Provider || old.Model != ec.Model ||
-		old.Dimensions != ec.Dimensions || old.BaseURL != ec.BaseURL ||
-		old.AzureEndpoint != ec.AzureEndpoint || old.AzureDeployment != ec.AzureDeployment
+	changed := old.Model != ec.Model ||
+		old.Dimensions != ec.Dimensions || old.BaseURL != ec.BaseURL
 
 	s.cfg.Embedding = ec
 	if err := config.Save(s.cfg); err != nil {
@@ -111,16 +111,14 @@ func (s *Server) handleSettingsEmbedding(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleSettingsQdrant(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
-	host := strings.TrimSpace(r.FormValue("qdrant_host"))
-	port, portOK := atoiStrict(r.FormValue("qdrant_port"))
-	if host == "" || !portOK || port < 1 || port > 65535 {
+	qdrantURL := strings.TrimSpace(r.FormValue("qdrant_url"))
+	parsed, err := url.Parse(qdrantURL)
+	if qdrantURL == "" || err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		http.Redirect(w, r, "/settings?notice=qdrant_invalid", http.StatusSeeOther)
 		return
 	}
 	s.cfg.Qdrant = config.QdrantConfig{
-		Host:   host,
-		Port:   port,
-		HTTPS:  r.FormValue("qdrant_https") == "on",
+		URL:    qdrantURL,
 		APIKey: r.FormValue("qdrant_api_key"),
 	}
 	if err := config.Save(s.cfg); err != nil {
@@ -158,7 +156,7 @@ func (s *Server) handleSettingsVerify(w http.ResponseWriter, r *http.Request) {
 	switch r.PathValue("service") {
 	case "embedding":
 		tmp := &config.AppConfig{Embedding: embeddingFromForm(r)}
-		svc := rag.NewEmbeddingService(tmp, s.secrets)
+		svc := rag.NewEmbeddingService(tmp)
 		vec, err := svc.Embed(ctx, "connection test")
 		if err != nil {
 			writeVerify(w, false, err.Error())
@@ -167,9 +165,7 @@ func (s *Server) handleSettingsVerify(w http.ResponseWriter, r *http.Request) {
 		writeVerify(w, true, fmt.Sprintf("OK — model returned %d-dim vector", len(vec)))
 	case "qdrant":
 		tmp := &config.AppConfig{Qdrant: config.QdrantConfig{
-			Host:   r.FormValue("qdrant_host"),
-			Port:   atoiOr(r.FormValue("qdrant_port"), 6333),
-			HTTPS:  r.FormValue("qdrant_https") == "on",
+			URL:    r.FormValue("qdrant_url"),
 			APIKey: r.FormValue("qdrant_api_key"),
 		}}
 		cols, err := rag.NewVectorStore(tmp).ListCollections(ctx)
@@ -180,7 +176,7 @@ func (s *Server) handleSettingsVerify(w http.ResponseWriter, r *http.Request) {
 		writeVerify(w, true, fmt.Sprintf("Connected — %d collection(s)", len(cols)))
 	case "preprocessing":
 		tmp := &config.AppConfig{Preprocessing: preprocessingFromForm(r)}
-		msg, err := rag.NewDocumentPreprocessor(tmp, s.secrets).Verify(ctx)
+		msg, err := rag.NewDocumentPreprocessor(tmp).Verify(ctx)
 		if err != nil {
 			writeVerify(w, false, err.Error())
 			return
@@ -245,30 +241,20 @@ func (s *Server) recreateExperience(ctx context.Context) {
 
 func embeddingFromForm(r *http.Request) config.EmbeddingConfig {
 	return config.EmbeddingConfig{
-		Provider:              formOr(r, "provider", "openai-compatible"),
-		Model:                 r.FormValue("model"),
-		BaseURL:               r.FormValue("base_url"),
-		Dimensions:            atoiOr(r.FormValue("dimensions"), 768),
-		MaxInputTokens:        atoiOr(r.FormValue("max_input_tokens"), 8192),
-		AzureEndpoint:         r.FormValue("azure_endpoint"),
-		AzureDeployment:       r.FormValue("azure_deployment"),
-		AzureAPIVersion:       formOr(r, "azure_api_version", "2024-02-01"),
-		AzureAPIKeyCredential: r.FormValue("azure_api_key_credential"),
+		Model:          r.FormValue("model"),
+		BaseURL:        r.FormValue("base_url"),
+		Dimensions:     atoiOr(r.FormValue("dimensions"), 768),
+		MaxInputTokens: atoiOr(r.FormValue("max_input_tokens"), 8192),
 	}
 }
 
 func preprocessingFromForm(r *http.Request) config.PreprocessingConfig {
 	return config.PreprocessingConfig{
-		Enabled:               r.FormValue("enabled") == "on",
-		Provider:              formOr(r, "provider", "openai-compatible"),
-		BaseURL:               r.FormValue("base_url"),
-		Model:                 r.FormValue("model"),
-		SystemPrompt:          r.FormValue("system_prompt"),
-		SourceTypes:           sourceTypesFromForm(r),
-		AzureEndpoint:         r.FormValue("azure_endpoint"),
-		AzureDeployment:       r.FormValue("azure_deployment"),
-		AzureAPIVersion:       formOr(r, "azure_api_version", "2024-02-01"),
-		AzureAPIKeyCredential: r.FormValue("azure_api_key_credential"),
+		Enabled:      r.FormValue("enabled") == "on",
+		BaseURL:      r.FormValue("base_url"),
+		Model:        r.FormValue("model"),
+		SystemPrompt: r.FormValue("system_prompt"),
+		SourceTypes:  sourceTypesFromForm(r),
 	}
 }
 
@@ -283,13 +269,6 @@ func sourceTypesFromForm(r *http.Request) map[string]bool {
 
 func writeVerify(w http.ResponseWriter, ok bool, msg string) {
 	writeJSON(w, map[string]any{"ok": ok, "message": msg})
-}
-
-func formOr(r *http.Request, key, def string) string {
-	if v := r.FormValue(key); v != "" {
-		return v
-	}
-	return def
 }
 
 func atoiOr(s string, def int) int {

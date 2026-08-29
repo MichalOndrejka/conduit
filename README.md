@@ -29,7 +29,7 @@ Web UI ──► Sync engine ──► generic API / manual sources
 **Indexing pipeline**
 1. Fetch documents from configured sources (any JSON endpoint, or pasted content)
 2. Chunk text with sentence-boundary and newline-priority splitting
-3. Generate embeddings via Ollama / Azure OpenAI / any OpenAI-compatible API
+3. Generate embeddings via Ollama or any OpenAI-compatible embeddings API
 4. Store in Qdrant, one collection per content type — with rollback on partial failure
 
 ## MCP Tools
@@ -119,7 +119,7 @@ docker build -t conduit .
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
   -e CONDUIT_HOST=0.0.0.0 \
-  -e QDRANT_HOST=host.docker.internal \
+  -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   conduit
 ```
@@ -130,16 +130,16 @@ Or pull the prebuilt image from Docker Hub instead of building:
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
   -e CONDUIT_HOST=0.0.0.0 \
-  -e QDRANT_HOST=host.docker.internal \
+  -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   michalondrejka/conduit:latest
 ```
 
 The volume at `/data` (`CONDUIT_DATA_DIR=/data`) persists sources, config, and
 credentials across restarts. `host.docker.internal` reaches services running
-on the host; point `QDRANT_HOST`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL`
+on the host; point `QDRANT_URL`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL`
 at wherever those services actually run instead (another container, a remote
-host, Azure OpenAI, etc.) — or leave them out and configure the connections
+host, etc.) — or leave them out and configure the connections
 from the **Settings** page after the container starts.
 
 ### Sync performance: concurrency
@@ -166,10 +166,8 @@ configured on that service directly — see the
 |----------|---------|
 | `CONDUIT_HOST` | Bind address (default `127.0.0.1`; use `0.0.0.0` in Docker) |
 | `PORT` | Listen port (default `8000`) |
-| `QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_HTTPS` / `QDRANT_API_KEY` | Qdrant connection |
-| `EMBEDDING_PROVIDER` | `openai-compatible` (default) or `azure-openai` |
-| `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_MAX_INPUT_TOKENS` | Embedding settings |
-| `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` / `AZURE_OPENAI_API_KEY` | Azure OpenAI embeddings |
+| `QDRANT_URL` / `QDRANT_API_KEY` | Qdrant connection |
+| `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_MAX_INPUT_TOKENS` | Embedding settings (Ollama or any OpenAI-compatible endpoint) |
 | `CONDUIT_CONFIG` | Path to `config.json` |
 | `CONDUIT_DATA_DIR` | Directory for `config.json`, sources, credentials, and keys. **Required in Docker.** |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for `credentials.enc.json`. Pin so credentials survive container recreation. |

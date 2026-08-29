@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -158,29 +157,22 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 	t.Cleanup(embedSrv.Close)
 
 	qd := newFakeQdrant()
-	qdHost, qdPort := "127.0.0.1", 1 // reserved port, connection refused
+	qdURL := "http://127.0.0.1:1" // reserved port, connection refused
 	if qdrantReachable {
 		qdSrv := httptest.NewServer(qd.handler())
 		t.Cleanup(qdSrv.Close)
-		qdURL, err := url.Parse(qdSrv.URL)
-		if err != nil {
-			t.Fatal(err)
-		}
-		qdHost = qdURL.Hostname()
-		qdPort, _ = strconv.Atoi(qdURL.Port())
+		qdURL = qdSrv.URL
 	}
 
 	dataDir := t.TempDir()
 	t.Setenv("CONDUIT_CONFIG", filepath.Join(dataDir, "config.json"))
 
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 	cfg.Embedding.Dimensions = 3
 	cfg.Embedding.Model = "test-model"
-	cfg.Qdrant.Host = qdHost
-	cfg.Qdrant.Port = qdPort
+	cfg.Qdrant.URL = qdURL
 	cfg.Chunking.MaxChunkSize = 2000
 	cfg.Chunking.Overlap = 200
 	cfg.Preprocessing.SourceTypes = map[string]bool{}
@@ -192,7 +184,7 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 	}
 
 	vectors := rag.NewVectorStore(cfg)
-	embedding := rag.NewEmbeddingService(cfg, secretsStore)
+	embedding := rag.NewEmbeddingService(cfg)
 	memSvc := memory.NewService(vectors, embedding)
 	chunker := rag.NewTextChunker(cfg)
 	indexer := rag.NewDocumentIndexer(vectors, embedding, chunker)

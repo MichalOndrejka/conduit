@@ -6,8 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,14 +43,13 @@ func TestInitialStateIsPending(t *testing.T) {
 
 func TestEmbeddingReflectsLiveConfig(t *testing.T) {
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.Model = "model-a"
 	m := &Monitor{cfg: cfg}
 	m.setEmbedding(ProbeState{Status: "ready"})
 
 	got := m.Embedding()
-	if got.Provider != "openai-compatible" || got.Model != "model-a" {
-		t.Errorf("Embedding() = %+v, want Provider/Model from cfg", got)
+	if got.Model != "model-a" {
+		t.Errorf("Embedding() = %+v, want Model from cfg", got)
 	}
 
 	// Embedding() reads cfg live on every call, not a snapshot cached at
@@ -171,21 +168,14 @@ func TestStartReachesReadyAgainstWorkingBackends(t *testing.T) {
 
 	qdSrv := httptest.NewServer(emptyQdrantHandler())
 	defer qdSrv.Close()
-	qdURL, err := url.Parse(qdSrv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	qdPort, _ := strconv.Atoi(qdURL.Port())
 
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
+	cfg.Qdrant.URL = qdSrv.URL
 
 	vectors := rag.NewVectorStore(cfg)
-	embedding := rag.NewEmbeddingService(cfg, nil)
+	embedding := rag.NewEmbeddingService(cfg)
 
 	m := Start(cfg, vectors, embedding)
 	waitFor(t, m.IsReady, 2*time.Second, "Qdrant probe to become ready")
@@ -198,14 +188,12 @@ func TestStartReachesReadyAgainstWorkingBackends(t *testing.T) {
 // would show up as IsReady() flipping true here).
 func TestStartStaysPendingAgainstUnreachableQdrant(t *testing.T) {
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = "http://127.0.0.1:1" // reserved port, connection refused
 	cfg.Embedding.MaxInputTokens = 8192
-	cfg.Qdrant.Host = "127.0.0.1"
-	cfg.Qdrant.Port = 1
+	cfg.Qdrant.URL = "http://127.0.0.1:1"
 
 	vectors := rag.NewVectorStore(cfg)
-	embedding := rag.NewEmbeddingService(cfg, nil)
+	embedding := rag.NewEmbeddingService(cfg)
 
 	m := Start(cfg, vectors, embedding)
 	time.Sleep(300 * time.Millisecond) // comfortably under the 1s startup backoff

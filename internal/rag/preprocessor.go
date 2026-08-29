@@ -12,14 +12,12 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
-	"github.com/MichalOndrejka/conduit/internal/secrets"
 )
 
 // minPreprocessLength skips summarizing very short documents — they're already
@@ -39,12 +37,6 @@ type DocumentPreprocessor struct {
 	url          string
 	httpClient   *http.Client
 	concurrency  int
-
-	// Azure resolves the API key per request (azureCredential → secrets
-	// store, falling back to AZURE_OPENAI_API_KEY), matching EmbeddingService.
-	azure           bool
-	azureCredential string
-	secrets         secrets.Reader
 }
 
 // PreprocessOptions carries the per-document progress and cancellation hooks,
@@ -57,56 +49,26 @@ type PreprocessOptions struct {
 // NewDocumentPreprocessor builds a preprocessor from the current config. It is
 // cheap to construct, so callers can build it per sync to pick up live config
 // changes (preprocessing is not captured at startup like the embedding client).
-// Supports the same two providers as the embedding config: "openai-compatible"
-// (Ollama, etc.) and "azure-openai".
-func NewDocumentPreprocessor(cfg *config.AppConfig, store secrets.Reader) *DocumentPreprocessor {
+func NewDocumentPreprocessor(cfg *config.AppConfig) *DocumentPreprocessor {
 	pc := cfg.Preprocessing
 	prompt := strings.TrimSpace(pc.SystemPrompt)
 	if prompt == "" {
 		prompt = defaultPreprocessPrompt
 	}
 	concurrency := effectiveConcurrency(pc.Concurrency)
-	p := &DocumentPreprocessor{
+	base := pc.BaseURL
+	if base == "" {
+		base = "http://localhost:11434/v1"
+	}
+	return &DocumentPreprocessor{
 		enabled:      pc.Enabled,
+		model:        pc.Model,
 		systemPrompt: prompt,
 		sourceTypes:  pc.SourceTypes,
-		secrets:      store,
+		url:          strings.TrimRight(base, "/") + "/chat/completions",
 		httpClient:   &http.Client{Timeout: 120 * time.Second, Transport: pooledTransport(concurrency)},
 		concurrency:  concurrency,
 	}
-	if pc.Provider == "azure-openai" {
-		p.azure = true
-		p.azureCredential = pc.AzureAPIKeyCredential
-		p.model = pc.AzureDeployment
-		if p.model == "" {
-			p.model = pc.Model
-		}
-		p.url = fmt.Sprintf(
-			"%s/openai/deployments/%s/chat/completions?api-version=%s",
-			strings.TrimRight(pc.AzureEndpoint, "/"), p.model, pc.AzureAPIVersion,
-		)
-	} else {
-		p.model = pc.Model
-		base := pc.BaseURL
-		if base == "" {
-			base = "http://localhost:11434/v1"
-		}
-		p.url = strings.TrimRight(base, "/") + "/chat/completions"
-	}
-	return p
-}
-
-// apiKey resolves the credential at call time, not construction time.
-func (p *DocumentPreprocessor) apiKey() string {
-	if !p.azure {
-		return "ollama" // matches embedding's local-key convention
-	}
-	if p.azureCredential != "" && p.secrets != nil {
-		if key := p.secrets.GetValue(p.azureCredential); key != "" {
-			return key
-		}
-	}
-	return os.Getenv("AZURE_OPENAI_API_KEY")
 }
 
 // EnabledForType reports whether preprocessing should run for a source type.
@@ -194,11 +156,7 @@ func (p *DocumentPreprocessor) summarize(ctx context.Context, doc models.SourceD
 		return doc.Text
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if p.azure {
-		req.Header.Set("api-key", p.apiKey())
-	} else {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey())
-	}
+	req.Header.Set("Authorization", "Bearer ollama") // matches embedding's local-key convention
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
@@ -225,8 +183,8 @@ func (p *DocumentPreprocessor) summarize(ctx context.Context, doc models.SourceD
 }
 
 // Verify probes the configured chat endpoint with a minimal request, for the
-// Settings page's "Verify" button. It checks connectivity and auth for either
-// provider without depending on a model actually producing a useful reply.
+// Settings page's "Verify" button. It checks connectivity without depending
+// on a model actually producing a useful reply.
 func (p *DocumentPreprocessor) Verify(ctx context.Context) (string, error) {
 	if strings.TrimSpace(p.model) == "" {
 		return "", fmt.Errorf("model is required")
@@ -246,11 +204,7 @@ func (p *DocumentPreprocessor) Verify(ctx context.Context) (string, error) {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if p.azure {
-		req.Header.Set("api-key", p.apiKey())
-	} else {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey())
-	}
+	req.Header.Set("Authorization", "Bearer ollama") // matches embedding's local-key convention
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {

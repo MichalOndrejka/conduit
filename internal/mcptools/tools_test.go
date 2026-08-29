@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -104,21 +102,14 @@ func setup(t *testing.T, qd *fakeQdrant, embedHandler http.HandlerFunc) (*server
 
 	qdSrv := httptest.NewServer(qd.handler())
 	t.Cleanup(qdSrv.Close)
-	qdURL, err := url.Parse(qdSrv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	qdPort, _ := strconv.Atoi(qdURL.Port())
 
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
+	cfg.Qdrant.URL = qdSrv.URL
 
 	vectors := rag.NewVectorStore(cfg)
-	embedding := rag.NewEmbeddingService(cfg, nil)
+	embedding := rag.NewEmbeddingService(cfg)
 	search := rag.NewSearchService(vectors, embedding, nil)
 	mem := memory.NewService(vectors, embedding)
 

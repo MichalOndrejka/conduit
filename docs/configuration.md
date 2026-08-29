@@ -7,21 +7,14 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
 ```json
 {
   "embedding": {
-    "provider": "openai-compatible",
     "model": "nomic-embed-text-v2-moe",
     "base_url": "http://localhost:11434/v1",
     "dimensions": 768,
     "max_input_tokens": 8192,
-    "azure_endpoint": "",
-    "azure_deployment": "",
-    "azure_api_version": "2024-02-01",
-    "azure_api_key_credential": "",
     "concurrency": 4
   },
   "qdrant": {
-    "host": "localhost",
-    "port": 6333,
-    "https": false,
+    "url": "http://localhost:6333",
     "api_key": ""
   },
   "chunking": {
@@ -30,7 +23,6 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
   },
   "preprocessing": {
     "enabled": false,
-    "provider": "openai-compatible",
     "base_url": "",
     "model": "",
     "system_prompt": "",
@@ -39,10 +31,6 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
       "commit-history": false, "code": false,
       "test-code": false, "documentation": true
     },
-    "azure_endpoint": "",
-    "azure_deployment": "",
-    "azure_api_version": "2024-02-01",
-    "azure_api_key_credential": "",
     "concurrency": 4
   },
   "sources_file_path": "conduit-sources.json"
@@ -53,14 +41,10 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
 
 ## Embedding
 
-Conduit supports two embedding providers, selected via `provider`:
-
-- **`openai-compatible`** (default) — any endpoint speaking the OpenAI
-  embeddings API format, such as [Ollama](https://ollama.ai), for local,
-  private embeddings.
-- **`azure-openai`** — Azure OpenAI Service.
-
-### `provider: "openai-compatible"`
+Conduit talks to any endpoint speaking the OpenAI embeddings API format, such
+as [Ollama](https://ollama.ai), for local, private embeddings. There's no
+cloud provider option — only local/self-hosted OpenAI-compatible endpoints
+are supported.
 
 #### `model`
 
@@ -82,31 +66,6 @@ Base URL for the OpenAI-compatible embeddings endpoint. Default: `http://localho
 
 Change this if Ollama is running on a different host or port. Override with the `EMBEDDING_BASE_URL` env var.
 
-### `provider: "azure-openai"`
-
-#### `azure_endpoint`
-
-Your Azure OpenAI resource endpoint, e.g. `https://my-resource.openai.azure.com/`. Override with `AZURE_OPENAI_ENDPOINT`.
-
-#### `azure_deployment`
-
-Name of the model deployment in Azure AI Foundry, e.g. `text-embedding-3-small`. Override with `AZURE_OPENAI_DEPLOYMENT`.
-
-#### `azure_api_version`
-
-Azure OpenAI REST API version. Default `2024-02-01`. Override with `AZURE_OPENAI_API_VERSION`.
-
-#### `azure_api_key_credential`
-
-Name of a credential in the [credential library](#credential-library) holding
-the Azure OpenAI API key. If empty, falls back to the `AZURE_OPENAI_API_KEY`
-environment variable — useful when the key is supplied as a platform secret.
-
-| Recommended model | Dimensions |
-|------------------|------------|
-| `text-embedding-3-small` | `1536` |
-| `text-embedding-3-large` | `3072` (≈6x the cost/storage of `-small`) |
-
 ### `dimensions`
 
 Vector dimensions. **Must match the model exactly.** Changing this drops all existing Qdrant collections and marks every source for re-indexing. Override with `EMBEDDING_DIMENSIONS`.
@@ -119,14 +78,12 @@ Context window of your embedding model in tokens. Default `8192` (matches `nomic
 
 ## Qdrant
 
-### `host` / `port`
+### `url`
 
-Qdrant connection details. Override with `QDRANT_HOST` / `QDRANT_PORT` environment variables (useful in Docker where the service name differs from `localhost`).
-
-### `https`
-
-Connect to Qdrant over TLS. Needed for Qdrant Cloud. Override with
-`QDRANT_HTTPS=true`.
+Full Qdrant connection URL, including scheme, e.g. `http://localhost:6333` or
+`https://my-cluster.qdrant.io:6333` for Qdrant Cloud. Override with the
+`QDRANT_URL` environment variable (useful in Docker where the service name
+differs from `localhost`).
 
 ### `api_key`
 
@@ -156,10 +113,6 @@ Runs at sync time, per source type, before chunking/embedding.
 
 Master switch, toggled on the **Settings** page. Default `false`.
 
-### `provider`
-
-`openai-compatible` (any OpenAI-compatible chat endpoint, e.g. Ollama) or `azure-openai`. Same provider split as `embedding.provider`. Override with `PREPROCESSING_PROVIDER`.
-
 ### `base_url` / `model` / `system_prompt`
 
 Chat endpoint, model name, and system prompt used to summarize documents. `system_prompt` defaults to a built-in technical-summarization prompt if left empty. Override `base_url` with `PREPROCESSING_BASE_URL` and `model` with `PREPROCESSING_MODEL`.
@@ -168,9 +121,7 @@ Chat endpoint, model name, and system prompt used to summarize documents. `syste
 
 Map of source type key (`work-item`, `requirements`, `test-case`, `commit-history`, `code`, `test-code`, `documentation`) → whether preprocessing runs for that type. A type absent from the map defaults to enabled. Documents shorter than 200 characters are always passed through unsummarized.
 
-### `azure_endpoint` / `azure_deployment` / `azure_api_version` / `azure_api_key_credential`
-
-Same shape as the `embedding` block's Azure OpenAI fields, used only when `provider: "azure-openai"`.
+Like embedding, preprocessing talks to any OpenAI-compatible chat endpoint (e.g. Ollama) — there's no separate cloud provider option.
 
 ---
 
@@ -187,21 +138,13 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in CWD. |
 | `CONDUIT_DATA_DIR` | If set, `config.json`, `conduit-sources.json`, and `credentials.enc.json` are placed here. **Required in Docker** to persist all data across container restarts. |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
-| `QDRANT_HOST` | Overrides `qdrant.host` in config. |
-| `QDRANT_PORT` | Overrides `qdrant.port` in config. |
-| `QDRANT_HTTPS` | Overrides `qdrant.https` (`true`/`false`). |
+| `QDRANT_URL` | Overrides `qdrant.url` in config. |
 | `QDRANT_API_KEY` | Overrides `qdrant.api_key`. |
-| `EMBEDDING_PROVIDER` | Overrides `embedding.provider` (`openai-compatible` / `azure-openai`). |
 | `EMBEDDING_MODEL` | Overrides `embedding.model`. |
 | `EMBEDDING_BASE_URL` | Overrides `embedding.base_url`. |
 | `EMBEDDING_DIMENSIONS` | Overrides `embedding.dimensions`. |
 | `EMBEDDING_MAX_INPUT_TOKENS` | Overrides `embedding.max_input_tokens`. |
 | `EMBEDDING_CONCURRENCY` | Overrides `embedding.concurrency` — max in-flight embed calls during a sync. Default: `4`. |
-| `AZURE_OPENAI_ENDPOINT` | Overrides `embedding.azure_endpoint`. |
-| `AZURE_OPENAI_DEPLOYMENT` | Overrides `embedding.azure_deployment`. |
-| `AZURE_OPENAI_API_VERSION` | Overrides `embedding.azure_api_version`. |
-| `AZURE_OPENAI_API_KEY` | Fallback API key for `provider: "azure-openai"` when `azure_api_key_credential` is empty. |
-| `PREPROCESSING_PROVIDER` | Overrides `preprocessing.provider` (`openai-compatible` / `azure-openai`). |
 | `PREPROCESSING_MODEL` | Overrides `preprocessing.model`. |
 | `PREPROCESSING_BASE_URL` | Overrides `preprocessing.base_url`. |
 | `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
@@ -248,7 +191,7 @@ docker build -t conduit .
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
   -e CONDUIT_HOST=0.0.0.0 \
-  -e QDRANT_HOST=host.docker.internal \
+  -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   conduit
 ```
@@ -259,13 +202,13 @@ Or pull the prebuilt image instead of building:
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
   -e CONDUIT_HOST=0.0.0.0 \
-  -e QDRANT_HOST=host.docker.internal \
+  -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   michalondrejka/conduit:latest
 ```
 
 `host.docker.internal` reaches services running on the host; point the env
-vars at wherever Qdrant/Ollama/Azure OpenAI actually run instead, or skip them
+vars at wherever Qdrant/Ollama actually run instead, or skip them
 and set the connection details from the **Settings** page after the container
 starts. The volume at `/data` and `CONDUIT_DATA_DIR=/data` persist source
 definitions, config, and credentials across container restarts.

@@ -2,7 +2,7 @@
 //
 // Deliberately uses Qdrant's HTTP API (same port 6333 / HTTPS 443 the Python
 // qdrant-client targets) instead of the official gRPC client, so the existing
-// container deployment (QDRANT_HOST/PORT/HTTPS/API_KEY) works unchanged.
+// container deployment (QDRANT_URL/QDRANT_API_KEY) works unchanged.
 // Only the handful of operations Conduit needs are implemented.
 package rag
 
@@ -21,8 +21,8 @@ import (
 )
 
 // VectorStore reads its connection details from *config.AppConfig on every
-// call, so Qdrant host/port/API-key/dimensions changes made via the Settings
-// page take effect on the next request without requiring a restart.
+// call, so Qdrant URL/API-key/dimensions changes made via the Settings page
+// take effect on the next request without requiring a restart.
 type VectorStore struct {
 	cfg        *config.AppConfig
 	httpClient *http.Client
@@ -36,11 +36,7 @@ func NewVectorStore(cfg *config.AppConfig) *VectorStore {
 }
 
 func (v *VectorStore) baseURL() string {
-	scheme := "http"
-	if v.cfg.Qdrant.HTTPS {
-		scheme = "https"
-	}
-	return fmt.Sprintf("%s://%s:%d", scheme, v.cfg.Qdrant.Host, v.cfg.Qdrant.Port)
+	return strings.TrimRight(v.cfg.Qdrant.URL, "/")
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────

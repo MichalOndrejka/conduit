@@ -5,10 +5,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -43,20 +41,12 @@ func runSearchCLISearchErrorSubprocess() {
 	// The embedding endpoint URL is passed in by the parent process so this
 	// subprocess talks to the same fake server.
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = os.Getenv("CONDUIT_TEST_EMBED_URL")
 	cfg.Embedding.MaxInputTokens = 8192
-	embedding := rag.NewEmbeddingService(cfg, nil)
+	embedding := rag.NewEmbeddingService(cfg)
 
-	qdrantURL := os.Getenv("CONDUIT_TEST_QDRANT_URL")
-	u, err := url.Parse(qdrantURL)
-	if err != nil {
-		panic(err)
-	}
-	port, _ := strconv.Atoi(u.Port())
 	vCfg := &config.AppConfig{}
-	vCfg.Qdrant.Host = u.Hostname()
-	vCfg.Qdrant.Port = port
+	vCfg.Qdrant.URL = os.Getenv("CONDUIT_TEST_QDRANT_URL")
 	vectors := rag.NewVectorStore(vCfg)
 
 	searchSvc := rag.NewSearchService(vectors, embedding, nil)
@@ -129,19 +119,12 @@ func TestRunSearchCLIPrintsResultsOnSuccess(t *testing.T) {
 	defer qdrant.Close()
 
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = embed.URL
 	cfg.Embedding.MaxInputTokens = 8192
-	embedding := rag.NewEmbeddingService(cfg, nil)
+	embedding := rag.NewEmbeddingService(cfg)
 
-	u, err := url.Parse(qdrant.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, _ := strconv.Atoi(u.Port())
 	vCfg := &config.AppConfig{}
-	vCfg.Qdrant.Host = u.Hostname()
-	vCfg.Qdrant.Port = port
+	vCfg.Qdrant.URL = qdrant.URL
 	vectors := rag.NewVectorStore(vCfg)
 
 	searchSvc := rag.NewSearchService(vectors, embedding, nil)

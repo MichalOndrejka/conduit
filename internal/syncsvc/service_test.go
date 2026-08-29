@@ -8,9 +8,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -175,13 +173,9 @@ func setupPipelineWithEmbed(t *testing.T, sourceURL string, embedHandler http.Ha
 	qd := newFakeQdrant()
 	qdSrv := httptest.NewServer(qd.handler())
 	t.Cleanup(qdSrv.Close)
-	qdURL, _ := url.Parse(qdSrv.URL)
-	qdPort, _ := strconv.Atoi(qdURL.Port())
 
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = qdURL.Hostname()
-	cfg.Qdrant.Port = qdPort
-	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Qdrant.URL = qdSrv.URL
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 	cfg.Chunking.MaxChunkSize = 2000
@@ -200,7 +194,7 @@ func setupPipelineWithEmbed(t *testing.T, sourceURL string, embedHandler http.Ha
 	}
 
 	vectors := rag.NewVectorStore(cfg)
-	embedding := rag.NewEmbeddingService(cfg, nil)
+	embedding := rag.NewEmbeddingService(cfg)
 	indexer := rag.NewDocumentIndexer(vectors, embedding, rag.NewTextChunker(cfg))
 	svc := New(cfg, st, fakeSecrets{}, indexer, syncctl.NewProgressStore(), syncctl.NewControlStore())
 	return svc, st, qd, &src

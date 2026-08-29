@@ -139,7 +139,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	// ── Phase 1.5: optional LLM preprocessing (summarize before chunking) ──
 	// Built per-sync so a Settings change applies without a restart (the web
 	// server and this service share the same *config.AppConfig).
-	if pre := rag.NewDocumentPreprocessor(s.cfg, s.secrets); pre.EnabledForType(src.Type) {
+	if pre := rag.NewDocumentPreprocessor(s.cfg); pre.EnabledForType(src.Type) {
 		if err := s.control.Checkpoint(ctx, sourceID); err != nil {
 			cancelledOutcome()
 			return

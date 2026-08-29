@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -34,21 +32,13 @@ func TestSearchExcludesDisabledSources(t *testing.T) {
 	}))
 	defer qdrantSrv.Close()
 
-	u, err := url.Parse(qdrantSrv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, _ := strconv.Atoi(u.Port())
-
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = u.Hostname()
-	cfg.Qdrant.Port = port
-	cfg.Embedding.Provider = "openai-compatible"
+	cfg.Qdrant.URL = qdrantSrv.URL
 	cfg.Embedding.BaseURL = embedSrv.URL
 	cfg.Embedding.MaxInputTokens = 8192
 
 	vectors := NewVectorStore(cfg)
-	embedding := NewEmbeddingService(cfg, nil)
+	embedding := NewEmbeddingService(cfg)
 	sources := fakeSourceLister{
 		{ID: "enabled-1", Disabled: false},
 		{ID: "disabled-1", Disabled: true},

@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -38,22 +36,15 @@ func embeddingServer(t *testing.T, vector []float32, fail bool) *httptest.Server
 func newEmbeddingService(t *testing.T, srv *httptest.Server) *rag.EmbeddingService {
 	t.Helper()
 	cfg := &config.AppConfig{}
-	cfg.Embedding.Provider = "openai-compatible"
 	cfg.Embedding.BaseURL = srv.URL
 	cfg.Embedding.MaxInputTokens = 8192
-	return rag.NewEmbeddingService(cfg, nil)
+	return rag.NewEmbeddingService(cfg)
 }
 
 func newVectorStore(t *testing.T, srv *httptest.Server) *rag.VectorStore {
 	t.Helper()
-	u, err := url.Parse(srv.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	port, _ := strconv.Atoi(u.Port())
 	cfg := &config.AppConfig{}
-	cfg.Qdrant.Host = u.Hostname()
-	cfg.Qdrant.Port = port
+	cfg.Qdrant.URL = srv.URL
 	cfg.Embedding.Dimensions = 3
 	return rag.NewVectorStore(cfg)
 }

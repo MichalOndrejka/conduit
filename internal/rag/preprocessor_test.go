@@ -22,11 +22,10 @@ func testPreprocessor(t *testing.T, chatHandler http.HandlerFunc, concurrency in
 
 	cfg := &config.AppConfig{}
 	cfg.Preprocessing.Enabled = true
-	cfg.Preprocessing.Provider = "openai-compatible"
 	cfg.Preprocessing.BaseURL = srv.URL
 	cfg.Preprocessing.Model = "llama3.2:3b"
 	cfg.Preprocessing.Concurrency = concurrency
-	return NewDocumentPreprocessor(cfg, nil)
+	return NewDocumentPreprocessor(cfg)
 }
 
 // TestPreprocessSummarizesConcurrently asserts documents are summarized in
@@ -120,7 +119,7 @@ func TestPreprocessSkipsShortDocuments(t *testing.T) {
 // TestPreprocessDisabledByDefault asserts EnabledForType is false when the
 // master switch is off, even for a source type with no explicit override.
 func TestPreprocessDisabledByDefault(t *testing.T) {
-	p := NewDocumentPreprocessor(&config.AppConfig{}, nil)
+	p := NewDocumentPreprocessor(&config.AppConfig{})
 	if p.EnabledForType("documentation") {
 		t.Error("EnabledForType(\"documentation\") = true, want false when Preprocessing.Enabled is unset")
 	}
@@ -132,7 +131,7 @@ func TestEnabledForTypeRespectsPerTypeOverride(t *testing.T) {
 	cfg := &config.AppConfig{}
 	cfg.Preprocessing.Enabled = true
 	cfg.Preprocessing.SourceTypes = map[string]bool{"code": false}
-	p := NewDocumentPreprocessor(cfg, nil)
+	p := NewDocumentPreprocessor(cfg)
 
 	if p.EnabledForType("code") {
 		t.Error("EnabledForType(\"code\") = true, want false (explicitly disabled)")
@@ -220,90 +219,6 @@ func TestSummarizeFallsBackToOriginalOnErrors(t *testing.T) {
 	}
 }
 
-// TestAzurePreprocessorBuildsURLAndUsesCredentialStore asserts the Azure
-// provider branch of NewDocumentPreprocessor produces the expected URL and
-// that summarize resolves the API key from the secrets store.
-func TestAzurePreprocessorBuildsURLAndUsesCredentialStore(t *testing.T) {
-	var gotAPIKey, gotPath, gotAPIVersion string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotAPIKey = r.Header.Get("api-key")
-		gotPath = r.URL.Path
-		gotAPIVersion = r.URL.Query().Get("api-version")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{{"message": map[string]any{"content": "azure summary"}}},
-		})
-	}))
-	defer srv.Close()
-
-	cfg := &config.AppConfig{}
-	cfg.Preprocessing.Enabled = true
-	cfg.Preprocessing.Provider = "azure-openai"
-	cfg.Preprocessing.AzureEndpoint = srv.URL
-	cfg.Preprocessing.AzureDeployment = "gpt-4o-mini"
-	cfg.Preprocessing.AzureAPIVersion = "2024-02-01"
-	cfg.Preprocessing.AzureAPIKeyCredential = "azure-chat-key"
-
-	p := NewDocumentPreprocessor(cfg, fakeSecrets{"azure-chat-key": "sk-from-store"})
-
-	wantPath := "/openai/deployments/gpt-4o-mini/chat/completions"
-	if p.url != srv.URL+wantPath+"?api-version=2024-02-01" {
-		t.Errorf("url = %q", p.url)
-	}
-
-	docs := []models.SourceDocument{{ID: "doc-1", Text: strings.Repeat("word ", 100)}}
-	out, err := p.Preprocess(context.Background(), docs, "documentation", PreprocessOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out[0].Text != "azure summary" {
-		t.Errorf("Text = %q, want azure summary", out[0].Text)
-	}
-	if gotPath != wantPath {
-		t.Errorf("request path = %q, want %q", gotPath, wantPath)
-	}
-	if gotAPIVersion != "2024-02-01" {
-		t.Errorf("api-version = %q", gotAPIVersion)
-	}
-	if gotAPIKey != "sk-from-store" {
-		t.Errorf("api-key = %q, want credential store value", gotAPIKey)
-	}
-}
-
-// TestAzurePreprocessorAPIKeyFallsBackToEnvVar covers the apiKey() branch
-// used when no credential is configured (or the secrets store misses it).
-func TestAzurePreprocessorAPIKeyFallsBackToEnvVar(t *testing.T) {
-	t.Setenv("AZURE_OPENAI_API_KEY", "sk-from-env")
-
-	cfg := &config.AppConfig{}
-	cfg.Preprocessing.Enabled = true
-	cfg.Preprocessing.Provider = "azure-openai"
-	cfg.Preprocessing.AzureEndpoint = "https://example.invalid"
-	cfg.Preprocessing.AzureDeployment = "gpt-4o-mini"
-
-	p := NewDocumentPreprocessor(cfg, nil)
-	if got := p.apiKey(); got != "sk-from-env" {
-		t.Errorf("apiKey() = %q, want env var fallback", got)
-	}
-}
-
-// TestAzurePreprocessorDeploymentFallsBackToModel asserts an empty
-// AzureDeployment falls back to the generic Model field for both the URL and
-// the request body's model field.
-func TestAzurePreprocessorDeploymentFallsBackToModel(t *testing.T) {
-	cfg := &config.AppConfig{}
-	cfg.Preprocessing.Provider = "azure-openai"
-	cfg.Preprocessing.AzureEndpoint = "https://example.invalid"
-	cfg.Preprocessing.Model = "gpt-4o"
-
-	p := NewDocumentPreprocessor(cfg, nil)
-	if p.model != "gpt-4o" {
-		t.Errorf("model = %q, want fallback to Model", p.model)
-	}
-	if !strings.Contains(p.url, "/deployments/gpt-4o/") {
-		t.Errorf("url = %q, want deployment path to use fallback model", p.url)
-	}
-}
-
 func TestVerifySucceeds(t *testing.T) {
 	p := testPreprocessor(t, func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -322,9 +237,8 @@ func TestVerifySucceeds(t *testing.T) {
 
 func TestVerifyFailsWhenModelMissing(t *testing.T) {
 	cfg := &config.AppConfig{}
-	cfg.Preprocessing.Provider = "openai-compatible"
 	cfg.Preprocessing.BaseURL = "http://localhost:1"
-	p := NewDocumentPreprocessor(cfg, nil)
+	p := NewDocumentPreprocessor(cfg)
 
 	if _, err := p.Verify(context.Background()); err == nil {
 		t.Error("expected error when model is unset")
@@ -351,10 +265,9 @@ func TestVerifyFailsOnUnreachableServer(t *testing.T) {
 	srv.Close() // closed before use — connection refused
 
 	cfg := &config.AppConfig{}
-	cfg.Preprocessing.Provider = "openai-compatible"
 	cfg.Preprocessing.BaseURL = srv.URL
 	cfg.Preprocessing.Model = "llama3.2:3b"
-	p := NewDocumentPreprocessor(cfg, nil)
+	p := NewDocumentPreprocessor(cfg)
 
 	if _, err := p.Verify(context.Background()); err == nil {
 		t.Error("expected error from unreachable server")
