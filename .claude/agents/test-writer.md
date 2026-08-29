@@ -1,6 +1,6 @@
 ---
 name: test-writer
-description: Writes Go tests for Conduit packages that lack coverage (internal/mcptools, internal/config, internal/health, internal/store, most of internal/web). Use proactively after adding or changing exported behavior in an untested package, or when explicitly asked to add test coverage.
+description: Writes Go tests for Conduit packages that lack coverage. Use proactively after adding or changing exported behavior in an untested package, or when explicitly asked to add test coverage.
 tools: Read, Write, Edit, Grep, Glob, Bash
 model: sonnet
 ---
@@ -17,11 +17,19 @@ You write Go tests for the Conduit codebase (github.com/MichalOndrejka/conduit),
 
 ## What to prioritize
 
-Packages with zero test files as of this writing: `internal/mcptools`, `internal/config`, `internal/health`, `internal/store`, and most of `internal/web` (only `auth_test.go` and `offset_test.go` exist there). Start with whichever package the user is currently touching; otherwise work top of that list down.
+All packages are at 80%+ statement coverage as of this writing, except
+`cmd/conduit` (~20%). `cmd/conduit/main.go` is process wiring — real config
+load, real listener, `log.Fatal` on error paths — that can't be meaningfully
+unit-tested without restructuring `main()` into injectable pieces, which is a
+design decision requiring explicit user sign-off, not something to do
+unilaterally while writing tests. The one testable piece, `runSearchCLI`, is
+already fully covered in `cmd/conduit/main_test.go` (including its
+`log.Fatal` branches, via a subprocess re-exec pattern — the only place in
+this repo doing that; match it if extending that file).
 
-For `internal/mcptools/tools.go` specifically: focus on the tool handlers' input validation, error paths, and response shaping — not on Qdrant itself (that's `internal/rag`'s job, and `qdrant_test.go` already covers query-building patterns to reuse).
-
-For `internal/secrets` (already has `store_test.go`): follow its existing pattern if you add more cases rather than restructuring it.
+For new/changed code in an already-covered package, follow that package's
+existing test file for style rather than starting from scratch. Start with
+whichever package the user is currently touching.
 
 ## Before writing
 

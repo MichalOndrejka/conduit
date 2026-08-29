@@ -236,6 +236,44 @@ func TestPathDefaultsWhenEnvVarUnset(t *testing.T) {
 	}
 }
 
+func TestPathUsesDataDirWhenConfigEnvUnset(t *testing.T) {
+	t.Setenv("CONDUIT_CONFIG", "")
+	dataDir := t.TempDir()
+	t.Setenv("CONDUIT_DATA_DIR", dataDir)
+
+	want := filepath.Join(dataDir, "config.json")
+	if got := Path(); got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
+	}
+}
+
+func TestSaveThenLoadRoundTripsUnderDataDirOnly(t *testing.T) {
+	t.Setenv("CONDUIT_CONFIG", "")
+	dataDir := t.TempDir()
+	t.Setenv("CONDUIT_DATA_DIR", dataDir)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Embedding.Model = "data-dir-round-trip-model"
+
+	if err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dataDir, "config.json")); err != nil {
+		t.Fatalf("config.json was not written under CONDUIT_DATA_DIR: %v", err)
+	}
+
+	reloaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Embedding.Model != "data-dir-round-trip-model" {
+		t.Errorf("Embedding.Model = %q after round-trip, want %q", reloaded.Embedding.Model, "data-dir-round-trip-model")
+	}
+}
+
 func TestSaveThenLoadRoundTrips(t *testing.T) {
 	useConfigFile(t)
 

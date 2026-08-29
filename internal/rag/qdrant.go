@@ -20,24 +20,27 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
+// VectorStore reads its connection details from *config.AppConfig on every
+// call, so Qdrant host/port/API-key/dimensions changes made via the Settings
+// page take effect on the next request without requiring a restart.
 type VectorStore struct {
-	baseURL    string
-	apiKey     string
+	cfg        *config.AppConfig
 	httpClient *http.Client
-	dimensions int
 }
 
 func NewVectorStore(cfg *config.AppConfig) *VectorStore {
+	return &VectorStore{
+		cfg:        cfg,
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+	}
+}
+
+func (v *VectorStore) baseURL() string {
 	scheme := "http"
-	if cfg.Qdrant.HTTPS {
+	if v.cfg.Qdrant.HTTPS {
 		scheme = "https"
 	}
-	return &VectorStore{
-		baseURL:    fmt.Sprintf("%s://%s:%d", scheme, cfg.Qdrant.Host, cfg.Qdrant.Port),
-		apiKey:     cfg.Qdrant.APIKey,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
-		dimensions: cfg.Embedding.Dimensions,
-	}
+	return fmt.Sprintf("%s://%s:%d", scheme, v.cfg.Qdrant.Host, v.cfg.Qdrant.Port)
 }
 
 // ── Wire types ──────────────────────────────────────────────────────────────
@@ -111,13 +114,13 @@ func (v *VectorStore) do(ctx context.Context, method, path string, body any, out
 		}
 		rdr = bytes.NewReader(data)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, v.baseURL+path, rdr)
+	req, err := http.NewRequestWithContext(ctx, method, v.baseURL()+path, rdr)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if v.apiKey != "" {
-		req.Header.Set("api-key", v.apiKey)
+	if v.cfg.Qdrant.APIKey != "" {
+		req.Header.Set("api-key", v.cfg.Qdrant.APIKey)
 	}
 	resp, err := v.httpClient.Do(req)
 	if err != nil {
@@ -183,7 +186,7 @@ func (v *VectorStore) CollectionExists(ctx context.Context, name string) bool {
 func (v *VectorStore) CreateCollection(ctx context.Context, name string, dimensions int) error {
 	size := dimensions
 	if size <= 0 {
-		size = v.dimensions
+		size = v.cfg.Embedding.Dimensions
 	}
 	body := map[string]any{
 		"vectors": map[string]any{"size": size, "distance": "Cosine"},

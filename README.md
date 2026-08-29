@@ -164,14 +164,20 @@ configured on that service directly — see the
 
 | Variable | Purpose |
 |----------|---------|
+| `CONDUIT_HOST` | Bind address (default `127.0.0.1`; use `0.0.0.0` in Docker) |
 | `PORT` | Listen port (default `8000`) |
 | `QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_HTTPS` / `QDRANT_API_KEY` | Qdrant connection |
 | `EMBEDDING_PROVIDER` | `openai-compatible` (default) or `azure-openai` |
 | `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_MAX_INPUT_TOKENS` | Embedding settings |
 | `AZURE_OPENAI_ENDPOINT` / `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_API_VERSION` / `AZURE_OPENAI_API_KEY` | Azure OpenAI embeddings |
 | `CONDUIT_CONFIG` | Path to `config.json` |
-| `CONDUIT_DATA_DIR` | Directory for sources, credentials, and keys. **Required in Docker.** |
+| `CONDUIT_DATA_DIR` | Directory for `config.json`, sources, credentials, and keys. **Required in Docker.** |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for `credentials.enc.json`. Pin so credentials survive container recreation. |
+
+Env vars always override the matching `config.json` value on every process start
+(including container restarts) — if a variable above is set, a value saved for
+the same field from the **Settings** page has no effect until that env var is
+unset.
 
 ## Project structure
 

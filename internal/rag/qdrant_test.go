@@ -147,14 +147,61 @@ func TestTagFilterNilForEmpty(t *testing.T) {
 	}
 }
 
+// TestVectorStoreReflectsLiveConfigChanges guards against regressing to
+// baking the connection details in at construction time (the bug this test
+// was added for: Settings-page Qdrant changes had no effect without a
+// process restart, because VectorStore used to copy host/port/API key into
+// plain struct fields instead of reading the shared *config.AppConfig live).
+func TestVectorStoreReflectsLiveConfigChanges(t *testing.T) {
+	var gotAPIKey string
+	oldSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("request reached the old Qdrant host after config was updated")
+	}))
+	defer oldSrv.Close()
+	newSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAPIKey = r.Header.Get("api-key")
+		w.Write([]byte(`{"result":{"collections":[]}}`))
+	}))
+	defer newSrv.Close()
+
+	oldURL, err := url.Parse(oldSrv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldPort, _ := strconv.Atoi(oldURL.Port())
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.Host = oldURL.Hostname()
+	cfg.Qdrant.Port = oldPort
+	cfg.Qdrant.APIKey = "old-key"
+	v := NewVectorStore(cfg)
+
+	// Simulate a Settings-page save: mutate the same *config.AppConfig the
+	// VectorStore holds, without reconstructing it.
+	newURL, err := url.Parse(newSrv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newPort, _ := strconv.Atoi(newURL.Port())
+	cfg.Qdrant.Host = newURL.Hostname()
+	cfg.Qdrant.Port = newPort
+	cfg.Qdrant.APIKey = "new-key"
+
+	if _, err := v.ListCollections(context.Background()); err != nil {
+		t.Fatalf("ListCollections after live config update: %v", err)
+	}
+	if gotAPIKey != "new-key" {
+		t.Errorf("api-key header = %q, want %q (should reflect updated config)", gotAPIKey, "new-key")
+	}
+}
+
 func TestNewVectorStoreUsesHTTPSScheme(t *testing.T) {
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.Host = "qdrant.internal"
 	cfg.Qdrant.Port = 443
 	cfg.Qdrant.HTTPS = true
 	v := NewVectorStore(cfg)
-	if v.baseURL != "https://qdrant.internal:443" {
-		t.Errorf("baseURL = %q, want https scheme", v.baseURL)
+	if got := v.baseURL(); got != "https://qdrant.internal:443" {
+		t.Errorf("baseURL() = %q, want https scheme", got)
 	}
 }
 

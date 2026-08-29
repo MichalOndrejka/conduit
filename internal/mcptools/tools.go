@@ -1,5 +1,5 @@
 // Package mcptools is the Go port of app/mcp_tools/tools.py: registers the
-// nine collection search tools and the two experience-memory tools on an MCP
+// seven collection search tools and the two experience-memory tools on an MCP
 // server (mark3labs/mcp-go, streamable HTTP transport).
 package mcptools
 

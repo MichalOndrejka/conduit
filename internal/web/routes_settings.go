@@ -2,8 +2,13 @@
 // (persisted to config.json), service verification, and the danger zone.
 //
 // Connection-affecting changes (embedding, Qdrant) are written to config.json
-// but only take effect on the next restart, because the RAG services capture
-// their config at construction time (see NewVectorStore / NewEmbeddingService).
+// and take effect immediately — VectorStore and EmbeddingService both read
+// the shared *config.AppConfig live on every call rather than capturing
+// values at construction time, so no restart is needed. The one exception:
+// if the same field is also set via environment variable, config.Load()
+// re-applies that env var on top of config.json on every process start, so
+// the env var wins again after any restart until it's unset (see
+// docs/configuration.md's "Environment variables" section).
 package web
 
 import (

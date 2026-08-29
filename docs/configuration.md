@@ -15,7 +15,8 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
     "azure_endpoint": "",
     "azure_deployment": "",
     "azure_api_version": "2024-02-01",
-    "azure_api_key_credential": ""
+    "azure_api_key_credential": "",
+    "concurrency": 4
   },
   "qdrant": {
     "host": "localhost",
@@ -41,7 +42,8 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
     "azure_endpoint": "",
     "azure_deployment": "",
     "azure_api_version": "2024-02-01",
-    "azure_api_key_credential": ""
+    "azure_api_key_credential": "",
+    "concurrency": 4
   },
   "sources_file_path": "conduit-sources.json"
 }
@@ -156,11 +158,11 @@ Master switch, toggled on the **Settings** page. Default `false`.
 
 ### `provider`
 
-`openai-compatible` (any OpenAI-compatible chat endpoint, e.g. Ollama) or `azure-openai`. Same provider split as `embedding.provider`.
+`openai-compatible` (any OpenAI-compatible chat endpoint, e.g. Ollama) or `azure-openai`. Same provider split as `embedding.provider`. Override with `PREPROCESSING_PROVIDER`.
 
 ### `base_url` / `model` / `system_prompt`
 
-Chat endpoint, model name, and system prompt used to summarize documents. `system_prompt` defaults to a built-in technical-summarization prompt if left empty.
+Chat endpoint, model name, and system prompt used to summarize documents. `system_prompt` defaults to a built-in technical-summarization prompt if left empty. Override `base_url` with `PREPROCESSING_BASE_URL` and `model` with `PREPROCESSING_MODEL`.
 
 ### `source_types`
 
@@ -199,7 +201,17 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `AZURE_OPENAI_DEPLOYMENT` | Overrides `embedding.azure_deployment`. |
 | `AZURE_OPENAI_API_VERSION` | Overrides `embedding.azure_api_version`. |
 | `AZURE_OPENAI_API_KEY` | Fallback API key for `provider: "azure-openai"` when `azure_api_key_credential` is empty. |
+| `PREPROCESSING_PROVIDER` | Overrides `preprocessing.provider` (`openai-compatible` / `azure-openai`). |
+| `PREPROCESSING_MODEL` | Overrides `preprocessing.model`. |
+| `PREPROCESSING_BASE_URL` | Overrides `preprocessing.base_url`. |
 | `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
+| `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`. Set to `0.0.0.0` in Docker so the port mapping works. |
+| `PORT` | HTTP listen port. Default: `8000`. |
+
+Every variable above always overrides the matching `config.json` value on process
+start, including on a container restart — if it's set in the environment, a value
+saved for the same field from the **Settings** page has no effect until that env
+var is unset.
 
 ---
 

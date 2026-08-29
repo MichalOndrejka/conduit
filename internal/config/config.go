@@ -90,6 +90,9 @@ func configPath() string {
 	if p := os.Getenv("CONDUIT_CONFIG"); p != "" {
 		return p
 	}
+	if d := os.Getenv("CONDUIT_DATA_DIR"); d != "" {
+		return filepath.Join(d, "config.json")
+	}
 	return "config.json"
 }
 
