@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -176,6 +177,103 @@ func TestSourceCreatePostRejectsInvalidURL(t *testing.T) {
 	}
 	if body := bodyString(t, resp); !strings.Contains(body, "valid http") {
 		t.Error("expected the URL validation error")
+	}
+}
+
+// ── Source preview ───────────────────────────────────────────────────────────
+
+func TestSourcePreviewFetchesSampleDocuments(t *testing.T) {
+	h := newHarness(t)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"title":"First item","body":"hello"},{"title":"Second item","body":"world"}]`))
+	}))
+	defer api.Close()
+
+	resp := h.postForm("/sources/preview", url.Values{
+		"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Ok        bool                           `json:"ok"`
+		Documents []struct{ Title, Text string } `json:"documents"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Ok || len(out.Documents) != 2 || out.Documents[0].Title != "First item" {
+		t.Errorf("preview = %+v, want two items starting with First item", out)
+	}
+}
+
+func TestSourcePreviewSurfacesFetchError(t *testing.T) {
+	h := newHarness(t)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer api.Close()
+
+	resp := h.postForm("/sources/preview", url.Values{
+		"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Ok    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Ok || !strings.Contains(out.Error, "401") {
+		t.Errorf("preview = %+v, want an HTTP 401 error surfaced", out)
+	}
+}
+
+func TestSourcePreviewReturnsValidationError(t *testing.T) {
+	h := newHarness(t)
+	resp := h.postForm("/sources/preview", url.Values{
+		"type": {"work-item"}, "provider": {"api"}, "Url": {"not-a-url"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Ok    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Ok || !strings.Contains(out.Error, "valid http") {
+		t.Errorf("preview = %+v, want a URL validation error", out)
+	}
+}
+
+func TestSourcePreviewManualUsesExistingContentWhenBlank(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Doc", Type: "documentation", Config: map[string]string{
+		"Provider": "manual", "Title": "Doc", "Content": "stored content",
+	}})
+
+	resp := h.postForm("/sources/preview", url.Values{
+		"id": {"s1"}, "type": {"documentation"}, "provider": {"manual"},
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var out struct {
+		Ok        bool                           `json:"ok"`
+		Documents []struct{ Title, Text string } `json:"documents"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Ok || len(out.Documents) != 1 || out.Documents[0].Text != "stored content" {
+		t.Errorf("preview = %+v, want the stored manual content", out)
 	}
 }
 

@@ -51,6 +51,7 @@
 {{end}}
 
 <form id="source-form" method="post" onsubmit="return prepareSubmit()" class="max-w-3xl space-y-6">
+  <input type="hidden" name="id" value="{{$s.ID}}">
   <input type="hidden" name="type" value="{{$s.Type}}">
   <input type="hidden" name="provider" id="f-provider" value="api">
   <input type="hidden" name="Platform" id="f-platform" value="">
@@ -213,7 +214,21 @@
     </button>
     <button type="submit" name="action" value="save_sync"
             class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Save &amp; sync</button>
+    <button type="button" id="preview-btn" onclick="previewSource()"
+            class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Preview data</button>
     <a href="/" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
+  </div>
+
+  <!-- Preview results — fetches a handful of documents with the form's
+       current (unsaved) config, so mistakes in field mappings/auth surface
+       before Create/Save & sync. -->
+  <div id="preview-panel" class="hidden rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-3">
+    <div class="flex items-center justify-between">
+      <h2 class="text-sm font-medium text-slate-300">Preview</h2>
+      <button type="button" onclick="document.getElementById('preview-panel').classList.add('hidden')"
+              class="text-xs text-slate-500 hover:text-white">Close</button>
+    </div>
+    <div id="preview-body" class="space-y-3 text-sm"></div>
   </div>
 </form>
 
@@ -287,6 +302,67 @@ function prepareSubmit() {
     }
   }
   return true;
+}
+
+function previewSource() {
+  // Compose the ADO URL / work-item type list into hidden fields, same as a
+  // real submit; prepareSubmit() returns false (and shows its own alert) if
+  // required fields like a work item type selection are missing.
+  if (!prepareSubmit()) return;
+  var btn = document.getElementById('preview-btn');
+  var panel = document.getElementById('preview-panel');
+  var body = document.getElementById('preview-body');
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  panel.classList.remove('hidden');
+  body.innerHTML = '<p class="text-slate-500">Fetching a few items…</p>';
+
+  var form = document.getElementById('source-form');
+  fetch('/sources/preview', { method: 'POST', body: new FormData(form) })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data.ok) {
+        body.innerHTML = '';
+        var err = document.createElement('p');
+        err.className = 'text-red-400';
+        err.textContent = data.error || 'Preview failed.';
+        body.appendChild(err);
+        return;
+      }
+      if (!data.documents || data.documents.length === 0) {
+        body.innerHTML = '<p class="text-slate-500">No items returned.</p>';
+        return;
+      }
+      body.innerHTML = '';
+      data.documents.forEach(function (doc) {
+        var card = document.createElement('div');
+        card.className = 'rounded-lg border border-slate-800 bg-slate-950 p-3';
+        var title = document.createElement('div');
+        title.className = 'font-medium text-white mb-1';
+        title.textContent = doc.title;
+        var text = document.createElement('pre');
+        text.className = 'whitespace-pre-wrap break-words font-mono text-xs text-slate-400';
+        text.textContent = doc.text;
+        card.appendChild(title);
+        card.appendChild(text);
+        body.appendChild(card);
+      });
+      var count = document.createElement('p');
+      count.className = 'text-xs text-slate-500';
+      count.textContent = 'Showing ' + data.documents.length + ' item(s).';
+      body.appendChild(count);
+    })
+    .catch(function (err) {
+      body.innerHTML = '';
+      var el = document.createElement('p');
+      el.className = 'text-red-400';
+      el.textContent = 'Preview failed: ' + err;
+      body.appendChild(el);
+    })
+    .finally(function () {
+      btn.disabled = false;
+      btn.textContent = 'Preview data';
+    });
 }
 
 function addWorkItemTypeTile(value, checked) {

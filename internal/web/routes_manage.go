@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -297,6 +298,63 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 		go s.sync.Sync(context.Background(), src.ID)
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// previewFetchLimit caps how many items handleSourcePreview fetches — enough
+// to sanity-check field mappings and auth without a full sync's cost (e.g.
+// per-commit diff enrichment, paginated work-item batches).
+const previewFetchLimit = 5
+
+// previewTimeout bounds how long a single preview fetch may run, so a slow or
+// hung endpoint can't leave the form waiting indefinitely.
+const previewTimeout = 20 * time.Second
+
+// handleSourcePreview fetches a handful of documents using the form's current
+// (unsaved) configuration, so a source can be sanity-checked — auth, URL,
+// field mappings — before it's created or synced for real. It never touches
+// the stored source record.
+func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
+	var existing *models.SourceDefinition
+	if id := r.FormValue("id"); id != "" {
+		existing, _ = s.sources.Get(id) // best-effort: falls back to a from-scratch source on any error
+	}
+	src := sourceFromForm(r, existing)
+	if msg := validateSourceConfig(src.Type, src.Config); msg != "" {
+		writeJSON(w, map[string]any{"ok": false, "error": msg})
+		return
+	}
+	src.Config["Top"] = strconv.Itoa(previewFetchLimit)
+
+	source, err := sources.New(src, s.secrets)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
+	defer cancel()
+	docs, err := source.FetchDocuments(ctx, nil)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if len(docs) > previewFetchLimit {
+		docs = docs[:previewFetchLimit]
+	}
+
+	type previewDoc struct {
+		Title string `json:"title"`
+		Text  string `json:"text"`
+	}
+	out := make([]previewDoc, 0, len(docs))
+	for _, d := range docs {
+		title := d.Properties["title"]
+		if title == "" {
+			title = d.ID
+		}
+		out = append(out, previewDoc{Title: title, Text: rag.Truncate(d.Text, 800)})
+	}
+	writeJSON(w, map[string]any{"ok": true, "documents": out})
 }
 
 // handleSourceDelete removes the source and its vectors, mirroring
