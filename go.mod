@@ -3,6 +3,7 @@ module github.com/MichalOndrejka/conduit
 go 1.24
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/fernet/fernet-go v0.0.0-20240119011108-303da6aec611
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.32.0

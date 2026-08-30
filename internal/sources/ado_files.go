@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
@@ -61,19 +63,22 @@ func parsePathFilter(raw string) []string {
 
 // matchesPathFilter reports whether p matches at least one wildcard pattern —
 // or true if patterns is empty (no filter configured). Patterns are matched
-// against both the full path and the filename alone, so both "*.cs" and
-// "src/*.cs" work as expected. ADO paths are always POSIX-style regardless of
-// host OS, hence "path" (not "path/filepath").
+// against both the full path and the filename alone, so "*.cs", "src/*.cs"
+// and "**/*.cs" (any depth) all work as expected. Matching uses doublestar
+// rather than the standard library's path.Match, which treats "**" as a
+// plain "*" and can't cross directory boundaries. ADO paths are always
+// POSIX-style regardless of host OS, hence "path" (not "path/filepath").
 func matchesPathFilter(p string, patterns []string) bool {
 	if len(patterns) == 0 {
 		return true
 	}
 	name := path.Base(p)
+	trimmed := strings.TrimPrefix(p, "/")
 	for _, pat := range patterns {
-		if ok, _ := path.Match(pat, name); ok {
+		if ok, _ := doublestar.Match(pat, name); ok {
 			return true
 		}
-		if ok, _ := path.Match(pat, p); ok {
+		if ok, _ := doublestar.Match(pat, trimmed); ok {
 			return true
 		}
 	}

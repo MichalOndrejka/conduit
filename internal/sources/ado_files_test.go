@@ -57,7 +57,7 @@ func TestMatchesPathFilter(t *testing.T) {
 		{"src/Foo.cs", true},
 		{"src/nested/Bar.ts", true},
 		{"README.md", false},
-		{"Foo.CS", false}, // path.Match is case-sensitive, matches ADO's own casing
+		{"Foo.CS", false}, // matching is case-sensitive, matches ADO's own casing
 	}
 	for _, c := range cases {
 		if got := matchesPathFilter(c.path, patterns); got != c.want {
@@ -68,6 +68,25 @@ func TestMatchesPathFilter(t *testing.T) {
 	// An empty filter accepts everything.
 	if !matchesPathFilter("anything.bin", parsePathFilter("")) {
 		t.Error("empty PathFilter should match every path")
+	}
+}
+
+func TestMatchesPathFilterRecursiveGlob(t *testing.T) {
+	patterns := parsePathFilter("**/*.md")
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"README.md", true},          // top level
+		{"/README.md", true},         // ADO-style leading slash
+		{"docs/README.md", true},     // one level deep
+		{"docs/sub/README.md", true}, // multiple levels deep
+		{"README.txt", false},
+	}
+	for _, c := range cases {
+		if got := matchesPathFilter(c.path, patterns); got != c.want {
+			t.Errorf("matchesPathFilter(%q, %v) = %v, want %v", c.path, patterns, got, c.want)
+		}
 	}
 }
 
