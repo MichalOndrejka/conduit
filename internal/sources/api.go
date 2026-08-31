@@ -18,7 +18,8 @@
 //	TitleField     item field used as the document title (default "title")
 //	ContentFields  comma-separated fields to index (default: all fields)
 //	NextUrlPath    dot-path to a full next-page URL in the response (pagination)
-//	Top            max items to fetch across all pages (default 500)
+//	Top            max items to fetch across all pages (default: unlimited —
+//	               every item the source has is fetched)
 //	VerifySSL      "false" to skip TLS verification (self-hosted instances)
 //	PathFilter     comma-separated wildcards (e.g. "*.cs,*.ts") narrowing which
 //	               repo files get their content fetched — commit-history/code/
@@ -62,6 +63,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -75,8 +77,11 @@ import (
 )
 
 const (
-	defaultTop = 500
-	maxPages   = 50 // hard cap so a cyclic NextUrlPath cannot loop forever
+	// unlimitedTop is the effective item cap when the source has no
+	// user-configured Top — every item the source has is fetched, bounded
+	// only by maxPages below.
+	unlimitedTop = math.MaxInt32
+	maxPages     = 50 // hard cap so a cyclic NextUrlPath cannot loop forever
 
 	diffFetchConcurrency = 8 // bounded parallelism for per-commit diff enrichment
 )
@@ -134,7 +139,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		return nil, fmt.Errorf("API source requires a Url")
 	}
 
-	top := defaultTop
+	top := unlimitedTop
 	if t := cfg.GetConfig("Top"); t != "" {
 		if n, err := strconv.Atoi(t); err == nil && n > 0 {
 			top = n
@@ -159,12 +164,19 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 
 	client := a.httpClient()
 	itemsPath := cfg.GetConfig("ItemsPath")
+	// progressTotal is left at 0 (meaning "unknown") when top is the
+	// unlimited default — a real Total of math.MaxInt32 would render as a
+	// nonsense "x/2147483647" in the UI.
+	progressTotal := top
+	if top == unlimitedTop {
+		progressTotal = 0
+	}
 	var items []any
 	pageURL := fetchURL
 	for page := 0; page < maxPages && pageURL != "" && len(items) < top; page++ {
 		if progress != nil {
 			progress(models.SyncProgress{
-				Phase: "fetching", Current: len(items), Total: top,
+				Phase: "fetching", Current: len(items), Total: progressTotal,
 				Message: fmt.Sprintf("Fetching page %d", page+1),
 			})
 		}

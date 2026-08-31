@@ -24,6 +24,10 @@ import (
 
 const workItemBatchSize = 200 // Azure DevOps' workitemsbatch hard limit
 
+// adoWiqlMaxTop is Azure DevOps' own hard limit on the WIQL $top parameter —
+// requesting more than this errors out server-side.
+const adoWiqlMaxTop = 19999
+
 // defaultWorkItemFields are fetched for every work item regardless of type —
 // covering the fields common process templates (Agile, Scrum, CMMI, Basic)
 // use for a work item's title, description and test-case steps.
@@ -141,7 +145,13 @@ func (a *APISource) wiqlWorkItemIDs(ctx context.Context, client *http.Client, or
 	if err != nil {
 		return nil, err
 	}
-	wiqlURL := fmt.Sprintf("%s/%s/_apis/wit/wiql?api-version=%s&$top=%d", org, url.PathEscape(project), apiVersion, top)
+	// Azure DevOps' WIQL endpoint rejects $top values above its own hard
+	// limit — clamp rather than pass the unlimited sentinel straight through.
+	queryTop := top
+	if queryTop > adoWiqlMaxTop {
+		queryTop = adoWiqlMaxTop
+	}
+	wiqlURL := fmt.Sprintf("%s/%s/_apis/wit/wiql?api-version=%s&$top=%d", org, url.PathEscape(project), apiVersion, queryTop)
 	data, err := a.postJSON(ctx, client, wiqlURL, body)
 	if err != nil {
 		return nil, err
