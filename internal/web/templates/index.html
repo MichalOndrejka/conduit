@@ -32,6 +32,7 @@
     Select all
   </label>
   <button type="button" onclick="bulkAction('/sources/sync-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
+  <button type="button" onclick="syncUnembedded()" class="rounded-lg border border-amber-800 text-amber-300 px-3 py-1.5 text-xs hover:bg-amber-950/40">Sync unembedded</button>
   <button type="button" onclick="bulkAction('/sources/disable-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Disable</button>
   <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete</button>
   <div id="sync-eta" class="ml-auto text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2" style="visibility:hidden">&nbsp;</div>
@@ -53,8 +54,9 @@
         <div class="text-xs text-slate-500 mt-1">
           {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
         </div>
-        <div data-progress-wrap class="pt-1.5" style="opacity:0;transition:opacity .25s ease">
-          <div data-progress class="text-xs text-violet-400 mb-1 h-4"></div>
+        {{$notEmbedded := and (eq .VectorCount 0) (ne .SyncStatus "syncing")}}
+        <div data-progress-wrap class="pt-1.5" style="opacity:{{if $notEmbedded}}1{{else}}0{{end}};transition:opacity .25s ease">
+          <div data-progress class="text-xs {{if $notEmbedded}}text-amber-300{{else}}text-violet-400{{end}} mb-1 h-4">{{if $notEmbedded}}Not embedded yet — click Sync to index this source{{end}}</div>
           <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
             <div data-progress-bar class="h-full bg-violet-500 rounded-full transition-all duration-300" style="width: 0%"></div>
           </div>
@@ -67,7 +69,7 @@
         <button onclick="syncCtl('{{.ID}}','pause')" data-pause class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Pause</button>
         <button onclick="syncCtl('{{.ID}}','resume')" data-resume class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Resume</button>
         <button onclick="syncCtl('{{.ID}}','cancel')" data-cancel class="hidden text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Cancel</button>
-        <button onclick="syncOne('{{.ID}}')" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Sync</button>
+        <button onclick="syncOne('{{.ID}}')" data-sync-btn class="text-xs rounded-lg px-3 py-1.5 {{if $notEmbedded}}bg-violet-600 text-white border border-violet-600 hover:bg-violet-500{{else}}border border-slate-700 hover:bg-slate-800{{end}}">Sync</button>
         <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
         <form method="post" action="/sources/{{.ID}}/toggle" class="contents">
           <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
@@ -95,8 +97,7 @@ function syncOne(id) {
 document.getElementById('select-all').addEventListener('change', e => {
   document.querySelectorAll('.row-check').forEach(cb => cb.checked = e.target.checked);
 });
-function bulkAction(url, confirmMsg) {
-  const ids = [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
+function submitIDs(url, ids, confirmMsg) {
   if (ids.length === 0) return;
   if (confirmMsg && !confirm(confirmMsg)) return;
   const form = document.createElement('form');
@@ -111,6 +112,24 @@ function bulkAction(url, confirmMsg) {
   }
   document.body.appendChild(form);
   form.submit();
+}
+function bulkAction(url, confirmMsg) {
+  const ids = [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
+  submitIDs(url, ids, confirmMsg);
+}
+function syncUnembedded() {
+  const ids = [...document.querySelectorAll('[data-source-id]')]
+    .filter(card => !card.classList.contains('opacity-50'))
+    .filter(card => {
+      const badge = card.querySelector('[data-no-data-badge]');
+      return badge && !badge.classList.contains('hidden');
+    })
+    .map(card => card.dataset.sourceId);
+  if (ids.length === 0) {
+    showToast('All sources are already embedded', 'ok');
+    return;
+  }
+  submitIDs('/sources/sync-selected', ids);
 }
 let syncBatchStart = null;
 let wasSyncing = false;
@@ -134,6 +153,7 @@ function poll() {
         anySyncing = true;
         syncingCount++;
         const p = s.progress;
+        prog.className = 'text-xs text-violet-400 mb-1 h-4';
         prog.textContent = p.phase + (p.total ? ` ${p.current}/${p.total}` : '') + (p.message ? ` — ${p.message}` : '');
         progWrap.style.opacity = '1';
         if (p.total > 0) {
@@ -143,6 +163,15 @@ function poll() {
           bar.style.width = '100%';
           bar.classList.add('animate-pulse');
         }
+      } else if (s.vector_count === 0) {
+        // Not currently syncing and nothing embedded yet — surface an
+        // actionable hint in the progress-bar spot instead of leaving it
+        // blank, so it's obvious at a glance which sources still need a sync.
+        progWrap.style.opacity = '1';
+        prog.className = 'text-xs text-amber-300 mb-1 h-4';
+        prog.textContent = 'Not embedded yet — click Sync to index this source';
+        bar.style.width = '0%';
+        bar.classList.remove('animate-pulse');
       } else {
         progWrap.style.opacity = '0';
         bar.classList.remove('animate-pulse');
@@ -159,6 +188,10 @@ function poll() {
       card.querySelector('[data-resume]').classList.toggle('hidden', !syncing || !s.paused);
       card.querySelector('[data-cancel]').classList.toggle('hidden', !syncing);
       card.querySelector('[data-no-data-badge]').classList.toggle('hidden', s.vector_count !== 0);
+      const syncBtn = card.querySelector('[data-sync-btn]');
+      syncBtn.className = 'text-xs rounded-lg px-3 py-1.5 ' + (s.vector_count === 0
+        ? 'bg-violet-600 text-white border border-violet-600 hover:bg-violet-500'
+        : 'border border-slate-700 hover:bg-slate-800');
     }
     const etaBox = document.getElementById('sync-eta');
     if (anySyncing) {

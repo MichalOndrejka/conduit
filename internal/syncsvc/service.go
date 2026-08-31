@@ -90,6 +90,14 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	s.progress.Set(sourceID, models.SyncProgress{Phase: "fetching"})
 	s.control.Register(sourceID)
 
+	// Derived per-source so RequestCancel can abort this sync's in-flight
+	// ctx-aware work (HTTP fetches, embedding calls) immediately, instead of
+	// waiting for the next checkpoint — which can be minutes away mid-fetch
+	// on a large source, and would otherwise keep its concurrency slot stuck.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.control.SetCancelFunc(sourceID, cancel)
+
 	finish := func() {
 		s.progress.Clear(sourceID)
 		s.control.Clear(sourceID)
@@ -128,7 +136,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		s.progress.Set(sourceID, p)
 	})
 	if err != nil {
-		if errors.Is(err, syncctl.ErrSyncCancelled) {
+		if isCancelled(err) {
 			cancelledOutcome()
 			return
 		}
@@ -155,7 +163,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 			Checkpoint: func() error { return s.control.Checkpoint(ctx, sourceID) },
 		})
 		if err != nil {
-			if errors.Is(err, syncctl.ErrSyncCancelled) {
+			if isCancelled(err) {
 				cancelledOutcome()
 				return
 			}
@@ -184,7 +192,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		},
 	})
 	switch {
-	case errors.Is(err, syncctl.ErrSyncCancelled):
+	case isCancelled(err):
 		cancelledOutcome()
 	case err != nil:
 		failedOutcome("embed", err)
@@ -196,6 +204,14 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		src.SyncErrorPhase = nil
 		finish()
 	}
+}
+
+// isCancelled reports whether err resulted from a sync cancellation — either
+// the cooperative ErrSyncCancelled returned at a checkpoint, or a
+// context.Canceled surfacing from ctx-aware work (HTTP calls, …) aborted
+// directly by RequestCancel's cancelFunc.
+func isCancelled(err error) bool {
+	return errors.Is(err, syncctl.ErrSyncCancelled) || errors.Is(err, context.Canceled)
 }
 
 // maxConcurrentSyncs caps how many sources sync simultaneously, preventing

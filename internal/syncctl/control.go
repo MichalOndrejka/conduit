@@ -17,9 +17,10 @@ import (
 var ErrSyncCancelled = errors.New("sync cancelled")
 
 type controlState struct {
-	cancelled bool
-	paused    bool
-	resumeCh  chan struct{} // closed when resumed; nil when not paused
+	cancelled  bool
+	paused     bool
+	resumeCh   chan struct{}      // closed when resumed; nil when not paused
+	cancelFunc context.CancelFunc // aborts this source's in-flight ctx-aware work (HTTP calls, …)
 }
 
 type ControlStore struct {
@@ -47,7 +48,12 @@ func (c *ControlStore) Register(sourceID string) {
 	c.states[sourceID] = &controlState{}
 }
 
-// RequestCancel marks the sync cancelled and unblocks a paused checkpoint.
+// RequestCancel marks the sync cancelled, unblocks a paused checkpoint, and
+// aborts any in-flight ctx-aware work (HTTP fetches, embedding calls, …) for
+// this source immediately — without this, a cancel only takes effect at the
+// next checkpoint, which can be minutes away mid-fetch on a large source,
+// leaving that sync's concurrency slot stuck instead of freed for the next
+// queued sync.
 func (c *ControlStore) RequestCancel(sourceID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -58,6 +64,17 @@ func (c *ControlStore) RequestCancel(sourceID string) {
 		close(st.resumeCh)
 		st.resumeCh = nil
 	}
+	if st.cancelFunc != nil {
+		st.cancelFunc()
+	}
+}
+
+// SetCancelFunc registers the cancel function for this source's current sync
+// ctx, so a later RequestCancel can abort in-flight work immediately.
+func (c *ControlStore) SetCancelFunc(sourceID string, cancel context.CancelFunc) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.get(sourceID).cancelFunc = cancel
 }
 
 func (c *ControlStore) Pause(sourceID string) {

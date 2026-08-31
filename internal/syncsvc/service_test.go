@@ -496,6 +496,50 @@ func TestSyncSelectedRunsAllSourcesAndSkipsUnknownIDs(t *testing.T) {
 	}
 }
 
+// TestSyncCancelDuringFetchAbortsImmediately guards against a cancelled
+// sync sitting on its concurrency slot until a slow in-flight fetch happens
+// to finish on its own: RequestCancel must abort the fetch's HTTP call right
+// away (via the source's own cancellable ctx) rather than only taking effect
+// at the next checkpoint, which — for a large source — can be minutes later.
+func TestSyncCancelDuringFetchAbortsImmediately(t *testing.T) {
+	reached := make(chan struct{}, 1)
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case reached <- struct{}{}:
+		default:
+		}
+		<-r.Context().Done() // hangs until the client aborts the request
+	}))
+	defer apiSrv.Close()
+
+	svc, st, _, src := setupPipeline(t, apiSrv.URL)
+
+	done := make(chan struct{})
+	go func() {
+		svc.Sync(context.Background(), src.ID)
+		close(done)
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(2 * time.Second):
+		t.Fatal("fetch never reached the fake API server")
+	}
+
+	svc.Control().RequestCancel(src.ID)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Sync did not return promptly after cancel — fetch's ctx was not aborted")
+	}
+
+	saved, _ := st.Get(src.ID)
+	if saved.SyncStatus != "idle" {
+		t.Errorf("status = %q, want idle", saved.SyncStatus)
+	}
+}
+
 func TestProgressAndControlAccessors(t *testing.T) {
 	svc, _, _, src := setupPipeline(t, "http://unused.invalid")
 
