@@ -169,7 +169,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	srcs, err := s.sources.ListAll()
 	if err != nil {
 		httpError(w, err)
@@ -183,9 +183,11 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		SyncErrorPhase *string              `json:"sync_error_phase,omitempty"`
 		Paused         bool                 `json:"paused"`
 		Progress       *models.SyncProgress `json:"progress,omitempty"`
+		VectorCount    int                  `json:"vector_count"`
 	}
 	out := make([]sourceStatus, 0, len(srcs))
-	for _, src := range srcs {
+	for i := range srcs {
+		src := &srcs[i]
 		st := sourceStatus{
 			ID: src.ID, Name: src.Name,
 			SyncStatus: src.SyncStatus, SyncError: src.SyncError, SyncErrorPhase: src.SyncErrorPhase,
@@ -194,6 +196,16 @@ func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
 		if p, ok := s.sync.Progress().Get(src.ID); ok {
 			st.Progress = &p
 		}
+		// Included so the Sources list can update its "No data embedded"
+		// badge from this same poll, instead of relying on catching a
+		// syncing→idle transition to trigger a reload — a fast sync (e.g. a
+		// small manual source) can finish before the page's first poll ever
+		// observes it as "syncing", which left the badge stuck stale.
+		collection := sources.CollectionFor(src)
+		filter := &rag.Filter{Must: []rag.FieldCondition{{
+			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
+		}}}
+		st.VectorCount = s.vectors.Count(r.Context(), collection, filter)
 		out = append(out, st)
 	}
 	writeJSON(w, out)

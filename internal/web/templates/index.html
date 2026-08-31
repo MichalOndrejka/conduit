@@ -48,9 +48,7 @@
           {{if .Disabled}}
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-600 rounded px-1.5 py-0.5">Disabled</span>
           {{end}}
-          {{if eq .VectorCount 0}}
-          <span class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5">No data embedded</span>
-          {{end}}
+          <span data-no-data-badge class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5{{if ne .VectorCount 0}} hidden{{end}}">No data embedded</span>
         </div>
         <div class="text-xs text-slate-500 mt-1">
           {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
@@ -160,6 +158,7 @@ function poll() {
       card.querySelector('[data-pause]').classList.toggle('hidden', !syncing || s.paused);
       card.querySelector('[data-resume]').classList.toggle('hidden', !syncing || !s.paused);
       card.querySelector('[data-cancel]').classList.toggle('hidden', !syncing);
+      card.querySelector('[data-no-data-badge]').classList.toggle('hidden', s.vector_count !== 0);
     }
     const etaBox = document.getElementById('sync-eta');
     if (anySyncing) {
@@ -172,9 +171,8 @@ function poll() {
       syncBatchStart = null;
       etaBox.style.visibility = 'hidden';
       if (wasSyncing) {
-        // A sync just finished — reload so "Last synced" and the "No data
-        // embedded" badge (rendered server-side, not part of this JSON) pick
-        // up their new values.
+        // A sync just finished — reload so "Last synced" (rendered
+        // server-side, not part of this JSON) picks up its new value.
         location.reload();
         return;
       }

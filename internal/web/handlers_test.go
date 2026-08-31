@@ -53,6 +53,24 @@ func TestHandleStatusListsSourcesWithSyncState(t *testing.T) {
 	}
 }
 
+func TestHandleStatusReportsVectorCount(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "One", Type: "documentation", SyncStatus: "completed"})
+	h.qd.count["conduit_documentation"] = 7
+
+	resp := h.get("/status")
+	var out []struct {
+		ID          string `json:"id"`
+		VectorCount int    `json:"vector_count"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || out[0].ID != "s1" || out[0].VectorCount != 7 {
+		t.Errorf("status = %+v, want one entry for s1 with vector_count 7", out)
+	}
+}
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 func mustSave(t *testing.T, h *harness, src models.SourceDefinition) {
