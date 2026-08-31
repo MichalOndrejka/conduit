@@ -38,10 +38,11 @@ var sourceTypes = []struct{ Value, Label, Description string }{
 }
 
 // workItemTypePresets seeds the work-item-type tile picker for each
-// dual-purpose source with types relevant to that domain — ADO process
-// templates vary per project, so the picker also lets users add arbitrary
-// custom types beyond these presets (see #worktype-custom-input in
-// source_form.html).
+// dual-purpose source with types relevant to that domain — the only types
+// selectable in the UI. A source saved before this was the only option may
+// still carry a WorkItemTypes value outside these presets; the picker
+// renders an extra tile for it (see initWorkItemTypes in source_form.html)
+// so re-opening the form doesn't silently drop it.
 var workItemTypePresets = map[string][]string{
 	models.SourceWorkItemQuery: {"Epic", "Feature", "User Story", "Bug", "Task", "Issue"},
 	models.SourceRequirements:  {"Product Requirement", "Software Requirements", "Risk", "Architecture Item"},

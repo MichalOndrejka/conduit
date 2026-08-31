@@ -2,8 +2,7 @@
 
 <!-- Shared by the Work Items tab and the Requirements/Test Cases "workitems"
      fetch mode: a preset tile picker (see WorkItemTypePresets, set per
-     source type in routes_manage.go) plus a free-text input so users can add
-     types from their own ADO process template beyond the presets. -->
+     source type in routes_manage.go). -->
 {{define "worktype-picker"}}
 {{$s := .Source}}
 <div>
@@ -20,13 +19,6 @@
       <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">{{.}}</div>
     </label>
     {{end}}
-  </div>
-  <div class="flex gap-2 mt-4 pt-3 border-t border-slate-800">
-    <input type="text" id="worktype-custom-input" placeholder="Add a custom type from your process template…"
-           class="flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none"
-           onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomWorkItemType();}">
-    <button type="button" onclick="addCustomWorkItemType()"
-            class="rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800">Add</button>
   </div>
   <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
 </div>
@@ -443,21 +435,6 @@ function addWorkItemTypeTile(value, checked) {
   label.appendChild(div);
   grid.appendChild(label);
   return input;
-}
-
-function addCustomWorkItemType() {
-  var input = document.getElementById('worktype-custom-input');
-  if (!input) return;
-  var value = input.value.trim();
-  if (!value) return;
-  var existing = Array.prototype.slice.call(document.querySelectorAll('.ado-worktype'))
-    .filter(function (el) { return el.value.toLowerCase() === value.toLowerCase(); })[0];
-  if (existing) {
-    existing.checked = true;
-  } else {
-    addWorkItemTypeTile(value, true);
-  }
-  input.value = '';
 }
 
 (function initWorkItemTypes() {

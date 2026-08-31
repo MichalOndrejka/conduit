@@ -65,7 +65,7 @@ Manual-provider sources always land in `conduit_documentation` regardless of typ
 
 ## Platform presets (UI convenience, not backend code)
 
-The **Sources → Create** flow offers a friendly **Azure DevOps** tab. It's a frontend-only preset: filling in org/project/PAT/resource fields compiles them into the generic API keys above on submit (`Url`, `AuthType=basic`, `Password=<credential>`, `ItemsPath=value`, …), and the source is stored as an ordinary generic API source. Commit History, Source Code, Test Code and Documentation sources additionally get backend-side ADO enrichment (real diffs / real file content, see above); Work Items sources are fetched entirely server-side (see below). A few UI-only metadata keys (`Platform`, `AdoOrg`, `AdoProject`, `AdoApiVersion`, `AdoResource`, `AdoQuery`) are persisted alongside the generic keys purely so the editor can re-open a source in the right tab, pre-filled.
+The **Sources → Create** flow offers a friendly **Azure DevOps** tab. It's a frontend-only preset: filling in org/project/PAT/resource fields compiles them into the generic API keys above on submit (`Url`, `AuthType=basic`, `Password=<credential>`, `ItemsPath=value`, …), and the source is stored as an ordinary generic API source. Commit History, Source Code, Test Code and Documentation sources additionally get backend-side ADO enrichment (real diffs / real file content, see above); Work Items sources are fetched entirely server-side (see below). A few UI-only metadata keys (`Platform`, `AdoOrg`, `AdoProject`, `AdoApiVersion`, `AdoResource`, `AdoRepo`, `AdoQuery`) are persisted alongside the generic keys purely so the editor can re-open a source in the right tab, pre-filled.
 
 The generic API config keys aren't tied to Azure DevOps — the backend runs any single-endpoint JSON API this way — but the web UI no longer exposes a form for building one from scratch; non-ADO API sources must be added directly to `conduit-sources.json`. Examples expressible as pure configuration:
 
@@ -76,14 +76,14 @@ The generic API config keys aren't tied to Azure DevOps — the backend runs any
 
 Work Items sources on the Azure DevOps tab don't use a hand-built URL at all: Conduit runs a WIQL query scoped to the configured project, then batch-fetches each matching work item's fields directly from Azure DevOps' Work Item Tracking API. The **Work item types** checkboxes restrict which types the WIQL query matches — `WorkItemTypes` config key, comma-separated; at least one type must be selected. **Area paths** further scopes the query to one or more team areas — `AreaPaths` config key, comma-separated (e.g. `MyProject\Team A, MyProject\Team B`), matched with WIQL's `UNDER` operator so sub-areas are included; left blank, every area in the project is fetched. `ContentFields` still narrows which fetched fields get embedded, same as the generic API source.
 
-The type picker shows a preset set of tiles per source type — Work Items: Epic, Feature, User Story, Bug, Task, Issue; Requirements: Product Requirement, Software Requirements, Risk, Architecture Item; Test Cases: Test Case — plus an **Add a custom type** input, since ADO process templates vary per project/org. Types added this way aren't limited to the presets; they're stored the same as a preset selection and re-appear as their own tile when the source is reopened for editing.
+The type picker shows a preset set of tiles per source type — Work Items: Epic, Feature, User Story, Bug, Task, Issue; Requirements: Product Requirement, Software Requirements, Risk, Architecture Item; Test Cases: Test Case. Only these presets are selectable; a source saved before custom types were removed may still carry a `WorkItemTypes` value outside the presets, which re-appears as its own (unaddable) tile when the source is reopened for editing.
 
 ### Requirements and Test Cases (dual-mode)
 
 Requirements and Test Cases sources can be fetched either way, since teams keep them as repo files (often `.md`) or as Azure DevOps work items interchangeably. The Azure DevOps tab shows a **Fetch as** toggle — `FetchMode` config key, `files` (default) or `workitems`:
 
-- **Files in a repo** — same as Documentation: **Resource path** + **File filter** point at a repo items endpoint, and Conduit fetches real file content for each match (best-effort — falls back to raw metadata if the resource isn't a repo, e.g. it points at a wiki instead).
-- **Azure DevOps work items** — identical to the Work Items source above, including the preset/custom type picker: **Area paths** + **Work item types** drive a WIQL query, `WorkItemTypes` requires at least one type selected.
+- **Files in a repo** — same as Documentation: **Repository name** + **File filter** point at a repo items endpoint, and Conduit fetches real file content for each match (best-effort — falls back to raw metadata if the resource isn't a repo, e.g. it points at a wiki instead).
+- **Azure DevOps work items** — identical to the Work Items source above, including the preset type picker: **Area paths** + **Work item types** drive a WIQL query, `WorkItemTypes` requires at least one type selected.
 
 Switching the toggle swaps which field set is submitted; the other is disabled client-side so its stale values aren't persisted.
 
