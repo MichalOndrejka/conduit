@@ -3,6 +3,19 @@
 @tailwind utilities;
 
 /*
+ * JetBrains Mono has a built-in "empty block comment" ligature that merges
+ * slash-star-star-slash into a single compact glyph. Fine for code display,
+ * but form fields hold URLs and glob patterns (e.g. doc/**\/*.md) where
+ * every character needs to stay visually distinct, so ligatures are
+ * disabled here.
+ */
+input.font-mono,
+textarea.font-mono {
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0;
+}
+
+/*
  * Light theme. Dark is the hardcoded default palette across the templates
  * (no `dark:` variants are used) — these rules remap the same utility
  * classes to light equivalents when the `dark` class is absent from <html>.
