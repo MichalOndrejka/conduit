@@ -243,6 +243,13 @@
                 class="text-xs text-slate-500 hover:text-white">Close</button>
       </div>
       <div id="preview-body" class="space-y-3 text-sm p-5 overflow-y-auto"></div>
+      <div id="preview-footer" class="hidden flex items-center justify-between p-5 pt-3 border-t border-slate-800 shrink-0">
+        <button type="button" id="preview-prev-btn" onclick="loadPreviewPage(currentPreviewOffset - previewLimit)"
+                class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed">← Previous</button>
+        <span id="preview-page-label" class="text-xs text-slate-500"></span>
+        <button type="button" id="preview-next-btn" onclick="loadPreviewPage(currentPreviewOffset + previewLimit)"
+                class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
+      </div>
     </div>
   </div>
 </form>
@@ -337,22 +344,37 @@ function previewEscHandler(e) {
   if (e.key === 'Escape') closePreview();
 }
 
+var currentPreviewOffset = 0;
+var previewLimit = 5; // overwritten from the server's response (see previewFetchLimit)
+
 function previewSource() {
   // Compose the ADO URL / work-item type list into hidden fields, same as a
   // real submit; prepareSubmit() returns false (and shows its own alert) if
   // required fields like a work item type selection are missing.
   if (!prepareSubmit()) return;
+  document.getElementById('preview-modal').classList.remove('hidden');
+  document.addEventListener('keydown', previewEscHandler);
+  loadPreviewPage(0);
+}
+
+function loadPreviewPage(offset) {
+  if (offset < 0) return;
   var btn = document.getElementById('preview-btn');
-  var modal = document.getElementById('preview-modal');
   var body = document.getElementById('preview-body');
+  var footer = document.getElementById('preview-footer');
+  var prevBtn = document.getElementById('preview-prev-btn');
+  var nextBtn = document.getElementById('preview-next-btn');
   btn.disabled = true;
   btn.textContent = 'Loading…';
-  modal.classList.remove('hidden');
-  document.addEventListener('keydown', previewEscHandler);
+  prevBtn.disabled = true;
+  nextBtn.disabled = true;
+  footer.classList.add('hidden');
   body.innerHTML = '<p class="text-slate-500">Fetching a few items…</p>';
 
   var form = document.getElementById('source-form');
-  fetch('/sources/preview', { method: 'POST', body: new FormData(form) })
+  var formData = new FormData(form);
+  formData.set('offset', offset);
+  fetch('/sources/preview', { method: 'POST', body: formData })
     .then(function (r) { return r.json(); })
     .then(function (data) {
       if (!data.ok) {
@@ -363,28 +385,33 @@ function previewSource() {
         body.appendChild(err);
         return;
       }
-      if (!data.documents || data.documents.length === 0) {
-        body.innerHTML = '<p class="text-slate-500">No items returned.</p>';
-        return;
-      }
+      currentPreviewOffset = data.offset || 0;
+      previewLimit = data.limit || previewLimit;
       body.innerHTML = '';
-      data.documents.forEach(function (doc) {
-        var card = document.createElement('div');
-        card.className = 'rounded-lg border border-slate-800 bg-slate-950 p-3';
-        var title = document.createElement('div');
-        title.className = 'font-medium text-white mb-1';
-        title.textContent = doc.title;
-        var text = document.createElement('pre');
-        text.className = 'whitespace-pre-wrap break-words font-mono text-xs text-slate-400';
-        text.textContent = doc.text;
-        card.appendChild(title);
-        card.appendChild(text);
-        body.appendChild(card);
-      });
-      var count = document.createElement('p');
-      count.className = 'text-xs text-slate-500';
-      count.textContent = 'Showing ' + data.documents.length + ' item(s).';
-      body.appendChild(count);
+      if (!data.documents || data.documents.length === 0) {
+        body.innerHTML = '<p class="text-slate-500">' +
+          (currentPreviewOffset === 0 ? 'No items returned.' : 'No more items.') + '</p>';
+      } else {
+        data.documents.forEach(function (doc) {
+          var card = document.createElement('div');
+          card.className = 'rounded-lg border border-slate-800 bg-slate-950 p-3';
+          var title = document.createElement('div');
+          title.className = 'font-medium text-white mb-1';
+          title.textContent = doc.title;
+          var text = document.createElement('pre');
+          text.className = 'whitespace-pre-wrap break-words font-mono text-xs text-slate-400';
+          text.textContent = doc.text;
+          card.appendChild(title);
+          card.appendChild(text);
+          body.appendChild(card);
+        });
+      }
+      document.getElementById('preview-page-label').textContent = data.documents && data.documents.length
+        ? 'Items ' + (currentPreviewOffset + 1) + '–' + (currentPreviewOffset + data.documents.length)
+        : '';
+      prevBtn.disabled = currentPreviewOffset <= 0;
+      nextBtn.disabled = !data.hasMore;
+      footer.classList.remove('hidden');
     })
     .catch(function (err) {
       body.innerHTML = '';

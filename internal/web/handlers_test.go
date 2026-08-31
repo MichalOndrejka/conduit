@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -205,6 +206,63 @@ func TestSourcePreviewFetchesSampleDocuments(t *testing.T) {
 	}
 	if !out.Ok || len(out.Documents) != 2 || out.Documents[0].Title != "First item" {
 		t.Errorf("preview = %+v, want two items starting with First item", out)
+	}
+}
+
+func TestSourcePreviewPaginatesAcrossOffset(t *testing.T) {
+	h := newHarness(t)
+	items := make([]string, 12)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"title":"Item %d"}`, i)
+	}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+	}))
+	defer api.Close()
+
+	fetchPage := func(offset string) struct {
+		Ok        bool                           `json:"ok"`
+		Documents []struct{ Title, Text string } `json:"documents"`
+		Offset    int                            `json:"offset"`
+		Limit     int                            `json:"limit"`
+		HasMore   bool                           `json:"hasMore"`
+	} {
+		resp := h.postForm("/sources/preview", url.Values{
+			"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL}, "offset": {offset},
+		})
+		var out struct {
+			Ok        bool                           `json:"ok"`
+			Documents []struct{ Title, Text string } `json:"documents"`
+			Offset    int                            `json:"offset"`
+			Limit     int                            `json:"limit"`
+			HasMore   bool                           `json:"hasMore"`
+		}
+		if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	first := fetchPage("0")
+	if !first.Ok || len(first.Documents) != 5 || first.Offset != 0 || !first.HasMore {
+		t.Errorf("page 1 = %+v, want 5 docs, offset 0, hasMore true", first)
+	}
+	if first.Documents[0].Title != "Item 0" {
+		t.Errorf("page 1 first doc = %q, want Item 0", first.Documents[0].Title)
+	}
+
+	second := fetchPage("5")
+	if !second.Ok || len(second.Documents) != 5 || second.Offset != 5 || !second.HasMore {
+		t.Errorf("page 2 = %+v, want 5 docs, offset 5, hasMore true", second)
+	}
+	if second.Documents[0].Title != "Item 5" {
+		t.Errorf("page 2 first doc = %q, want Item 5", second.Documents[0].Title)
+	}
+
+	third := fetchPage("10")
+	if !third.Ok || len(third.Documents) != 2 || third.Offset != 10 || third.HasMore {
+		t.Errorf("page 3 = %+v, want 2 docs, offset 10, hasMore false", third)
 	}
 }
 

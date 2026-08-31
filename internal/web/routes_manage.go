@@ -333,16 +333,23 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-// previewFetchLimit caps how many items handleSourcePreview fetches — enough
-// to sanity-check field mappings and auth without a full sync's cost (e.g.
-// per-commit diff enrichment, paginated work-item batches).
+// previewFetchLimit caps how many items handleSourcePreview returns per page
+// — enough to sanity-check field mappings and auth without a full sync's
+// cost (e.g. per-commit diff enrichment, paginated work-item batches).
 const previewFetchLimit = 5
+
+// previewMaxOffset caps how far the preview can paginate. FetchDocuments has
+// no server-side "skip N" — each page re-fetches everything from the start
+// up to offset+limit, so pagination cost grows with how far in the user
+// goes; this keeps that bounded to what a real sync's default Top would
+// fetch anyway (see defaultTop in internal/sources/api.go).
+const previewMaxOffset = 500
 
 // previewTimeout bounds how long a single preview fetch may run, so a slow or
 // hung endpoint can't leave the form waiting indefinitely.
 const previewTimeout = 20 * time.Second
 
-// handleSourcePreview fetches a handful of documents using the form's current
+// handleSourcePreview fetches a page of documents using the form's current
 // (unsaved) configuration, so a source can be sanity-checked — auth, URL,
 // field mappings — before it's created or synced for real. It never touches
 // the stored source record.
@@ -356,7 +363,19 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": msg})
 		return
 	}
-	src.Config["Top"] = strconv.Itoa(previewFetchLimit)
+
+	offset := 0
+	if o, err := strconv.Atoi(r.FormValue("offset")); err == nil && o > 0 {
+		offset = o
+	}
+	if offset > previewMaxOffset {
+		offset = previewMaxOffset
+	}
+	top := offset + previewFetchLimit + 1 // +1 so we can tell whether another page follows
+	if top > previewMaxOffset {
+		top = previewMaxOffset
+	}
+	src.Config["Top"] = strconv.Itoa(top)
 
 	source, err := sources.New(src, s.secrets)
 	if err != nil {
@@ -371,7 +390,14 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if len(docs) > previewFetchLimit {
+
+	if offset < len(docs) {
+		docs = docs[offset:]
+	} else {
+		docs = nil
+	}
+	hasMore := len(docs) > previewFetchLimit
+	if hasMore {
 		docs = docs[:previewFetchLimit]
 	}
 
@@ -387,7 +413,13 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, previewDoc{Title: title, Text: rag.Truncate(d.Text, 800)})
 	}
-	writeJSON(w, map[string]any{"ok": true, "documents": out})
+	writeJSON(w, map[string]any{
+		"ok":        true,
+		"documents": out,
+		"offset":    offset,
+		"limit":     previewFetchLimit,
+		"hasMore":   hasMore,
+	})
 }
 
 // handleSourceDelete removes the source and its vectors, mirroring
