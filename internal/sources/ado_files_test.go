@@ -149,6 +149,48 @@ func TestFetchDocumentsFetchesRealFileContentForCodeSources(t *testing.T) {
 	}
 }
 
+// TestFetchDocumentsAppliesPathFilterBeforeTop guards against a regression
+// where Top truncated the raw item list before PathFilter ran: a small Top
+// (as the source preview uses) could slice off every matching file if ADO
+// happened to list non-matching files first, even though matches exist.
+func TestFetchDocumentsAppliesPathFilterBeforeTop(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/items"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"value": []map[string]any{
+					{"path": "/src/A.cs", "gitObjectType": "blob", "objectId": "sha-a"},
+					{"path": "/src/B.cs", "gitObjectType": "blob", "objectId": "sha-b"},
+					{"path": "/src/C.cs", "gitObjectType": "blob", "objectId": "sha-c"},
+					{"path": "/doc/guide/intro.md", "gitObjectType": "blob", "objectId": "sha-md"},
+				},
+			})
+		case strings.Contains(r.URL.Path, "/blobs/sha-md"):
+			_, _ = w.Write([]byte("# Intro"))
+		default:
+			http.Error(w, "unexpected request: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: codeSrc(map[string]string{
+		"Url":        srv.URL + "/_apis/git/repositories/repo/items",
+		"PathFilter": "doc/**/*.md",
+		"Top":        "1",
+	})}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("got %d docs, want 1 (matching file should survive Top truncation)", len(docs))
+	}
+	if !strings.Contains(docs[0].Text, "# Intro") {
+		t.Errorf("expected matching file's content, got %q", docs[0].Text)
+	}
+}
+
 func TestFetchDocumentsCodeSourceRequiresAdoItemsURL(t *testing.T) {
 	s := &APISource{src: codeSrc(map[string]string{
 		"Url": "https://api.example.com/items",

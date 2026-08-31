@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -73,7 +74,23 @@ var apiConfigKeys = []string{
 // The backend ignores them — execution is driven entirely by apiConfigKeys, so
 // any platform is "just a generic HTTP source" (see internal/sources/source.go).
 var presetConfigKeys = []string{
-	"Platform", "AdoOrg", "AdoProject", "AdoApiVersion", "AdoResource", "AdoQuery",
+	"Platform", "AdoOrg", "AdoProject", "AdoApiVersion", "AdoResource", "AdoRepo", "AdoQuery",
+}
+
+// adoRepoNamePattern extracts the repo name from a legacy AdoResource preset
+// value (e.g. "git/repositories/MyRepo/items" or ".../commits") — sources
+// saved before the dedicated repo-name field existed still pre-fill it.
+var adoRepoNamePattern = regexp.MustCompile(`^git/repositories/([^/]+)/(?:items|commits)$`)
+
+func adoRepoNameFromResource(resource string) string {
+	m := adoRepoNamePattern.FindStringSubmatch(resource)
+	if m == nil {
+		return ""
+	}
+	if decoded, err := url.QueryUnescape(m[1]); err == nil {
+		return decoded
+	}
+	return m[1]
 }
 
 // ── Source CRUD ─────────────────────────────────────────────────────────────
@@ -101,6 +118,22 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 			}
 			seen[m.CredentialName] = true
 			creds = append(creds, models.CredentialInfo{Name: m.CredentialName})
+		}
+	}
+
+	// Back-fill AdoRepo from a legacy stored AdoResource for display only —
+	// never persisted, so it doesn't overwrite a source's saved config until
+	// the user actually re-saves the form.
+	if src.GetConfig("AdoRepo") == "" {
+		if repo := adoRepoNameFromResource(src.GetConfig("AdoResource")); repo != "" {
+			cfg := make(map[string]string, len(src.Config)+1)
+			for k, v := range src.Config {
+				cfg[k] = v
+			}
+			cfg["AdoRepo"] = repo
+			srcCopy := *src
+			srcCopy.Config = cfg
+			src = &srcCopy
 		}
 	}
 

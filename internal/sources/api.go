@@ -181,17 +181,20 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 			}
 		}
 	}
-	if len(items) > top {
-		items = items[:top]
-	}
-
 	// File-content enrichment is automatic for code/test-code sources, and
 	// best-effort for documentation sources (which may point at a wiki
 	// instead of a repo) — never a user-configurable option, and never
 	// applied to any other source type.
 	if fileContentType {
 		if repoBase, ok := AdoItemsAPIBase(url); ok {
+			// PathFilter must run before the Top truncation below — otherwise
+			// a small Top (e.g. the preview's 5-item cap) can slice off every
+			// item that would have matched the filter, since ADO returns the
+			// full repo tree in an arbitrary order.
 			items = filterGitItems(items, parsePathFilter(cfg.GetConfig("PathFilter")))
+			if len(items) > top {
+				items = items[:top]
+			}
 			docs := a.itemsToDocuments(items, url)
 			if err := a.enrichWithFileContent(ctx, client, repoBase, items, docs, progress); err != nil {
 				return nil, err
@@ -205,6 +208,9 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		// URL (e.g. a wiki) — fall through to plain metadata handling below.
 	}
 
+	if len(items) > top {
+		items = items[:top]
+	}
 	docs := a.itemsToDocuments(items, url)
 	// Diff enrichment is automatic for commit-history sources only — never a
 	// user-configurable option, and never applied to any other source type

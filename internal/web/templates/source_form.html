@@ -154,8 +154,8 @@
 
       <div id="fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} space-y-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Resource path <span class="text-slate-500">(after /_apis/)</span></label>
-          <input name="AdoResource" value="{{$s.GetConfig `AdoResource`}}" placeholder="git/repositories/MyRepo/items"
+          <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
+          <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
         <div>
@@ -169,10 +169,21 @@
         {{template "worktype-picker" .}}
       </div>
 
-      {{else}}
+      {{else if eq $s.Type "commit-history"}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Resource path <span class="text-slate-500">(after /_apis/)</span></label>
         <input name="AdoResource" value="{{$s.GetConfig `AdoResource`}}" placeholder="git/repositories/MyRepo/commits"
+               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">File filter <span class="text-slate-500">(comma-sep wildcards, e.g. "*.cs, *.ts" — empty = all files)</span></label>
+        <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.cs, *.ts"
+               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      {{else}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
+        <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       <div>
@@ -298,7 +309,16 @@ function prepareSubmit() {
       document.getElementById('ado-worktypes').value = checked.join(',');
     } else {
       var ver = adoVal('AdoApiVersion') || '7.1';
-      var res = adoVal('AdoResource').replace(/^\/+/, '');
+      // "Files in a repo" types (Source Code, Test Code, Documentation, and
+      // Requirements/Test Cases in file mode) hit the items endpoint of a
+      // single named repo — the repo name is all the user needs to give, the
+      // rest of the path is fixed. Commit History still needs a free-text
+      // resource path since it targets a different (commits) endpoint.
+      var isFilesRepoType = SOURCE_TYPE === 'code' || SOURCE_TYPE === 'test-code' || SOURCE_TYPE === 'documentation' ||
+        ((SOURCE_TYPE === 'requirements' || SOURCE_TYPE === 'test-case') && currentFetchMode() !== 'workitems');
+      var res = isFilesRepoType
+        ? 'git/repositories/' + encodeURIComponent(adoVal('AdoRepo')) + '/items'
+        : adoVal('AdoResource').replace(/^\/+/, '');
       var q = adoVal('AdoQuery').replace(/^[?&]+/, '');
       var url = org + '/' + proj + '/_apis/' + res + '?api-version=' + encodeURIComponent(ver);
       if (q) url += '&' + q;
