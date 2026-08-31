@@ -392,6 +392,13 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A fetch shorter than what was asked for (top) means the source has no
+	// more documents beyond it, so its length is the exact total. Otherwise
+	// the source has at least that many and the true total is unknown (it
+	// may exceed previewMaxOffset too), so the count is reported as a floor.
+	total := len(docs)
+	totalExact := total < top
+
 	if offset < len(docs) {
 		docs = docs[offset:]
 	} else {
@@ -415,11 +422,13 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		out = append(out, previewDoc{Title: title, Text: rag.Truncate(d.Text, 800)})
 	}
 	writeJSON(w, map[string]any{
-		"ok":        true,
-		"documents": out,
-		"offset":    offset,
-		"limit":     previewFetchLimit,
-		"hasMore":   hasMore,
+		"ok":         true,
+		"documents":  out,
+		"offset":     offset,
+		"limit":      previewFetchLimit,
+		"hasMore":    hasMore,
+		"total":      total,
+		"totalExact": totalExact,
 	})
 }
 

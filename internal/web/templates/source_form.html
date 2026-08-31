@@ -230,7 +230,10 @@
     <div class="absolute inset-0 bg-black/60" onclick="closePreview()"></div>
     <div class="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
       <div class="flex items-center justify-between p-5 pb-3 border-b border-slate-800 shrink-0">
-        <h2 class="text-sm font-medium text-slate-300">Preview</h2>
+        <div class="flex items-center gap-2">
+          <h2 class="text-sm font-medium text-slate-300">Preview</h2>
+          <span id="preview-total-label" class="text-xs text-slate-500"></span>
+        </div>
         <button type="button" onclick="closePreview()"
                 class="text-xs text-slate-500 hover:text-white">Close</button>
       </div>
@@ -361,6 +364,7 @@ function loadPreviewPage(offset) {
   prevBtn.disabled = true;
   nextBtn.disabled = true;
   footer.classList.add('hidden');
+  document.getElementById('preview-total-label').textContent = '';
   body.innerHTML = '<p class="text-slate-500">Fetching a few items…</p>';
 
   var form = document.getElementById('source-form');
@@ -379,6 +383,9 @@ function loadPreviewPage(offset) {
       }
       currentPreviewOffset = data.offset || 0;
       previewLimit = data.limit || previewLimit;
+      document.getElementById('preview-total-label').textContent = typeof data.total === 'number'
+        ? '(' + (data.totalExact ? data.total : data.total + '+') + ' item' + (data.total === 1 ? '' : 's') + ')'
+        : '';
       body.innerHTML = '';
       if (!data.documents || data.documents.length === 0) {
         body.innerHTML = '<p class="text-slate-500">' +

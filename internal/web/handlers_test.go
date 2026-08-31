@@ -240,21 +240,25 @@ func TestSourcePreviewPaginatesAcrossOffset(t *testing.T) {
 	defer api.Close()
 
 	fetchPage := func(offset string) struct {
-		Ok        bool                           `json:"ok"`
-		Documents []struct{ Title, Text string } `json:"documents"`
-		Offset    int                            `json:"offset"`
-		Limit     int                            `json:"limit"`
-		HasMore   bool                           `json:"hasMore"`
+		Ok         bool                           `json:"ok"`
+		Documents  []struct{ Title, Text string } `json:"documents"`
+		Offset     int                            `json:"offset"`
+		Limit      int                            `json:"limit"`
+		HasMore    bool                           `json:"hasMore"`
+		Total      int                            `json:"total"`
+		TotalExact bool                           `json:"totalExact"`
 	} {
 		resp := h.postForm("/sources/preview", url.Values{
 			"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL}, "offset": {offset},
 		})
 		var out struct {
-			Ok        bool                           `json:"ok"`
-			Documents []struct{ Title, Text string } `json:"documents"`
-			Offset    int                            `json:"offset"`
-			Limit     int                            `json:"limit"`
-			HasMore   bool                           `json:"hasMore"`
+			Ok         bool                           `json:"ok"`
+			Documents  []struct{ Title, Text string } `json:"documents"`
+			Offset     int                            `json:"offset"`
+			Limit      int                            `json:"limit"`
+			HasMore    bool                           `json:"hasMore"`
+			Total      int                            `json:"total"`
+			TotalExact bool                           `json:"totalExact"`
 		}
 		if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
 			t.Fatal(err)
@@ -269,6 +273,11 @@ func TestSourcePreviewPaginatesAcrossOffset(t *testing.T) {
 	if first.Documents[0].Title != "Item 0" {
 		t.Errorf("page 1 first doc = %q, want Item 0", first.Documents[0].Title)
 	}
+	// The underlying fetch is capped at top (offset+limit+1 = 6), which is
+	// fewer than the 12 items available, so the total is a floor, not exact.
+	if first.Total != 6 || first.TotalExact {
+		t.Errorf("page 1 total = %d exact=%v, want 6 exact=false", first.Total, first.TotalExact)
+	}
 
 	second := fetchPage("5")
 	if !second.Ok || len(second.Documents) != 5 || second.Offset != 5 || !second.HasMore {
@@ -281,6 +290,11 @@ func TestSourcePreviewPaginatesAcrossOffset(t *testing.T) {
 	third := fetchPage("10")
 	if !third.Ok || len(third.Documents) != 2 || third.Offset != 10 || third.HasMore {
 		t.Errorf("page 3 = %+v, want 2 docs, offset 10, hasMore false", third)
+	}
+	// At this offset the fetch (top=16) exceeds the 12 items available, so
+	// the exact total is now known.
+	if third.Total != 12 || !third.TotalExact {
+		t.Errorf("page 3 total = %d exact=%v, want 12 exact=true", third.Total, third.TotalExact)
 	}
 }
 
