@@ -125,7 +125,7 @@ func sortTree(n *treeNode) {
 // unrecognized/manual types all fall back to the Documentation collection.
 func useTree(collection string, docs []docSummary) bool {
 	switch collection {
-	case models.CollectionCode, models.CollectionTestCode:
+	case models.CollectionSourceCode, models.CollectionTestCode:
 		return true
 	case models.CollectionDocumentation:
 		if len(docs) == 0 {

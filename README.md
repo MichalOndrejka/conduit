@@ -36,17 +36,17 @@ Web UI ──► Sync engine ──► generic API / manual sources
 
 | Tool | What it searches |
 |------|-----------------|
-| `search_workitems` | Work items — bugs, user stories, tasks, features |
-| `search_requirements` | Requirements — features, user stories, epics |
+| `search_workitem` | Work items — bugs, user stories, tasks, features |
+| `search_requirement` | Requirements — features, user stories, epics |
 | `search_source_code` | Production source code |
 | `search_test_code` | Test code — unit tests, integration tests, specs |
-| `search_testcases` | Test cases including test steps |
+| `search_testcase` | Test cases including test steps |
 | `search_documentation` | Wiki pages, repo docs, and uploaded documents |
-| `search_commits` | Git commit history — messages, authors, change summaries |
+| `search_commit` | Git commit history — messages, authors, change summaries |
 | `retrieve_experience` | Recall relevant past experience. **Call at the start of every task.** |
 | `remember` | Store information worth retaining across sessions. **Call proactively.** |
 
-All search tools accept `query` (string), optional `top_k` (default 5), and optional `source_name` filter.
+All search tools accept `query` (string), optional `page` (default 1) to page to the next-most-relevant match, and optional `source_name` filter. Each call returns only the single most relevant match — see `docs/mcp-tools.md` for the pagination shape.
 
 ## Source configuration (generic by design)
 

@@ -245,12 +245,15 @@ func (v *VectorStore) Upsert(ctx context.Context, collection string, points []Po
 // deleting their vectors (they reappear immediately if the source is
 // re-enabled, no re-sync needed).
 func (v *VectorStore) Search(
-	ctx context.Context, collection string, vector []float32, limit int, tags map[string]string, excludeSourceIDs []string,
+	ctx context.Context, collection string, vector []float32, limit, offset int, tags map[string]string, excludeSourceIDs []string,
 ) ([]ScoredPoint, error) {
 	body := map[string]any{
 		"query":        vector,
 		"limit":        limit,
 		"with_payload": true,
+	}
+	if offset > 0 {
+		body["offset"] = offset
 	}
 	f := TagFilter(tags)
 	if len(excludeSourceIDs) > 0 {

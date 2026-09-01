@@ -92,7 +92,7 @@ func TestUseTree(t *testing.T) {
 	pathDocs := []docSummary{{Title: "src/foo.go"}, {Title: "src/bar.go"}}
 	flatDocs := []docSummary{{Title: "Some Work Item"}, {Title: "Another Item"}}
 
-	if !useTree(models.CollectionCode, flatDocs) {
+	if !useTree(models.CollectionSourceCode, flatDocs) {
 		t.Error("code collection should always use tree, even without path-shaped titles")
 	}
 	if !useTree(models.CollectionTestCode, flatDocs) {

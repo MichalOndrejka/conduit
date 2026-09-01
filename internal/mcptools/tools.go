@@ -6,6 +6,7 @@ package mcptools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -19,13 +20,18 @@ import (
 func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.Service) {
 
 	// ── Knowledge search tools ─────────────────────────────────────────────
+	// Each call returns only the single most relevant match — the rest of the
+	// ranked list is reachable by paging, never dumped in one response.
+	const paginationNote = " Returns only the single most relevant match. " +
+		"If it isn't sufficient, call again with a higher page number to see the next-most-relevant match."
 	makeSearchTool := func(collection, name, description string) {
 		tool := mcp.NewTool(name,
-			mcp.WithDescription(description),
+			mcp.WithDescription(description+paginationNote),
 			mcp.WithString("query", mcp.Required(),
 				mcp.Description("Natural-language search query")),
-			mcp.WithNumber("top_k",
-				mcp.Description("Number of results to return (default 5)")),
+			mcp.WithNumber("page",
+				mcp.Description("Which result to return by relevance rank, starting at 1 (the most relevant match). "+
+					"Call again with a higher page number to see the next-most-relevant match if this one isn't sufficient. Default 1.")),
 			mcp.WithString("source_name",
 				mcp.Description("Optional: restrict results to a single source by name")),
 		)
@@ -34,20 +40,26 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			topK := req.GetInt("top_k", 5)
+			page := req.GetInt("page", 1)
+			if page < 1 {
+				page = 1
+			}
 			var tags map[string]string
 			if sourceName := req.GetString("source_name", ""); sourceName != "" {
 				tags = map[string]string{"source_name": sourceName}
 			}
-			results, err := search.Search(ctx, collection, query, topK, tags)
+			results, hasMore, err := search.Search(ctx, collection, query, page, tags)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			var payload any
+			payload := map[string]any{"results": results, "page": page, "has_more": hasMore}
 			if len(results) == 0 {
-				payload = map[string]any{"results": []any{}, "note": "No data embedded for this query — the source may not be synced yet, or nothing matched."}
-			} else {
-				payload = map[string]any{"results": results}
+				payload["results"] = []any{}
+				if page == 1 {
+					payload["note"] = "No data embedded for this query — the source may not be synced yet, or nothing matched."
+				} else {
+					payload["note"] = fmt.Sprintf("No further matches beyond page %d — this was the last page.", page-1)
+				}
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {
@@ -57,23 +69,23 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		})
 	}
 
-	makeSearchTool(models.CollectionWorkItems, "search_workitems",
+	makeSearchTool(models.CollectionWorkItems, "search_workitem",
 		"Semantic search over work items (bugs, tasks, defects). "+
 			"Optionally filter by source_name to target a specific source.")
-	makeSearchTool(models.CollectionRequirements, "search_requirements",
+	makeSearchTool(models.CollectionRequirements, "search_requirement",
 		"Semantic search over requirements (features, user stories, epics). "+
 			"Optionally filter by source_name to target a specific source.")
-	makeSearchTool(models.CollectionCode, "search_source_code",
+	makeSearchTool(models.CollectionSourceCode, "search_source_code",
 		"Semantic search over production source code (classes, methods, functions). "+
 			"Does not include test files — use search_test_code for tests.")
 	makeSearchTool(models.CollectionTestCode, "search_test_code",
 		"Semantic search over test code — unit tests, integration tests and specs. "+
 			"Use this to find test coverage, test patterns, or examples of how code is tested.")
-	makeSearchTool(models.CollectionTestCases, "search_testcases",
+	makeSearchTool(models.CollectionTestCases, "search_testcase",
 		"Semantic search over test cases including test steps.")
 	makeSearchTool(models.CollectionDocumentation, "search_documentation",
 		"Semantic search over wiki pages, repo documentation and uploaded documents.")
-	makeSearchTool(models.CollectionCommits, "search_commits",
+	makeSearchTool(models.CollectionCommits, "search_commit",
 		"Semantic search over git commit history — messages, authors and change summaries.")
 
 	// ── Experience tools ───────────────────────────────────────────────────

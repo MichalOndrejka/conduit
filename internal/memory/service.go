@@ -70,7 +70,7 @@ func (s *Service) Retrieve(ctx context.Context, query string, topK int) ([]Exper
 	if err != nil {
 		return nil, err
 	}
-	points, err := s.store.Search(ctx, Collection, vector, topK, nil, nil)
+	points, err := s.store.Search(ctx, Collection, vector, topK, 0, nil, nil)
 	if err != nil {
 		return nil, err
 	}

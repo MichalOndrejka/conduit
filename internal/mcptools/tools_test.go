@@ -182,9 +182,9 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 		got[tool.Name] = true
 	}
 	want := []string{
-		"search_workitems", "search_requirements", "search_source_code",
-		"search_test_code", "search_testcases", "search_documentation",
-		"search_commits", "retrieve_experience", "remember",
+		"search_workitem", "search_requirement", "search_source_code",
+		"search_test_code", "search_testcase", "search_documentation",
+		"search_commit", "retrieve_experience", "remember",
 	}
 	for _, name := range want {
 		if !got[name] {
@@ -202,7 +202,7 @@ func TestSearchToolReturnsResults(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitems", map[string]any{"query": "some bug"})
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"query": "some bug"})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -212,12 +212,20 @@ func TestSearchToolReturnsResults(t *testing.T) {
 			ID   string `json:"id"`
 			Text string `json:"text"`
 		} `json:"results"`
+		Page    int  `json:"page"`
+		HasMore bool `json:"has_more"`
 	}
 	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
 		t.Fatal(err)
 	}
 	if len(payload.Results) != 1 || payload.Results[0].ID != "p1" || payload.Results[0].Text != "hit text" {
 		t.Errorf("Results = %+v, want one hit with id=p1 text=%q", payload.Results, "hit text")
+	}
+	if payload.Page != 1 {
+		t.Errorf("Page = %d, want 1", payload.Page)
+	}
+	if payload.HasMore {
+		t.Error("HasMore = true, want false (only one point returned by the fake)")
 	}
 }
 
@@ -248,7 +256,7 @@ func TestSearchToolNoResultsReturnsNote(t *testing.T) {
 func TestSearchToolMissingQueryArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitems", map[string]any{})
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{})
 	if !result.IsError {
 		t.Fatal("expected IsError=true for missing query argument")
 	}
@@ -260,7 +268,7 @@ func TestSearchToolMissingQueryArgErrors(t *testing.T) {
 func TestSearchToolEmbeddingFailurePropagatesAsToolError(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
 
-	result := callTool(t, s, ctx, "search_commits", map[string]any{"query": "anything"})
+	result := callTool(t, s, ctx, "search_commit", map[string]any{"query": "anything"})
 	if !result.IsError {
 		t.Fatal("expected IsError=true when the embedding backend fails")
 	}
@@ -273,8 +281,8 @@ func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
 	qd := &fakeQdrant{}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_testcases", map[string]any{
-		"query": "login flow", "source_name": "my-source", "top_k": float64(3),
+	result := callTool(t, s, ctx, "search_testcase", map[string]any{
+		"query": "login flow", "source_name": "my-source", "page": float64(3),
 	})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
@@ -283,8 +291,13 @@ func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
 	qd.mu.Lock()
 	body := qd.lastSearchBody
 	qd.mu.Unlock()
-	if got := body["limit"]; got != float64(3) {
-		t.Errorf("limit = %v, want 3", got)
+	// page 3 with pageSize 1 → offset 2 (skip ranks 1–2), limit 2 (fetch rank 3
+	// plus one lookahead to know whether a further page exists).
+	if got := body["limit"]; got != float64(2) {
+		t.Errorf("limit = %v, want 2", got)
+	}
+	if got := body["offset"]; got != float64(2) {
+		t.Errorf("offset = %v, want 2", got)
 	}
 	filter, ok := body["filter"].(map[string]any)
 	if !ok {
@@ -302,6 +315,59 @@ func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
 	if !ok || match["value"] != "my-source" {
 		t.Fatalf("filter.must[0].match = %+v, want value=my-source", cond["match"])
 	}
+}
+
+func TestSearchToolPagination(t *testing.T) {
+	type paginationPayload struct {
+		Results []any  `json:"results"`
+		Page    int    `json:"page"`
+		HasMore bool   `json:"has_more"`
+		Note    string `json:"note"`
+	}
+	decode := func(t *testing.T, result mcp.CallToolResult) paginationPayload {
+		t.Helper()
+		var p paginationPayload
+		if err := json.Unmarshal([]byte(resultText(t, result)), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+
+	t.Run("page 1 with a further match reports has_more", func(t *testing.T) {
+		qd := &fakeQdrant{searchPoints: []map[string]any{
+			{"id": "p1", "score": 0.9, "payload": map[string]any{"text": "most relevant"}},
+			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
+		}}
+		s, ctx := setup(t, qd, nil)
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x"}))
+		if len(p.Results) != 1 || p.Page != 1 || !p.HasMore {
+			t.Errorf("got %+v, want 1 result, page 1, has_more true", p)
+		}
+	})
+
+	t.Run("last page reports has_more false", func(t *testing.T) {
+		qd := &fakeQdrant{searchPoints: []map[string]any{
+			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
+		}}
+		s, ctx := setup(t, qd, nil)
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x", "page": float64(2)}))
+		if len(p.Results) != 1 || p.Page != 2 || p.HasMore {
+			t.Errorf("got %+v, want 1 result, page 2, has_more false", p)
+		}
+	})
+
+	t.Run("paging past the last match returns the exhausted-page note", func(t *testing.T) {
+		qd := &fakeQdrant{}
+		s, ctx := setup(t, qd, nil)
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x", "page": float64(3)}))
+		if len(p.Results) != 0 || p.HasMore {
+			t.Errorf("got %+v, want no results and has_more false", p)
+		}
+		want := "No further matches beyond page 2 — this was the last page."
+		if p.Note != want {
+			t.Errorf("Note = %q, want %q", p.Note, want)
+		}
+	})
 }
 
 func TestRetrieveExperienceReturnsResults(t *testing.T) {

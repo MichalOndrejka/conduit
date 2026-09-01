@@ -107,11 +107,11 @@ func runSearchCLI(searchSvc *rag.SearchService, args []string) {
 	}
 	collection := args[0]
 	query := strings.Join(args[1:], " ")
-	results, err := searchSvc.Search(context.Background(), collection, query, 5, nil)
+	results, hasMore, err := searchSvc.Search(context.Background(), collection, query, 1, nil)
 	if err != nil {
 		log.Fatalf("search: %v", err)
 	}
-	out, err := json.MarshalIndent(results, "", "  ")
+	out, err := json.MarshalIndent(map[string]any{"results": results, "has_more": hasMore}, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}

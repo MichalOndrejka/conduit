@@ -26,32 +26,40 @@ A `.vscode/mcp.json` is already included in the repo for VS Code users.
 All search tools share the same signature:
 
 ```
-tool_name(query: str, top_k: int = 5, source_name: str | None = None) -> str
+tool_name(query: str, page: int = 1, source_name: str | None = None) -> str
 ```
 
 - **`query`** — Natural language query. The query is embedded and matched semantically.
-- **`top_k`** — Number of results to return. Default `5`.
+- **`page`** — Which result to return by relevance rank, starting at `1` (the most relevant match). Each call returns only a single match; call again with a higher page number to see the next-most-relevant one if the first wasn't sufficient. Default `1`.
 - **`source_name`** — Optional filter. When set, only documents from sources with that exact name are returned. Useful when multiple sources of the same type exist (e.g. two different repositories).
 
-Results are returned as a JSON array. Each result contains:
+Results are returned as a JSON object with at most one entry in `results`, plus pagination info:
 
 ```json
 {
-  "id": "source_id_wi_12345",
-  "score": 0.87,
-  "text": "Work Item 12345: Fix login timeout...",
-  "tags": { "source_name": "My ADO Source", "state": "Active" },
-  "properties": { "title": "Fix login timeout", "url": "https://..." }
+  "results": [
+    {
+      "id": "source_id_wi_12345",
+      "score": 0.87,
+      "text": "Work Item 12345: Fix login timeout...",
+      "tags": { "source_name": "My ADO Source", "state": "Active" },
+      "properties": { "title": "Fix login timeout", "url": "https://..." }
+    }
+  ],
+  "page": 1,
+  "has_more": true
 }
 ```
 
-### `search_workitems`
+`has_more: true` means a next-most-relevant match exists — call again with `page + 1` to fetch it. When `results` is empty, a `note` explains why: nothing is embedded yet for `page == 1`, or the ranked list is exhausted for `page > 1`.
+
+### `search_workitem`
 
 Searches work items — bugs, tasks, user stories, features, epics.
 
 Best for: finding related issues, checking if a bug has been filed, understanding sprint scope.
 
-### `search_requirements`
+### `search_requirement`
 
 Searches requirements — features, user stories, epics, product and software requirements.
 
@@ -69,7 +77,7 @@ Searches test code — unit tests, integration tests, and specs.
 
 Best for: finding existing test coverage, understanding how code is tested, finding test patterns and examples.
 
-### `search_testcases`
+### `search_testcase`
 
 Searches test case definitions including test steps.
 
@@ -81,7 +89,7 @@ Searches wiki pages, repo documentation sections, and manually uploaded document
 
 Best for: finding architectural decisions, process documentation, onboarding guides, design docs, ADRs.
 
-### `search_commits`
+### `search_commit`
 
 Searches git commit history — messages, authors, file change summaries.
 
@@ -169,4 +177,4 @@ For a code change task, a useful sequence is:
 1. `retrieve_experience` — check for relevant past decisions
 2. `search_source_code` — find the implementation
 3. `search_test_code` — find existing tests for that code
-4. `search_workitems` — find related requirements or bugs
+4. `search_workitem` — find related requirements or bugs

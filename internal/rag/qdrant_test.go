@@ -44,7 +44,7 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	points, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 5,
+	points, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 5, 0,
 		map[string]string{"source_name": "my-source"}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -71,6 +71,30 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 	}
 	if res.Tags["source_name"] != "my-source" || res.Properties["url"] != "https://example.com" {
 		t.Errorf("tags/props not split: %+v", res)
+	}
+}
+
+func TestSearchOmitsOffsetWhenZeroButIncludesItWhenPositive(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"points": []map[string]any{}}})
+	}))
+	defer srv.Close()
+	v := storeFor(t, srv)
+
+	if _, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 2, 0, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gotBody["offset"]; ok {
+		t.Errorf("offset present with value 0: %v, want omitted", gotBody["offset"])
+	}
+
+	if _, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 2, 4, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := gotBody["offset"]; got != float64(4) {
+		t.Errorf("offset = %v, want 4", got)
 	}
 }
 

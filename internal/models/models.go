@@ -11,7 +11,7 @@ const DocumentPlaceholder = "__DOCUMENT_REQUIRED__"
 const (
 	CollectionWorkItems     = "conduit_workitems"
 	CollectionRequirements  = "conduit_requirements"
-	CollectionCode          = "conduit_code"
+	CollectionSourceCode    = "conduit_code"
 	CollectionTestCode      = "conduit_testcode"
 	CollectionTestCases     = "conduit_testcases"
 	CollectionDocumentation = "conduit_documentation"
@@ -21,7 +21,7 @@ const (
 
 // AllCollections mirrors CollectionNames.ALL in app/models.py.
 var AllCollections = []string{
-	CollectionWorkItems, CollectionRequirements, CollectionCode,
+	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
 	CollectionTestCode, CollectionTestCases,
 	CollectionDocumentation, CollectionCommits,
 	CollectionExperience,

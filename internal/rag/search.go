@@ -24,12 +24,23 @@ func NewSearchService(store *VectorStore, embedding *EmbeddingService, sources S
 	return &SearchService{store: store, embedding: embedding, sources: sources}
 }
 
+// pageSize is the number of ranked matches Search returns per page — always
+// 1, so a single search call can never return more than one full chunk of
+// text. Callers page to the next-most-relevant match with a higher page
+// number instead of asking for a batch up front.
+const pageSize = 1
+
+// Search returns the single most relevant match for page (1-based; values
+// below 1 are treated as 1). hasMore reports whether a further page exists.
 func (s *SearchService) Search(
-	ctx context.Context, collection, query string, topK int, tags map[string]string,
-) ([]models.SearchResult, error) {
+	ctx context.Context, collection, query string, page int, tags map[string]string,
+) (results []models.SearchResult, hasMore bool, err error) {
+	if page < 1 {
+		page = 1
+	}
 	vector, err := s.embedding.Embed(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	var excludeSourceIDs []string
 	if s.sources != nil {
@@ -41,13 +52,18 @@ func (s *SearchService) Search(
 			}
 		}
 	}
-	points, err := s.store.Search(ctx, collection, vector, topK, tags, excludeSourceIDs)
+	offset := (page - 1) * pageSize
+	points, err := s.store.Search(ctx, collection, vector, pageSize+1, offset, tags, excludeSourceIDs)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	results := make([]models.SearchResult, 0, len(points))
+	hasMore = len(points) > pageSize
+	if hasMore {
+		points = points[:pageSize]
+	}
+	results = make([]models.SearchResult, 0, len(points))
 	for _, p := range points {
 		results = append(results, PointToSearchResult(p))
 	}
-	return results, nil
+	return results, hasMore, nil
 }

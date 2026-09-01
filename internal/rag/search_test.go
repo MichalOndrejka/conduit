@@ -46,7 +46,7 @@ func TestSearchExcludesDisabledSources(t *testing.T) {
 	}
 	svc := NewSearchService(vectors, embedding, sources)
 
-	if _, err := svc.Search(context.Background(), "conduit_workitems", "query", 5, nil); err != nil {
+	if _, _, err := svc.Search(context.Background(), "conduit_workitems", "query", 1, nil); err != nil {
 		t.Fatal(err)
 	}
 
