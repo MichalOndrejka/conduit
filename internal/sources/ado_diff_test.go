@@ -163,6 +163,38 @@ func TestFetchCommitDiffAddedAndDeletedFile(t *testing.T) {
 	}
 }
 
+// A commit that adds a new folder reports that folder as a changed "item"
+// alongside real file changes, but a folder's objectId points at a tree, not
+// a blob — fetching it via the blobs endpoint as if it were a file must be
+// skipped, since Azure DevOps rejects that with 400 Bad Request.
+func TestFetchCommitDiffSkipsFolderChanges(t *testing.T) {
+	changes := adoChangesResponse{Changes: []adoChange{
+		{ChangeType: "add", Item: adoChangeItem{Path: "newdir", ObjectID: "treesha", IsFolder: true, GitObjectType: "tree"}},
+		{ChangeType: "add", Item: adoChangeItem{Path: "newdir/main.go", ObjectID: "newsha", GitObjectType: "blob"}},
+	}}
+	srv := adoStub(t, map[string]adoChangesResponse{"c1": changes}, map[string]string{
+		"newsha": "package main\n",
+		// deliberately no "treesha" entry — a blob fetch for it must 404 the
+		// stub, so if the fix regresses this test fails via the note below.
+	})
+	defer srv.Close()
+
+	s := &APISource{src: src(nil)}
+	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1", defaultMaxFilesPerCommit, defaultMaxDiffChars)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filesChanged != 2 {
+		t.Errorf("filesChanged = %d, want 2", filesChanged)
+	}
+	if strings.Contains(diffText, "diff unavailable") {
+		t.Errorf("folder change should have been skipped, not fetched as a blob: %q", diffText)
+	}
+	if !strings.Contains(diffText, "+package main") {
+		t.Errorf("real file change missing from diff: %q", diffText)
+	}
+}
+
 func TestFetchCommitDiffRespectsMaxFilesAndMaxChars(t *testing.T) {
 	var changes adoChangesResponse
 	blobs := map[string]string{}
@@ -211,6 +243,10 @@ func TestFetchDocumentsWithFetchDiffsEnriches(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"value": []map[string]any{
 					{"commitId": "abc123", "comment": "Fix login bug"},
@@ -359,6 +395,10 @@ func TestFetchDocumentsGracefullyDegradesOnPerCommitDiffFailure(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"value": []map[string]any{
 					{"commitId": "ok1", "comment": "Good commit"},
@@ -431,6 +471,10 @@ func TestFetchDocumentsWithFetchDiffsConcurrentOrderingIsCorrect(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+				return
+			}
 			items := make([]map[string]any, n)
 			for i := 0; i < n; i++ {
 				items[i] = map[string]any{"commitId": fmt.Sprintf("c%d", i), "comment": fmt.Sprintf("commit %d", i)}
@@ -484,5 +528,205 @@ func TestFetchDocumentsWithFetchDiffsConcurrentOrderingIsCorrect(t *testing.T) {
 		if !strings.Contains(docs[i].Text, wantFile) {
 			t.Errorf("docs[%d] diff missing own file path %q (cross-talk between concurrent fetches?): %q", i, wantFile, docs[i].Text)
 		}
+	}
+}
+
+// TestFetchDocumentsPaginatesPastAdoCommitsPageSize verifies that a
+// commit-history source keeps paging via searchCriteria.$top/$skip past
+// Azure DevOps' single-page response size, rather than silently stopping at
+// it (the "hard limit of 100" bug).
+func TestFetchDocumentsPaginatesPastAdoCommitsPageSize(t *testing.T) {
+	const total = adoCommitsPageSize + 30 // spans two pages
+	var gotSkips []string
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
+			top, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$top"))
+			gotSkips = append(gotSkips, r.URL.Query().Get("searchCriteria.$skip"))
+			end := skip + top
+			if end > total {
+				end = total
+			}
+			var items []map[string]any
+			for i := skip; i < end; i++ {
+				items = append(items, map[string]any{"commitId": fmt.Sprintf("c%d", i), "comment": fmt.Sprintf("commit %d", i)})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": items})
+		case strings.Contains(r.URL.Path, "/changes"):
+			_ = json.NewEncoder(w).Encode(adoChangesResponse{})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: commitSrc(map[string]string{
+		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
+		"ItemsPath":     "value",
+		"IdField":       "commitId",
+		"TitleField":    "comment",
+		"ContentFields": "comment",
+	})}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != total {
+		t.Fatalf("got %d docs, want %d", len(docs), total)
+	}
+	if len(gotSkips) < 2 {
+		t.Fatalf("expected at least 2 pages fetched, got %d requests: %v", len(gotSkips), gotSkips)
+	}
+	if gotSkips[0] != "0" {
+		t.Errorf("first page skip = %q, want \"0\"", gotSkips[0])
+	}
+	if gotSkips[1] != strconv.Itoa(adoCommitsPageSize) {
+		t.Errorf("second page skip = %q, want %q", gotSkips[1], strconv.Itoa(adoCommitsPageSize))
+	}
+}
+
+// TestFetchDocumentsStopsPagingOnNullValueEnvelope reproduces a real-world
+// bug: real ADO commit-history sources leave ItemsPath blank (it's not a
+// visible ADO-tab field), so resolveItems auto-detects the "value" envelope
+// instead of navigating an explicit path. If a trailing page's "value" comes
+// back as JSON null instead of [] — which asList alone handles fine, but the
+// pre-fix resolveItems fallback did not — the naive fallback wrapped that
+// whole page's raw response as one bogus document, and since the pagination
+// loop only stops once a page yields zero items, it kept "successfully"
+// fetching (and appending) that same bogus document on every subsequent page
+// up to maxPages, producing many near-identical giant-JSON documents.
+func TestFetchDocumentsStopsPagingOnNullValueEnvelope(t *testing.T) {
+	pages := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			pages++
+			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
+			if skip == 0 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"count": 1, "value": []map[string]any{
+					{"commitId": "c0", "comment": "only commit"},
+				}})
+				return
+			}
+			// Trailing empty page, serialized with "value": null rather than [].
+			_ = json.NewEncoder(w).Encode(map[string]any{"count": 0, "value": nil})
+		case strings.Contains(r.URL.Path, "/changes"):
+			_ = json.NewEncoder(w).Encode(adoChangesResponse{})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: commitSrc(map[string]string{
+		"Url": srv.URL + "/_apis/git/repositories/repo/commits",
+	})}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("got %d docs, want 1 (the null-value page must not become a bogus document)", len(docs))
+	}
+	if pages != 2 {
+		t.Errorf("got %d page requests, want exactly 2 (one real page, one empty page that correctly stops pagination)", pages)
+	}
+}
+
+// TestFetchDocumentsCommitHistoryRespectsTopAcrossPages verifies that a
+// configured Top still caps the total fetched even once it spans more than
+// one paginated request.
+func TestFetchDocumentsCommitHistoryRespectsTopAcrossPages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
+			top, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$top"))
+			var items []map[string]any
+			for i := skip; i < skip+top; i++ {
+				items = append(items, map[string]any{"commitId": fmt.Sprintf("c%d", i), "comment": fmt.Sprintf("commit %d", i)})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": items})
+		case strings.Contains(r.URL.Path, "/changes"):
+			_ = json.NewEncoder(w).Encode(adoChangesResponse{})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: commitSrc(map[string]string{
+		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
+		"ItemsPath":     "value",
+		"IdField":       "commitId",
+		"TitleField":    "comment",
+		"ContentFields": "comment",
+		"Top":           "130",
+	})}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 130 {
+		t.Fatalf("got %d docs, want 130", len(docs))
+	}
+}
+
+// TestFetchDocumentsCommitHistoryFiltersByBranch verifies that a
+// commit-history source scopes ADO's commits-list request to a single
+// branch — defaulting to "main" when Branch is unset — rather than walking
+// every branch in the repository.
+func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
+	cases := []struct {
+		name       string
+		branchCfg  string
+		wantBranch string
+	}{
+		{name: "default", branchCfg: "", wantBranch: "main"},
+		{name: "explicit", branchCfg: "release/2.0", wantBranch: "release/2.0"},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var gotBranch string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == "/_apis/git/repositories/repo/commits":
+					gotBranch = r.URL.Query().Get("searchCriteria.itemVersion.version")
+					_ = json.NewEncoder(w).Encode(map[string]any{
+						"value": []map[string]any{{"commitId": "c1", "comment": "hi"}},
+					})
+				case strings.Contains(r.URL.Path, "/changes"):
+					_ = json.NewEncoder(w).Encode(adoChangesResponse{})
+				default:
+					http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			cfg := map[string]string{
+				"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
+				"ItemsPath":     "value",
+				"IdField":       "commitId",
+				"TitleField":    "comment",
+				"ContentFields": "comment",
+			}
+			if c.branchCfg != "" {
+				cfg["Branch"] = c.branchCfg
+			}
+			s := &APISource{src: commitSrc(cfg)}
+
+			if _, err := s.FetchDocuments(context.Background(), nil); err != nil {
+				t.Fatal(err)
+			}
+			if gotBranch != c.wantBranch {
+				t.Errorf("searchCriteria.itemVersion.version = %q, want %q", gotBranch, c.wantBranch)
+			}
+		})
 	}
 }

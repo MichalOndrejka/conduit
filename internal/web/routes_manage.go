@@ -66,7 +66,7 @@ var apiConfigKeys = []string{
 	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
 	"ItemsPath", "IdField", "TitleField", "ContentFields",
 	"NextUrlPath", "Top", "VerifySSL",
-	"MaxFilesPerCommit", "MaxDiffChars", "PathFilter", "WorkItemTypes", "AreaPaths",
+	"MaxFilesPerCommit", "MaxDiffChars", "Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
 	"FetchMode",
 }
 

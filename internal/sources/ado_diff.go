@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -21,7 +22,42 @@ const (
 	defaultMaxDiffChars      = 20000
 	defaultMaxFilesPerCommit = 20
 	maxBlobFetchBytes        = 200 << 10 // skip diffing anything larger (likely binary/generated)
+
+	// adoCommitsPageSize is the page size requested per call when paging
+	// through Azure DevOps' commits-list endpoint (see withAdoCommitsPaging).
+	// It also matches ADO's own default page size when no $top is given,
+	// which is the "hard limit of 100" a commit-history source would
+	// otherwise silently stop at without manual pagination.
+	adoCommitsPageSize = 100
+
+	// defaultCommitsBranch is the branch a commit-history source reads from
+	// when Branch is left unset.
+	defaultCommitsBranch = "main"
 )
+
+// withAdoCommitsPaging appends Azure DevOps' commits-list pagination
+// parameters (searchCriteria.$top/$skip) to a commits API URL. The endpoint
+// returns no next-page link, so a commit-history source has to page through
+// it manually to fetch more than one page's worth of commits.
+func withAdoCommitsPaging(commitsURL string, top, skip int) string {
+	sep := "?"
+	if strings.Contains(commitsURL, "?") {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%ssearchCriteria.$top=%d&searchCriteria.$skip=%d", commitsURL, sep, top, skip)
+}
+
+// withAdoBranchFilter appends Azure DevOps' commits-list branch filter
+// (searchCriteria.itemVersion.version) to a commits API URL, scoping the
+// listed commits to a single branch's history instead of every branch in the
+// repository.
+func withAdoBranchFilter(commitsURL, branch string) string {
+	sep := "?"
+	if strings.Contains(commitsURL, "?") {
+		sep = "&"
+	}
+	return fmt.Sprintf("%s%ssearchCriteria.itemVersion.version=%s", commitsURL, sep, url.QueryEscape(branch))
+}
 
 // AdoRepoAPIBase derives the ADO git-repository API base
 // (".../_apis/git/repositories/{repo}") from a commits-list endpoint URL such
@@ -43,6 +79,8 @@ type adoChangeItem struct {
 	Path             string `json:"path"`
 	ObjectID         string `json:"objectId"`
 	OriginalObjectID string `json:"originalObjectId"`
+	IsFolder         bool   `json:"isFolder"`
+	GitObjectType    string `json:"gitObjectType"`
 }
 
 type adoChange struct {
@@ -77,7 +115,11 @@ func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, re
 	var b strings.Builder
 	processed := 0 // files actually accounted for (diffed, errored, or deliberately no-op)
 	for _, c := range changes.Changes[:limit] {
-		if c.Item.Path == "" || strings.EqualFold(c.ChangeType, "none") {
+		// Folder/tree entries show up in a commit's changes alongside real
+		// file changes (e.g. a commit that adds a new directory) but have no
+		// blob to diff — fetching one by its tree objectId as if it were a
+		// blob gets rejected by Azure DevOps with 400 Bad Request.
+		if c.Item.Path == "" || strings.EqualFold(c.ChangeType, "none") || c.Item.IsFolder || strings.EqualFold(c.Item.GitObjectType, "tree") {
 			processed++
 			continue
 		}

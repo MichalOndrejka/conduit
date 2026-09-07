@@ -32,7 +32,6 @@
     Select all
   </label>
   <button type="button" onclick="bulkAction('/sources/sync-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
-  <button type="button" onclick="syncUnembedded()" class="rounded-lg border border-amber-800 text-amber-300 px-3 py-1.5 text-xs hover:bg-amber-950/40">Sync unembedded</button>
   <button type="button" onclick="bulkAction('/sources/disable-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Disable</button>
   <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete</button>
   <div id="sync-eta" class="ml-auto text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2" style="visibility:hidden">&nbsp;</div>
@@ -116,20 +115,6 @@ function submitIDs(url, ids, confirmMsg) {
 function bulkAction(url, confirmMsg) {
   const ids = [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
   submitIDs(url, ids, confirmMsg);
-}
-function syncUnembedded() {
-  const ids = [...document.querySelectorAll('[data-source-id]')]
-    .filter(card => !card.classList.contains('opacity-50'))
-    .filter(card => {
-      const badge = card.querySelector('[data-no-data-badge]');
-      return badge && !badge.classList.contains('hidden');
-    })
-    .map(card => card.dataset.sourceId);
-  if (ids.length === 0) {
-    showToast('All sources are already embedded', 'ok');
-    return;
-  }
-  submitIDs('/sources/sync-selected', ids);
 }
 let syncBatchStart = null;
 let wasSyncing = false;

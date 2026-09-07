@@ -29,7 +29,14 @@
 //	with its real code diff, fetched from Azure DevOps' Git REST API — not
 //	user-configurable, and never applied to any other source type. Requires
 //	Url to be an ADO ".../_apis/git/repositories/{repo}/commits" endpoint;
-//	IdField defaults to "commitId" if unset.
+//	IdField defaults to "commitId" if unset. Since ADO's commits endpoint has
+//	no next-page link, more than one page (adoCommitsPageSize items) is
+//	fetched by paging manually via searchCriteria.$top/$skip until Top is
+//	reached or the repo runs out of commits.
+//	Branch             branch whose history is listed (default "main") —
+//	                   otherwise ADO's commits endpoint walks every branch,
+//	                   duplicating shared commits and pulling in stray
+//	                   feature-branch work.
 //	MaxFilesPerCommit  cap on changed files diffed per commit (default 20)
 //	MaxDiffChars       cap on total diff text per commit (default 20000)
 //
@@ -171,23 +178,54 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	if top == unlimitedTop {
 		progressTotal = 0
 	}
+	// Azure DevOps' commits-list endpoint returns no next-page link for
+	// NextUrlPath to follow, and caps a response at adoCommitsPageSize items
+	// — without manually paging via searchCriteria.$top/$skip, a
+	// commit-history source silently stops at that page size regardless of
+	// its own Top setting.
+	paginateAdoCommits := cfg.Type == models.SourceGitCommits && cfg.GetConfig("NextUrlPath") == ""
+	if paginateAdoCommits {
+		// Unfiltered, ADO's commits endpoint walks every branch's history,
+		// which duplicates commits shared with the default branch and pulls
+		// in throwaway feature-branch work — almost never what a "commit
+		// history" source wants indexed.
+		branch := cfg.GetConfig("Branch")
+		if branch == "" {
+			branch = defaultCommitsBranch
+		}
+		fetchURL = withAdoBranchFilter(fetchURL, branch)
+	}
+	skip := 0
 	var items []any
 	pageURL := fetchURL
 	for page := 0; page < maxPages && pageURL != "" && len(items) < top; page++ {
+		reqURL := pageURL
+		if paginateAdoCommits {
+			pageSize := adoCommitsPageSize
+			if top != unlimitedTop && top-len(items) < pageSize {
+				pageSize = top - len(items)
+			}
+			reqURL = withAdoCommitsPaging(pageURL, pageSize, skip)
+		}
 		if progress != nil {
 			progress(models.SyncProgress{
 				Phase: "fetching", Current: len(items), Total: progressTotal,
 				Message: fmt.Sprintf("Fetching page %d", page+1),
 			})
 		}
-		data, err := a.fetchPage(ctx, client, pageURL)
+		data, err := a.fetchPage(ctx, client, reqURL)
 		if err != nil {
 			return nil, err
 		}
 		pageItems := resolveItems(data, itemsPath)
 		items = append(items, pageItems...)
 		pageURL = ""
-		if nextPath := cfg.GetConfig("NextUrlPath"); nextPath != "" {
+		if paginateAdoCommits {
+			if len(pageItems) > 0 {
+				skip += len(pageItems)
+				pageURL = fetchURL // keep paging; loop guards (Top, maxPages) bound it
+			}
+		} else if nextPath := cfg.GetConfig("NextUrlPath"); nextPath != "" {
 			if next, ok := navigate(data, nextPath).(string); ok {
 				pageURL = next
 			}
@@ -529,6 +567,15 @@ func navigate(data any, path string) any {
 // used as-is; a map is checked for ADO's own "value" envelope; anything else
 // falls back to treating the whole response as a single item, unchanged from
 // the pre-auto-detection behavior.
+//
+// A map that *has* a "value" key but where it isn't a JSON array (e.g. an
+// empty trailing page serialized as "value": null instead of "value": [])
+// deliberately resolves to zero items rather than falling through to the
+// single-item wrap below — otherwise that fallback turns an empty envelope
+// page into one bogus document containing the entire raw response, and a
+// pagination loop that only stops on a truly empty page (see
+// paginateAdoCommits) would keep "successfully" fetching that same bogus
+// page indefinitely.
 func resolveItems(data any, itemsPath string) []any {
 	if itemsPath != "" {
 		return asList(navigate(data, itemsPath))
@@ -537,8 +584,9 @@ func resolveItems(data any, itemsPath string) []any {
 		return list
 	}
 	if m, ok := data.(map[string]any); ok {
-		if v, ok := m["value"].([]any); ok {
-			return v
+		if v, present := m["value"]; present {
+			list, _ := v.([]any)
+			return list
 		}
 	}
 	return asList(data)

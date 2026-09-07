@@ -167,6 +167,18 @@
         <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Branch</label>
+          <input name="Branch" value="{{or ($s.GetConfig `Branch`) `main`}}" placeholder="main"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits <span class="text-slate-500">(most recent first; fetched in pages of 100)</span></label>
+          <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
       {{else}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
