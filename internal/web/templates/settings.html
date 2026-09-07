@@ -120,7 +120,7 @@
   <div class="flex gap-2 mt-5">
     <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
     <button type="button" id="verify-btn-preprocessing" onclick="verifyService('preprocessing')"
-            class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Verify</button>
+            class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800 {{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">Verify</button>
   </div>
 </form>
 
@@ -200,6 +200,7 @@ function copyMcp() {
 function togglePreproc() {
   var on = document.getElementById('preprocEnabled').checked;
   document.getElementById('preproc-fields').classList.toggle('hidden', !on);
+  document.getElementById('verify-btn-preprocessing').classList.toggle('hidden', !on);
 }
 
 // Known output dimensions for common embedding models, used to warn when the

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,6 +28,11 @@ type VectorStore struct {
 	cfg        *config.AppConfig
 	httpClient *http.Client
 }
+
+// ErrCollectionNotFound wraps a 404 from Qdrant — the collection hasn't been
+// created yet, meaning nothing has been synced/embedded for it. Callers
+// querying for results treat this as "no data" rather than a failure.
+var ErrCollectionNotFound = errors.New("qdrant collection not found")
 
 func NewVectorStore(cfg *config.AppConfig) *VectorStore {
 	return &VectorStore{
@@ -128,7 +134,11 @@ func (v *VectorStore) do(ctx context.Context, method, path string, body any, out
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("qdrant %s %s: HTTP %d: %s", method, path, resp.StatusCode, Truncate(string(data), 300))
+		err := fmt.Errorf("qdrant %s %s: HTTP %d: %s", method, path, resp.StatusCode, Truncate(string(data), 300))
+		if resp.StatusCode == http.StatusNotFound {
+			return fmt.Errorf("%w: %w", ErrCollectionNotFound, err)
+		}
+		return err
 	}
 	if out != nil {
 		return json.Unmarshal(data, out)
@@ -273,6 +283,9 @@ func (v *VectorStore) Search(
 		} `json:"result"`
 	}
 	if err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/points/query", body, &resp); err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	return resp.Result.Points, nil
@@ -301,6 +314,9 @@ func (v *VectorStore) Scroll(
 		} `json:"result"`
 	}
 	if err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/points/scroll", body, &resp); err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			return nil, nil, nil
+		}
 		return nil, nil, err
 	}
 	next := resp.Result.NextPageOffset
