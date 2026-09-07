@@ -29,9 +29,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			mcp.WithDescription(description+paginationNote),
 			mcp.WithString("query", mcp.Required(),
 				mcp.Description("Natural-language search query")),
-			mcp.WithNumber("page",
+			mcp.WithNumber("page", mcp.Required(),
 				mcp.Description("Which result to return by relevance rank, starting at 1 (the most relevant match). "+
-					"Call again with a higher page number to see the next-most-relevant match if this one isn't sufficient. Default 1.")),
+					"Call again with a higher page number to see the next-most-relevant match if this one isn't sufficient. Start with 1.")),
 			mcp.WithString("source_name",
 				mcp.Description("Optional: restrict results to a single source by name")),
 		)
@@ -40,7 +40,10 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			page := req.GetInt("page", 1)
+			page, err := req.RequireInt("page")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
 			if page < 1 {
 				page = 1
 			}

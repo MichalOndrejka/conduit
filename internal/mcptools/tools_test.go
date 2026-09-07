@@ -202,7 +202,7 @@ func TestSearchToolReturnsResults(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"query": "some bug"})
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"query": "some bug", "page": float64(1)})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -232,7 +232,7 @@ func TestSearchToolReturnsResults(t *testing.T) {
 func TestSearchToolNoResultsReturnsNote(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_documentation", map[string]any{"query": "nothing matches"})
+	result := callTool(t, s, ctx, "search_documentation", map[string]any{"query": "nothing matches", "page": float64(1)})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -265,10 +265,22 @@ func TestSearchToolMissingQueryArgErrors(t *testing.T) {
 	}
 }
 
+func TestSearchToolMissingPageArgErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"query": "some bug"})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing page argument")
+	}
+	if got := resultText(t, result); !strings.Contains(got, `"page"`) {
+		t.Errorf("error text = %q, want it to mention the missing page argument", got)
+	}
+}
+
 func TestSearchToolEmbeddingFailurePropagatesAsToolError(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
 
-	result := callTool(t, s, ctx, "search_commit", map[string]any{"query": "anything"})
+	result := callTool(t, s, ctx, "search_commit", map[string]any{"query": "anything", "page": float64(1)})
 	if !result.IsError {
 		t.Fatal("expected IsError=true when the embedding backend fails")
 	}
@@ -339,7 +351,7 @@ func TestSearchToolPagination(t *testing.T) {
 			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
 		}}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x"}))
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x", "page": float64(1)}))
 		if len(p.Results) != 1 || p.Page != 1 || !p.HasMore {
 			t.Errorf("got %+v, want 1 result, page 1, has_more true", p)
 		}

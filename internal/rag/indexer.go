@@ -55,6 +55,12 @@ type IndexBatchOptions struct {
 	// error (e.g. syncctl.ErrSyncCancelled) aborts the run before any Qdrant
 	// write.
 	Checkpoint func() error
+	// PrecomputedChunks, when non-nil, supplies already-chunked text per
+	// document (parallel to docs) — e.g. from DocumentPreprocessor, which
+	// chunks a document before summarizing so a large document is never sent
+	// to an LLM as one oversized call. A nil entry for a given document falls
+	// back to chunking that document's text normally.
+	PrecomputedChunks [][]models.TextChunk
 }
 
 func (d *DocumentIndexer) Index(ctx context.Context, collection string, doc models.SourceDocument) error {
@@ -84,7 +90,12 @@ func (d *DocumentIndexer) IndexBatch(
 	var jobs []embedJob
 	remaining := make([]int, len(docs)) // chunks left to embed, per document — drives progress
 	for i := range docs {
-		chunks := d.chunker.Chunk(docs[i].Text)
+		var chunks []models.TextChunk
+		if opts.PrecomputedChunks != nil && opts.PrecomputedChunks[i] != nil {
+			chunks = opts.PrecomputedChunks[i]
+		} else {
+			chunks = d.chunker.Chunk(docs[i].Text)
+		}
 		remaining[i] = len(chunks)
 		for _, chunk := range chunks {
 			jobs = append(jobs, embedJob{docIdx: i, doc: &docs[i], chunk: chunk, totalChunks: len(chunks)})

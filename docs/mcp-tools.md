@@ -26,11 +26,11 @@ A `.vscode/mcp.json` is already included in the repo for VS Code users.
 All search tools share the same signature:
 
 ```
-tool_name(query: str, page: int = 1, source_name: str | None = None) -> str
+tool_name(query: str, page: int, source_name: str | None = None) -> str
 ```
 
 - **`query`** — Natural language query. The query is embedded and matched semantically.
-- **`page`** — Which result to return by relevance rank, starting at `1` (the most relevant match). Each call returns only a single match; call again with a higher page number to see the next-most-relevant one if the first wasn't sufficient. Default `1`.
+- **`page`** — Required. Which result to return by relevance rank, starting at `1` (the most relevant match). Each call returns only a single match; call again with a higher page number to see the next-most-relevant one if the first wasn't sufficient.
 - **`source_name`** — Optional filter. When set, only documents from sources with that exact name are returned. Useful when multiple sources of the same type exist (e.g. two different repositories).
 
 Results are returned as a JSON object with at most one entry in `results`, plus pagination info:

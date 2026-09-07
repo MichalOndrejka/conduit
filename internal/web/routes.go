@@ -8,6 +8,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -231,6 +232,9 @@ func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, 
 		httpError(w, err)
 		return
 	}
+	sort.Slice(allSources, func(i, j int) bool {
+		return strings.ToLower(allSources[i].Name) < strings.ToLower(allSources[j].Name)
+	})
 	rows := make([]sourceRow, len(allSources))
 	for i := range allSources {
 		src := &allSources[i]

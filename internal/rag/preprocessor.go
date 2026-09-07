@@ -1,7 +1,11 @@
 // Document preprocessing — Go port of app/rag/preprocessor.py. Optionally runs
 // each fetched document through an OpenAI-compatible chat model (Ollama, etc.)
-// to summarize it before chunking, reducing token usage and noise. Failures
-// degrade gracefully: the original text is kept, never dropped.
+// to summarize it, reducing token usage and noise. Documents are chunked
+// first (same chunker and overlap used for indexing) and each chunk is
+// summarized independently, so one oversized document never becomes a single
+// huge — slow, expensive, possibly context-window-exceeding — LLM call.
+// Failures degrade gracefully: the original chunk text is kept, never
+// dropped.
 package rag
 
 import (
@@ -37,6 +41,7 @@ type DocumentPreprocessor struct {
 	url          string
 	httpClient   *http.Client
 	concurrency  int
+	chunker      *TextChunker
 }
 
 // PreprocessOptions carries the per-document progress and cancellation hooks,
@@ -68,6 +73,7 @@ func NewDocumentPreprocessor(cfg *config.AppConfig) *DocumentPreprocessor {
 		url:          strings.TrimRight(base, "/") + "/chat/completions",
 		httpClient:   &http.Client{Timeout: 120 * time.Second, Transport: pooledTransport(concurrency)},
 		concurrency:  concurrency,
+		chunker:      NewTextChunker(cfg),
 	}
 }
 
@@ -83,17 +89,35 @@ func (p *DocumentPreprocessor) EnabledForType(sourceType string) bool {
 	return true
 }
 
-// Preprocess summarizes each document. Short documents pass through untouched.
-// The only error returned is from the Checkpoint hook (cancellation); model
-// failures keep the original text.
+// Preprocess chunks each document (same chunker and overlap used for
+// indexing) and summarizes the chunks that meet the minimum length,
+// concurrently. The returned slice is parallel to docs — chunksPerDoc[i]
+// holds document i's (possibly summarized) chunks, ready to hand to
+// DocumentIndexer.IndexBatch via IndexBatchOptions.PrecomputedChunks. The
+// only error returned is from the Checkpoint hook (cancellation); model
+// failures keep a chunk's original text.
 func (p *DocumentPreprocessor) Preprocess(
 	ctx context.Context, docs []models.SourceDocument, sourceType string, opts PreprocessOptions,
-) ([]models.SourceDocument, error) {
+) ([][]models.TextChunk, error) {
 	if !p.EnabledForType(sourceType) {
-		return docs, nil
+		return nil, nil
 	}
 
-	out := make([]models.SourceDocument, len(docs))
+	chunksPerDoc := make([][]models.TextChunk, len(docs))
+	type chunkJob struct {
+		docIdx   int
+		chunkIdx int
+	}
+	var jobs []chunkJob
+	remaining := make([]int, len(docs)) // chunks left to summarize, per document — drives progress
+	for i := range docs {
+		chunksPerDoc[i] = p.chunker.Chunk(docs[i].Text)
+		remaining[i] = len(chunksPerDoc[i])
+		for c := range chunksPerDoc[i] {
+			jobs = append(jobs, chunkJob{docIdx: i, chunkIdx: c})
+		}
+	}
+
 	var (
 		wg   sync.WaitGroup
 		sem  = make(chan struct{}, p.concurrency)
@@ -101,7 +125,17 @@ func (p *DocumentPreprocessor) Preprocess(
 		done int
 	)
 
-	for i, doc := range docs {
+	// Documents with no chunks (empty text) are "done" immediately.
+	for _, n := range remaining {
+		if n == 0 {
+			done++
+			if opts.ProgressCb != nil {
+				opts.ProgressCb(done, len(docs))
+			}
+		}
+	}
+
+	for _, job := range jobs {
 		if opts.Checkpoint != nil {
 			if err := opts.Checkpoint(); err != nil {
 				wg.Wait()
@@ -110,25 +144,29 @@ func (p *DocumentPreprocessor) Preprocess(
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, doc models.SourceDocument) {
+		go func(job chunkJob) {
 			defer wg.Done()
 			defer func() { <-sem }()
 
-			if len(doc.Text) >= minPreprocessLength {
-				doc.Text = p.summarize(ctx, doc)
+			docID := docs[job.docIdx].ID
+			chunk := &chunksPerDoc[job.docIdx][job.chunkIdx]
+			if len(chunk.Text) >= minPreprocessLength {
+				chunk.Text = p.summarize(ctx, docID, chunk.Text)
 			}
-			out[i] = doc
 
 			mu.Lock()
-			done++
-			if opts.ProgressCb != nil {
-				opts.ProgressCb(done, len(docs))
+			remaining[job.docIdx]--
+			if remaining[job.docIdx] == 0 {
+				done++
+				if opts.ProgressCb != nil {
+					opts.ProgressCb(done, len(docs))
+				}
 			}
 			mu.Unlock()
-		}(i, doc)
+		}(job)
 	}
 	wg.Wait()
-	return out, nil
+	return chunksPerDoc, nil
 }
 
 type chatResponse struct {
@@ -139,45 +177,45 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-func (p *DocumentPreprocessor) summarize(ctx context.Context, doc models.SourceDocument) string {
+func (p *DocumentPreprocessor) summarize(ctx context.Context, docID, text string) string {
 	body, err := json.Marshal(map[string]any{
 		"model": p.model,
 		"messages": []map[string]string{
 			{"role": "system", "content": p.systemPrompt},
-			{"role": "user", "content": doc.Text},
+			{"role": "user", "content": text},
 		},
 		"stream": false,
 	})
 	if err != nil {
-		return doc.Text
+		return text
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
 	if err != nil {
-		return doc.Text
+		return text
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer ollama") // matches embedding's local-key convention
 
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
-		log.Printf("warning: preprocessing call failed for doc %s — keeping original: %v", doc.ID, err)
-		return doc.Text
+		log.Printf("warning: preprocessing call failed for doc %s — keeping original chunk: %v", docID, err)
+		return text
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		log.Printf("warning: preprocessing HTTP %d for doc %s — keeping original", resp.StatusCode, doc.ID)
-		return doc.Text
+		log.Printf("warning: preprocessing HTTP %d for doc %s — keeping original chunk", resp.StatusCode, docID)
+		return text
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(data, &parsed); err != nil || len(parsed.Choices) == 0 {
-		log.Printf("warning: unparseable preprocessing response for doc %s — keeping original", doc.ID)
-		return doc.Text
+		log.Printf("warning: unparseable preprocessing response for doc %s — keeping original chunk", docID)
+		return text
 	}
 	summary := strings.TrimSpace(parsed.Choices[0].Message.Content)
 	if summary == "" {
-		log.Printf("warning: empty summary for doc %s — keeping original", doc.ID)
-		return doc.Text
+		log.Printf("warning: empty summary for doc %s — keeping original chunk", docID)
+		return text
 	}
 	return summary
 }

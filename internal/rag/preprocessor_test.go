@@ -25,6 +25,9 @@ func testPreprocessor(t *testing.T, chatHandler http.HandlerFunc, concurrency in
 	cfg.Preprocessing.BaseURL = srv.URL
 	cfg.Preprocessing.Model = "llama3.2:3b"
 	cfg.Preprocessing.Concurrency = concurrency
+	cfg.Chunking.MaxChunkSize = 2000
+	cfg.Chunking.Overlap = 200
+	cfg.Embedding.MaxInputTokens = 8192
 	return NewDocumentPreprocessor(cfg)
 }
 
@@ -75,12 +78,12 @@ func TestPreprocessSummarizesConcurrently(t *testing.T) {
 	if len(out) != len(docs) {
 		t.Fatalf("got %d docs, want %d", len(out), len(docs))
 	}
-	for i, d := range out {
-		if d.ID != docs[i].ID {
-			t.Errorf("out[%d].ID = %q, want %q — order not preserved", i, d.ID, docs[i].ID)
+	for i, chunks := range out {
+		if len(chunks) != 1 {
+			t.Fatalf("out[%d] has %d chunks, want 1 (text fits in one chunk)", i, len(chunks))
 		}
-		if d.Text != "summary" {
-			t.Errorf("out[%d].Text = %q, want summarized text", i, d.Text)
+		if chunks[0].Text != "summary" {
+			t.Errorf("out[%d][0].Text = %q, want summarized text", i, chunks[0].Text)
 		}
 	}
 }
@@ -105,14 +108,75 @@ func TestPreprocessSkipsShortDocuments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if out[0].Text != "tiny" {
-		t.Errorf("short doc text = %q, want unchanged %q", out[0].Text, "tiny")
+	if out[0][0].Text != "tiny" {
+		t.Errorf("short doc chunk text = %q, want unchanged %q", out[0][0].Text, "tiny")
 	}
-	if out[1].Text != "summary" {
-		t.Errorf("long doc text = %q, want summarized", out[1].Text)
+	if out[1][0].Text != "summary" {
+		t.Errorf("long doc chunk text = %q, want summarized", out[1][0].Text)
 	}
 	if got := atomic.LoadInt64(&calls); got != 1 {
 		t.Errorf("chat endpoint called %d times, want 1 (only the long doc)", got)
+	}
+}
+
+// TestPreprocessChunksLargeDocumentsBeforeSummarizing asserts a document
+// larger than max_chunk_size is split into overlapping chunks first, with
+// each chunk summarized by its own call — never the whole document in one
+// oversized request.
+func TestPreprocessChunksLargeDocumentsBeforeSummarizing(t *testing.T) {
+	var calls int32
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"content": "summary"}}},
+		})
+	}
+	srv := httptest.NewServer(http.HandlerFunc(handler))
+	t.Cleanup(srv.Close)
+
+	cfg := &config.AppConfig{}
+	cfg.Preprocessing.Enabled = true
+	cfg.Preprocessing.BaseURL = srv.URL
+	cfg.Preprocessing.Model = "llama3.2:3b"
+	cfg.Preprocessing.Concurrency = 4
+	cfg.Chunking.MaxChunkSize = 250
+	cfg.Chunking.Overlap = 30
+	cfg.Embedding.MaxInputTokens = 8192
+	p := NewDocumentPreprocessor(cfg)
+
+	docs := []models.SourceDocument{{ID: "big", Text: strings.Repeat("word ", 200)}} // 1000 chars, far over the 250-char chunk size
+	out, err := p.Preprocess(context.Background(), docs, "documentation", PreprocessOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	chunks := out[0]
+	if len(chunks) < 2 {
+		t.Fatalf("got %d chunks for a document far larger than max_chunk_size, want multiple", len(chunks))
+	}
+
+	wantCalls := 0
+	for i, c := range chunks {
+		origLen := c.EndOffset - c.StartOffset
+		if origLen >= minPreprocessLength {
+			wantCalls++
+			if c.Text != "summary" {
+				t.Errorf("chunk %d (len %d) text = %q, want summarized", i, origLen, c.Text)
+			}
+		} else if c.Text == "summary" {
+			t.Errorf("chunk %d (len %d) was summarized but is below the minimum length", i, origLen)
+		}
+	}
+	if got := atomic.LoadInt32(&calls); int(got) != wantCalls {
+		t.Errorf("chat endpoint called %d times, want one call per eligible chunk (%d)", got, wantCalls)
+	}
+
+	// Overlap between consecutive chunks — same guarantee the chunker
+	// already provides for indexing.
+	for i := 1; i < len(chunks); i++ {
+		if chunks[i].StartOffset >= chunks[i-1].EndOffset {
+			t.Errorf("chunk %d starts at %d, chunk %d ends at %d — no overlap", i, chunks[i].StartOffset, i-1, chunks[i-1].EndOffset)
+		}
 	}
 }
 
@@ -212,8 +276,8 @@ func TestSummarizeFallsBackToOriginalOnErrors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if out[0].Text != longText {
-				t.Errorf("Text = %q, want original text preserved on failure", out[0].Text)
+			if out[0][0].Text != longText {
+				t.Errorf("Text = %q, want original text preserved on failure", out[0][0].Text)
 			}
 		})
 	}

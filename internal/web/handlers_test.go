@@ -99,6 +99,29 @@ func TestHandleIndexRendersSourcesList(t *testing.T) {
 	}
 }
 
+func TestHandleIndexSortsSourcesByName(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Zebra"})
+	mustSave(t, h, models.SourceDefinition{ID: "s2", Name: "alpha"})
+	mustSave(t, h, models.SourceDefinition{ID: "s3", Name: "Mango"})
+
+	resp := h.get("/")
+	body := bodyString(t, resp)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+
+	iAlpha := strings.Index(body, "alpha")
+	iMango := strings.Index(body, "Mango")
+	iZebra := strings.Index(body, "Zebra")
+	if iAlpha < 0 || iMango < 0 || iZebra < 0 {
+		t.Fatalf("index page missing a source name: alpha=%d mango=%d zebra=%d", iAlpha, iMango, iZebra)
+	}
+	if !(iAlpha < iMango && iMango < iZebra) {
+		t.Errorf("sources not in alphabetical order: alpha=%d mango=%d zebra=%d", iAlpha, iMango, iZebra)
+	}
+}
+
 // ── Source create ────────────────────────────────────────────────────────────
 
 func TestSourceCreateGetShowsTypePicker(t *testing.T) {

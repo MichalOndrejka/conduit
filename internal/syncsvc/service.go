@@ -144,9 +144,13 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		return
 	}
 
-	// ── Phase 1.5: optional LLM preprocessing (summarize before chunking) ──
+	// ── Phase 1.5: optional LLM preprocessing (summarize before indexing) ──
 	// Built per-sync so a Settings change applies without a restart (the web
-	// server and this service share the same *config.AppConfig).
+	// server and this service share the same *config.AppConfig). Preprocessing
+	// chunks each document first (with overlap, same as indexing) and
+	// summarizes chunk-by-chunk, so a single large document never becomes one
+	// oversized, expensive LLM call.
+	var preprocessedChunks [][]models.TextChunk
 	if pre := rag.NewDocumentPreprocessor(s.cfg); pre.EnabledForType(src.Type) {
 		if err := s.control.Checkpoint(ctx, sourceID); err != nil {
 			cancelledOutcome()
@@ -154,7 +158,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		}
 		log.Printf("preprocessing %d documents for source %s", len(docs), sourceID)
 		s.progress.Set(sourceID, models.SyncProgress{Phase: "preprocessing", Total: len(docs)})
-		docs, err = pre.Preprocess(ctx, docs, src.Type, rag.PreprocessOptions{
+		preprocessedChunks, err = pre.Preprocess(ctx, docs, src.Type, rag.PreprocessOptions{
 			ProgressCb: func(current, total int) {
 				s.progress.Set(sourceID, models.SyncProgress{
 					Phase: "preprocessing", Current: current, Total: total,
@@ -186,7 +190,8 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 				Phase: "indexing", Current: current, Total: total,
 			})
 		},
-		ReplaceSourceID: src.ID,
+		ReplaceSourceID:   src.ID,
+		PrecomputedChunks: preprocessedChunks,
 		Checkpoint: func() error {
 			return s.control.Checkpoint(ctx, sourceID)
 		},
