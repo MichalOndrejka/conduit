@@ -22,8 +22,8 @@
 //	               every item the source has is fetched)
 //	VerifySSL      "false" to skip TLS verification (self-hosted instances)
 //	PathFilter     comma-separated wildcards (e.g. "*.cs,*.ts") narrowing which
-//	               repo files get their content fetched — commit-history/code/
-//	               test-code/documentation sources only
+//	               repo files get their content fetched — code/test-code/
+//	               documentation sources only
 //
 //	For sources of type commit-history only, each item is automatically enriched
 //	with its real code diff, fetched from Azure DevOps' Git REST API — not
