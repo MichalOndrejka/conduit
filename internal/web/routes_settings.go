@@ -150,7 +150,14 @@ func (s *Server) handleSettingsVerify(w http.ResponseWriter, r *http.Request) {
 	// string and never read the multipart body, leaving every field blank —
 	// use ParseMultipartForm so r.FormValue actually sees the submitted values.
 	_ = r.ParseMultipartForm(32 << 20)
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	// Preprocessing verify runs a real chat completion on a local model, which
+	// can take far longer than a connectivity check — CPU-only inference may
+	// need to load the model into memory before it can reply at all.
+	timeout := 15 * time.Second
+	if r.PathValue("service") == "preprocessing" {
+		timeout = 120 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	switch r.PathValue("service") {

@@ -23,7 +23,7 @@ Conduit stores its runtime configuration in `config.json` (location controlled b
   },
   "preprocessing": {
     "enabled": false,
-    "base_url": "",
+    "base_url": "http://localhost:11434/v1",
     "model": "",
     "system_prompt": "",
     "source_types": {
@@ -115,7 +115,9 @@ Master switch, toggled on the **Settings** page. Default `false`.
 
 ### `base_url` / `model` / `system_prompt`
 
-Chat endpoint, model name, and system prompt used to summarize documents. `system_prompt` defaults to a built-in technical-summarization prompt if left empty. Override `base_url` with `PREPROCESSING_BASE_URL` and `model` with `PREPROCESSING_MODEL`.
+Chat endpoint, model name, and system prompt used to summarize documents. `base_url` defaults to `http://localhost:11434/v1` — note the required `/v1` suffix (Ollama's OpenAI-compatible path); the value is used as-is, so a URL without it will fail. `system_prompt` defaults to a built-in technical-summarization prompt if left empty. Override `base_url` with `PREPROCESSING_BASE_URL` and `model` with `PREPROCESSING_MODEL`.
+
+Verifying a local, CPU-only model can be slow — the first request has to load the model into memory before it can reply. The Settings page's Verify button allows up to 2 minutes for preprocessing (vs. 15s for embedding/Qdrant) to accommodate this.
 
 ### `source_types`
 

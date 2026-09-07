@@ -56,6 +56,7 @@ func defaults() AppConfig {
 		Qdrant:   QdrantConfig{URL: "http://localhost:6333"},
 		Chunking: ChunkingConfig{MaxChunkSize: 2000, Overlap: 200},
 		Preprocessing: PreprocessingConfig{
+			BaseURL:     "http://localhost:11434/v1",
 			Concurrency: 4,
 			SourceTypes: map[string]bool{
 				"work-item": true, "requirements": true, "test-case": true,
