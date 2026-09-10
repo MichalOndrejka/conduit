@@ -379,3 +379,124 @@ func TestCountReturnsZeroOnError(t *testing.T) {
 		t.Errorf("Count = %d, want 0 on error", got)
 	}
 }
+
+func TestRetrieveSendsIDsAndParsesPayload(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"id": "chunk-1", "payload": map[string]any{"text": "chunk one"}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	points, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"chunk-1", "chunk-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/collections/conduit_workitems/points" {
+		t.Errorf("path = %q", gotPath)
+	}
+	ids, _ := gotBody["ids"].([]any)
+	if len(ids) != 2 || ids[0] != "chunk-1" || ids[1] != "chunk-2" {
+		t.Errorf("request ids = %v, want [chunk-1 chunk-2]", gotBody["ids"])
+	}
+	if len(points) != 1 || IDString(points[0].ID) != "chunk-1" {
+		t.Fatalf("points = %+v, want one point with id chunk-1", points)
+	}
+}
+
+func TestRetrieveMissingIDsReturnEmptyNotError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	points, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"missing-id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(points) != 0 {
+		t.Errorf("points = %+v, want empty", points)
+	}
+}
+
+func TestRetrieveCollectionNotFoundReturnsEmptyNotError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte("collection not found"))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	points, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"chunk-1"})
+	if err != nil {
+		t.Fatalf("expected no error on 404, got %v", err)
+	}
+	if len(points) != 0 {
+		t.Errorf("points = %+v, want empty", points)
+	}
+}
+
+func TestRetrieveGenericErrorPropagates(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if _, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"chunk-1"}); err == nil {
+		t.Fatal("expected a non-404 error to propagate")
+	}
+}
+
+func TestPointToSearchResultParsesChunkMetadata(t *testing.T) {
+	res := PointToSearchResult(ScoredPoint{
+		ID:    json.RawMessage(`"abc"`),
+		Score: 0.5,
+		Payload: map[string]any{
+			"text":          "chunk text",
+			"source_doc_id": "doc1",
+			"chunk_index":   "2",
+			"total_chunks":  "5",
+		},
+	})
+	if res.SourceDocID != "doc1" || res.ChunkIndex != 2 || res.TotalChunks != 5 {
+		t.Errorf("got SourceDocID=%q ChunkIndex=%d TotalChunks=%d, want doc1/2/5",
+			res.SourceDocID, res.ChunkIndex, res.TotalChunks)
+	}
+	if !res.HasPrevious || !res.HasNext {
+		t.Errorf("HasPrevious=%v HasNext=%v, want both true for chunk 2 of 5", res.HasPrevious, res.HasNext)
+	}
+}
+
+func TestPointToSearchResultDefaultsChunkMetadataWhenAbsent(t *testing.T) {
+	res := PointToSearchResult(ScoredPoint{
+		ID:      json.RawMessage(`"abc"`),
+		Payload: map[string]any{"text": "no chunk metadata"},
+	})
+	if res.ChunkIndex != 0 || res.TotalChunks != 1 {
+		t.Errorf("got ChunkIndex=%d TotalChunks=%d, want 0/1 defaults", res.ChunkIndex, res.TotalChunks)
+	}
+	if res.HasPrevious || res.HasNext {
+		t.Errorf("HasPrevious=%v HasNext=%v, want both false for a standalone chunk", res.HasPrevious, res.HasNext)
+	}
+}
+
+func TestPointToSearchResultBoundaryChunks(t *testing.T) {
+	first := PointToSearchResult(ScoredPoint{Payload: map[string]any{"chunk_index": "0", "total_chunks": "3"}})
+	if first.HasPrevious || !first.HasNext {
+		t.Errorf("first chunk: HasPrevious=%v HasNext=%v, want false/true", first.HasPrevious, first.HasNext)
+	}
+	last := PointToSearchResult(ScoredPoint{Payload: map[string]any{"chunk_index": "2", "total_chunks": "3"}})
+	if !last.HasPrevious || last.HasNext {
+		t.Errorf("last chunk: HasPrevious=%v HasNext=%v, want true/false", last.HasPrevious, last.HasNext)
+	}
+}

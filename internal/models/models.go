@@ -76,6 +76,16 @@ type SearchResult struct {
 	Text       string            `json:"text"`
 	Tags       map[string]string `json:"tags"`
 	Properties map[string]string `json:"properties"`
+
+	// SourceDocID, ChunkIndex and TotalChunks locate this result within its
+	// source document — pass SourceDocID and ChunkIndex±1 back to the
+	// retrieve_chunk request mode to fetch the adjacent chunk deterministically
+	// (no embedding/semantic search involved) when HasPrevious/HasNext is true.
+	SourceDocID string `json:"source_doc_id"`
+	ChunkIndex  int    `json:"chunk_index"`
+	TotalChunks int    `json:"total_chunks"`
+	HasPrevious bool   `json:"has_previous"`
+	HasNext     bool   `json:"has_next"`
 }
 
 type SourceDocument struct {

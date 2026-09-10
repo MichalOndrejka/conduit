@@ -46,7 +46,7 @@ Web UI ──► Sync engine ──► generic API / manual sources
 | `retrieve_experience` | Recall relevant past experience. **Call at the start of every task.** |
 | `remember` | Store information worth retaining across sessions. **Call proactively.** |
 
-All search tools accept `query` (string), optional `page` (default 1) to page to the next-most-relevant match, and optional `source_name` filter. Each call returns only the single most relevant match — see `docs/mcp-tools.md` for the pagination shape.
+All search tools accept a single `request` object, one of two shapes: `{mode: "semantic_search", query, page, source_name?}` for a ranked match (each call returns only the single most relevant one — page to see the next), or `{mode: "retrieve_chunk", source_doc_id, chunk_index}` to deterministically fetch one exact chunk of a document by ID — useful when a match got cut off, using the `source_doc_id`/`chunk_index ± 1`/`has_previous`/`has_next` fields on any result. See `docs/mcp-tools.md` for the full request/response shape.
 
 ## Source configuration (generic by design)
 

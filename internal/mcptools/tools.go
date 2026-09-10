@@ -16,53 +16,174 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
+// chunkQuery is one mode of the "request" oneOf parameter every search tool
+// accepts. resolve runs the query and builds the full JSON-able response
+// payload itself, so the tool handler never branches on which mode was
+// requested — that's decided once, when parseChunkQuery picks the concrete
+// type.
+type chunkQuery interface {
+	resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error)
+}
+
+// semanticSearchRequest is request.mode == "semantic_search": today's ranked
+// vector search, returning only the single most relevant match per call.
+type semanticSearchRequest struct {
+	Query      string
+	Page       int
+	SourceName string
+}
+
+func (q semanticSearchRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
+	var tags map[string]string
+	if q.SourceName != "" {
+		tags = map[string]string{"source_name": q.SourceName}
+	}
+	results, hasMore, err := search.Search(ctx, collection, q.Query, q.Page, tags)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{"results": results, "page": q.Page, "has_more": hasMore}
+	if len(results) == 0 {
+		payload["results"] = []any{}
+		if q.Page == 1 {
+			payload["note"] = "No data embedded for this query — the source may not be synced yet, or nothing matched."
+		} else {
+			payload["note"] = fmt.Sprintf("No further matches beyond page %d — this was the last page.", q.Page-1)
+		}
+	}
+	return payload, nil
+}
+
+// retrieveChunkRequest is request.mode == "retrieve_chunk": a deterministic
+// fetch of one exact chunk by source_doc_id + chunk_index — no embedding
+// call, so it can reliably walk to the chunk before/after a search hit that
+// got cut off.
+type retrieveChunkRequest struct {
+	SourceDocID string
+	ChunkIndex  int
+}
+
+func (q retrieveChunkRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
+	result, found, err := search.GetChunk(ctx, collection, q.SourceDocID, q.ChunkIndex)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return map[string]any{
+			"results": []any{},
+			"note": fmt.Sprintf(
+				"No chunk at index %d for source_doc_id %q — check has_previous/has_next on the original result, "+
+					"or this document may not be indexed under this collection.",
+				q.ChunkIndex, q.SourceDocID),
+		}, nil
+	}
+	return map[string]any{"results": []models.SearchResult{result}}, nil
+}
+
+// parseChunkQuery decodes the required "request" argument into the concrete
+// chunkQuery its "mode" field selects.
+func parseChunkQuery(args map[string]any) (chunkQuery, error) {
+	raw, ok := args["request"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf(`missing required "request" object argument`)
+	}
+	mode, _ := raw["mode"].(string)
+	switch mode {
+	case "semantic_search":
+		query, ok := raw["query"].(string)
+		if !ok || query == "" {
+			return nil, fmt.Errorf(`request.query is required when mode is "semantic_search"`)
+		}
+		pageF, ok := raw["page"].(float64)
+		if !ok {
+			return nil, fmt.Errorf(`request.page is required when mode is "semantic_search"`)
+		}
+		page := int(pageF)
+		if page < 1 {
+			page = 1
+		}
+		sourceName, _ := raw["source_name"].(string)
+		return semanticSearchRequest{Query: query, Page: page, SourceName: sourceName}, nil
+	case "retrieve_chunk":
+		docID, ok := raw["source_doc_id"].(string)
+		if !ok || docID == "" {
+			return nil, fmt.Errorf(`request.source_doc_id is required when mode is "retrieve_chunk"`)
+		}
+		idxF, ok := raw["chunk_index"].(float64)
+		if !ok {
+			return nil, fmt.Errorf(`request.chunk_index is required when mode is "retrieve_chunk"`)
+		}
+		return retrieveChunkRequest{SourceDocID: docID, ChunkIndex: int(idxF)}, nil
+	default:
+		return nil, fmt.Errorf(`request.mode must be "semantic_search" or "retrieve_chunk", got %q`, mode)
+	}
+}
+
+// requestParamSchema is a discriminated union (JSON Schema oneOf) of the two
+// chunkQuery shapes above, keyed by a "mode" field.
+func requestParamSchema() map[string]any {
+	return map[string]any{
+		"description": `Either a ranked semantic search or a deterministic fetch of one exact chunk by ID.`,
+		"oneOf": []any{
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode":  map[string]any{"const": "semantic_search"},
+					"query": map[string]any{"type": "string", "description": "Natural-language search query"},
+					"page": map[string]any{"type": "number", "description": "Which result to return by relevance rank, starting at 1 (the most relevant match). " +
+						"Call again with a higher page number to see the next-most-relevant match if this one isn't sufficient. Start with 1."},
+					"source_name": map[string]any{"type": "string", "description": "Optional: restrict results to a single source by name"},
+				},
+				"required": []string{"mode", "query", "page"},
+			},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode":          map[string]any{"const": "retrieve_chunk"},
+					"source_doc_id": map[string]any{"type": "string", "description": "The source_doc_id field from a previous result returned by this tool"},
+					"chunk_index": map[string]any{"type": "number", "description": "The chunk_index to fetch. Use the previous result's " +
+						"chunk_index - 1 (or + 1) to walk to the previous (or next) chunk when has_previous/has_next is true."},
+				},
+				"required": []string{"mode", "source_doc_id", "chunk_index"},
+			},
+		},
+	}
+}
+
+func withRequestParam() mcp.ToolOption {
+	return func(t *mcp.Tool) {
+		t.InputSchema.Properties["request"] = requestParamSchema()
+		t.InputSchema.Required = append(t.InputSchema.Required, "request")
+	}
+}
+
 // RegisterTools registers all MCP tools. Called once at startup.
 func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.Service) {
 
 	// ── Knowledge search tools ─────────────────────────────────────────────
-	// Each call returns only the single most relevant match — the rest of the
-	// ranked list is reachable by paging, never dumped in one response.
-	const paginationNote = " Returns only the single most relevant match. " +
-		"If it isn't sufficient, call again with a higher page number to see the next-most-relevant match."
+	// request.mode="semantic_search" returns only the single most relevant
+	// match — the rest of the ranked list is reachable by paging, never
+	// dumped in one response. request.mode="retrieve_chunk" fetches one exact
+	// chunk of a document by ID (see chunk_index/has_previous/has_next on any
+	// result) — deterministic, no embedding call, for walking to a chunk that
+	// got cut off by the chunker.
+	const requestModeNote = ` Pass request={"mode":"semantic_search","query":...,"page":1} for a ranked search. ` +
+		`Each result includes chunk_index/total_chunks and has_previous/has_next; if a match looks cut off, pass ` +
+		`request={"mode":"retrieve_chunk","source_doc_id":...,"chunk_index":...} (from the result, chunk_index ± 1) ` +
+		`to fetch the exact adjacent chunk.`
 	makeSearchTool := func(collection, name, description string) {
 		tool := mcp.NewTool(name,
-			mcp.WithDescription(description+paginationNote),
-			mcp.WithString("query", mcp.Required(),
-				mcp.Description("Natural-language search query")),
-			mcp.WithNumber("page", mcp.Required(),
-				mcp.Description("Which result to return by relevance rank, starting at 1 (the most relevant match). "+
-					"Call again with a higher page number to see the next-most-relevant match if this one isn't sufficient. Start with 1.")),
-			mcp.WithString("source_name",
-				mcp.Description("Optional: restrict results to a single source by name")),
+			mcp.WithDescription(description+requestModeNote),
+			withRequestParam(),
 		)
 		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			query, err := req.RequireString("query")
+			query, err := parseChunkQuery(req.GetArguments())
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
-			page, err := req.RequireInt("page")
+			payload, err := query.resolve(ctx, search, collection)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
-			}
-			if page < 1 {
-				page = 1
-			}
-			var tags map[string]string
-			if sourceName := req.GetString("source_name", ""); sourceName != "" {
-				tags = map[string]string{"source_name": sourceName}
-			}
-			results, hasMore, err := search.Search(ctx, collection, query, page, tags)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			payload := map[string]any{"results": results, "page": page, "has_more": hasMore}
-			if len(results) == 0 {
-				payload["results"] = []any{}
-				if page == 1 {
-					payload["note"] = "No data embedded for this query — the source may not be synced yet, or nothing matched."
-				} else {
-					payload["note"] = fmt.Sprintf("No further matches beyond page %d — this was the last page.", page-1)
-				}
 			}
 			data, err := json.Marshal(payload)
 			if err != nil {

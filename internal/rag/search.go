@@ -67,3 +67,31 @@ func (s *SearchService) Search(
 	}
 	return results, hasMore, nil
 }
+
+// GetChunk fetches one specific chunk of a document by exact point ID — a
+// deterministic lookup, not a semantic search, so no embedding call is made.
+// Pass the source_doc_id and chunk_index from a prior SearchResult (adjusted
+// by ±1) to walk to the previous/next chunk of the same document. found is
+// false when no chunk exists at that index (e.g. chunkIndex is out of range).
+func (s *SearchService) GetChunk(ctx context.Context, collection, sourceDocID string, chunkIndex int) (result models.SearchResult, found bool, err error) {
+	if chunkIndex < 0 {
+		return models.SearchResult{}, false, nil
+	}
+	points, err := s.store.Retrieve(ctx, collection, []string{makeChunkID(sourceDocID, chunkIndex)})
+	if err != nil {
+		return models.SearchResult{}, false, err
+	}
+	if len(points) == 0 && chunkIndex == 0 {
+		// Single-chunk documents are stored under the plain doc ID rather
+		// than the "<docID>_chunk_0" form — try that shape too.
+		points, err = s.store.Retrieve(ctx, collection, []string{makeID(sourceDocID)})
+		if err != nil {
+			return models.SearchResult{}, false, err
+		}
+	}
+	if len(points) == 0 {
+		return models.SearchResult{}, false, nil
+	}
+	p := points[0]
+	return PointToSearchResult(ScoredPoint{ID: p.ID, Payload: p.Payload}), true, nil
+}

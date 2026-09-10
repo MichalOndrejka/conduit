@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -291,6 +292,24 @@ func (v *VectorStore) Search(
 	return resp.Result.Points, nil
 }
 
+// Retrieve fetches points by exact ID — a direct lookup, not a vector search.
+// Missing IDs are simply absent from the returned slice (Qdrant does not
+// error on unknown IDs), which is what lets callers treat an out-of-range
+// chunk index as "not found" rather than a failure.
+func (v *VectorStore) Retrieve(ctx context.Context, collection string, ids []string) ([]ScrolledPoint, error) {
+	body := map[string]any{"ids": ids, "with_payload": true}
+	var resp struct {
+		Result []ScrolledPoint `json:"result"`
+	}
+	if err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/points", body, &resp); err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return resp.Result, nil
+}
+
 // Scroll pages through a collection. offset may be nil for the first page;
 // the returned next offset is nil when exhausted.
 func (v *VectorStore) Scroll(
@@ -367,6 +386,7 @@ func (v *VectorStore) HealthCheck(ctx context.Context) error {
 func PointToSearchResult(p ScoredPoint) models.SearchResult {
 	payload := p.Payload
 	text, _ := payload[models.PayloadText].(string)
+	sourceDocID, _ := payload[models.PayloadSourceDocID].(string)
 	tags := map[string]string{}
 	props := map[string]string{}
 	for k, val := range payload {
@@ -377,11 +397,33 @@ func PointToSearchResult(p ScoredPoint) models.SearchResult {
 			props[k[len(models.PropPrefix):]] = sv
 		}
 	}
+
+	// chunk_index/total_chunks are stored as strings (strconv.Itoa in
+	// indexer.go); default to a single, standalone chunk when absent or
+	// unparsable (e.g. non-chunked points such as experience-memory entries).
+	chunkIndex := 0
+	if s, ok := payload[models.PayloadChunkIndex].(string); ok {
+		if n, err := strconv.Atoi(s); err == nil {
+			chunkIndex = n
+		}
+	}
+	totalChunks := 1
+	if s, ok := payload[models.PayloadTotalChunks].(string); ok {
+		if n, err := strconv.Atoi(s); err == nil {
+			totalChunks = n
+		}
+	}
+
 	return models.SearchResult{
-		ID:         IDString(p.ID),
-		Score:      p.Score,
-		Text:       text,
-		Tags:       tags,
-		Properties: props,
+		ID:          IDString(p.ID),
+		Score:       p.Score,
+		Text:        text,
+		Tags:        tags,
+		Properties:  props,
+		SourceDocID: sourceDocID,
+		ChunkIndex:  chunkIndex,
+		TotalChunks: totalChunks,
+		HasPrevious: chunkIndex > 0,
+		HasNext:     chunkIndex < totalChunks-1,
 	}
 }

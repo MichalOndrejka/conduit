@@ -23,13 +23,16 @@ A `.vscode/mcp.json` is already included in the repo for VS Code users.
 
 ## Search tools
 
-All search tools share the same signature:
+All search tools share the same signature — a single `request` object that is one of two shapes, selected by `mode`:
 
 ```
-tool_name(query: str, page: int, source_name: str | None = None) -> str
+tool_name(request: { mode: "semantic_search", query: str, page: int, source_name?: str }) -> str
+tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int }) -> str
 ```
 
-- **`query`** — Natural language query. The query is embedded and matched semantically.
+### `mode: "semantic_search"`
+
+- **`query`** — Required. Natural language query. The query is embedded and matched semantically.
 - **`page`** — Required. Which result to return by relevance rank, starting at `1` (the most relevant match). Each call returns only a single match; call again with a higher page number to see the next-most-relevant one if the first wasn't sufficient.
 - **`source_name`** — Optional filter. When set, only documents from sources with that exact name are returned. Useful when multiple sources of the same type exist (e.g. two different repositories).
 
@@ -43,7 +46,12 @@ Results are returned as a JSON object with at most one entry in `results`, plus 
       "score": 0.87,
       "text": "Work Item 12345: Fix login timeout...",
       "tags": { "source_name": "My ADO Source", "state": "Active" },
-      "properties": { "title": "Fix login timeout", "url": "https://..." }
+      "properties": { "title": "Fix login timeout", "url": "https://..." },
+      "source_doc_id": "source_id_wi_12345",
+      "chunk_index": 0,
+      "total_chunks": 3,
+      "has_previous": false,
+      "has_next": true
     }
   ],
   "page": 1,
@@ -52,6 +60,21 @@ Results are returned as a JSON object with at most one entry in `results`, plus 
 ```
 
 `has_more: true` means a next-most-relevant match exists — call again with `page + 1` to fetch it. When `results` is empty, a `note` explains why: nothing is embedded yet for `page == 1`, or the ranked list is exhausted for `page > 1`.
+
+Every result also reports where it sits inside its source document: `chunk_index`/`total_chunks` give its position, and `has_previous`/`has_next` say whether a chunk exists immediately before/after it. If a match looks cut off mid-thought, use `mode: "retrieve_chunk"` (below) with the same `source_doc_id` and `chunk_index ± 1` to fetch the adjacent text — no new search needed.
+
+### `mode: "retrieve_chunk"`
+
+- **`source_doc_id`** — Required. Copy this from a `semantic_search` result.
+- **`chunk_index`** — Required. The exact chunk to fetch. Use a prior result's `chunk_index - 1` or `chunk_index + 1` to walk to the previous/next chunk.
+
+This is a deterministic point lookup, not a semantic search — no embedding call is made, so it's fast and always returns the exact chunk (or none) regardless of how well it would have scored against a query:
+
+```json
+{ "results": [ { "text": "...continuation of the previous chunk...", "source_doc_id": "source_id_wi_12345", "chunk_index": 1, "total_chunks": 3, "has_previous": true, "has_next": true } ] }
+```
+
+When `chunk_index` is out of range (or the document isn't indexed under this collection), `results` is empty and a `note` explains why.
 
 ### `search_workitem`
 
@@ -168,7 +191,16 @@ Returns:
 If you have multiple ADO sources (e.g. two different repos), use `source_name` to limit results:
 
 ```
-search_source_code("authentication middleware", source_name="Backend API")
+search_source_code(request={"mode": "semantic_search", "query": "authentication middleware", "page": 1, "source_name": "Backend API"})
+```
+
+### Following a cut-off match to its neighboring chunk
+
+```
+1. search_documentation(request={"mode": "semantic_search", "query": "deployment rollback steps", "page": 1})
+   → result has chunk_index=2, total_chunks=4, has_next=true, and looks cut off mid-sentence
+2. search_documentation(request={"mode": "retrieve_chunk", "source_doc_id": "<from step 1>", "chunk_index": 3})
+   → the next chunk of the same document, picking up where it left off
 ```
 
 ### Combining tools for context

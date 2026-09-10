@@ -15,6 +15,7 @@ import (
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/memory"
+	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
@@ -33,6 +34,9 @@ type fakeQdrant struct {
 	lastUpsertBody map[string]any
 
 	deleteCalls [][]string
+
+	retrievePoints   []map[string]any // returned verbatim from the points-retrieve endpoint
+	lastRetrieveBody map[string]any
 }
 
 func (q *fakeQdrant) handler() http.HandlerFunc {
@@ -70,6 +74,11 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			q.deleteCalls = append(q.deleteCalls, body.Points)
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points"):
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			q.lastRetrieveBody = body
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": q.retrievePoints})
 		default:
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
 		}
@@ -202,7 +211,9 @@ func TestSearchToolReturnsResults(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"query": "some bug", "page": float64(1)})
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "some bug", "page": float64(1),
+	}})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -229,10 +240,36 @@ func TestSearchToolReturnsResults(t *testing.T) {
 	}
 }
 
+func TestSearchToolClampsNonPositivePageToOne(t *testing.T) {
+	qd := &fakeQdrant{searchPoints: []map[string]any{
+		{"id": "p1", "score": 0.87, "payload": map[string]any{"text": "hit text"}},
+	}}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "some bug", "page": float64(0),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	var payload struct {
+		Page int `json:"page"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Page != 1 {
+		t.Errorf("Page = %d, want 1 (a non-positive page should be clamped)", payload.Page)
+	}
+}
+
 func TestSearchToolNoResultsReturnsNote(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_documentation", map[string]any{"query": "nothing matches", "page": float64(1)})
+	result := callTool(t, s, ctx, "search_documentation", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "nothing matches", "page": float64(1),
+	}})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -253,14 +290,28 @@ func TestSearchToolNoResultsReturnsNote(t *testing.T) {
 	}
 }
 
-func TestSearchToolMissingQueryArgErrors(t *testing.T) {
+func TestSearchToolMissingRequestArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
 	result := callTool(t, s, ctx, "search_workitem", map[string]any{})
 	if !result.IsError {
+		t.Fatal("expected IsError=true for missing request argument")
+	}
+	if got := resultText(t, result); !strings.Contains(got, `"request"`) {
+		t.Errorf("error text = %q, want it to mention the missing request argument", got)
+	}
+}
+
+func TestSearchToolMissingQueryArgErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+		"request": map[string]any{"mode": "semantic_search", "page": float64(1)},
+	})
+	if !result.IsError {
 		t.Fatal("expected IsError=true for missing query argument")
 	}
-	if got := resultText(t, result); !strings.Contains(got, `"query"`) {
+	if got := resultText(t, result); !strings.Contains(got, "request.query") {
 		t.Errorf("error text = %q, want it to mention the missing query argument", got)
 	}
 }
@@ -268,19 +319,37 @@ func TestSearchToolMissingQueryArgErrors(t *testing.T) {
 func TestSearchToolMissingPageArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"query": "some bug"})
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+		"request": map[string]any{"mode": "semantic_search", "query": "some bug"},
+	})
 	if !result.IsError {
 		t.Fatal("expected IsError=true for missing page argument")
 	}
-	if got := resultText(t, result); !strings.Contains(got, `"page"`) {
+	if got := resultText(t, result); !strings.Contains(got, "request.page") {
 		t.Errorf("error text = %q, want it to mention the missing page argument", got)
+	}
+}
+
+func TestSearchToolUnknownModeErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+		"request": map[string]any{"mode": "bogus"},
+	})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for unknown mode")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "mode") {
+		t.Errorf("error text = %q, want it to mention the invalid mode", got)
 	}
 }
 
 func TestSearchToolEmbeddingFailurePropagatesAsToolError(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
 
-	result := callTool(t, s, ctx, "search_commit", map[string]any{"query": "anything", "page": float64(1)})
+	result := callTool(t, s, ctx, "search_commit", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "anything", "page": float64(1),
+	}})
 	if !result.IsError {
 		t.Fatal("expected IsError=true when the embedding backend fails")
 	}
@@ -293,9 +362,9 @@ func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
 	qd := &fakeQdrant{}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_testcase", map[string]any{
-		"query": "login flow", "source_name": "my-source", "page": float64(3),
-	})
+	result := callTool(t, s, ctx, "search_testcase", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "login flow", "source_name": "my-source", "page": float64(3),
+	}})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -351,7 +420,9 @@ func TestSearchToolPagination(t *testing.T) {
 			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
 		}}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x", "page": float64(1)}))
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+			"mode": "semantic_search", "query": "x", "page": float64(1),
+		}}))
 		if len(p.Results) != 1 || p.Page != 1 || !p.HasMore {
 			t.Errorf("got %+v, want 1 result, page 1, has_more true", p)
 		}
@@ -362,7 +433,9 @@ func TestSearchToolPagination(t *testing.T) {
 			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
 		}}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x", "page": float64(2)}))
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+			"mode": "semantic_search", "query": "x", "page": float64(2),
+		}}))
 		if len(p.Results) != 1 || p.Page != 2 || p.HasMore {
 			t.Errorf("got %+v, want 1 result, page 2, has_more false", p)
 		}
@@ -371,7 +444,9 @@ func TestSearchToolPagination(t *testing.T) {
 	t.Run("paging past the last match returns the exhausted-page note", func(t *testing.T) {
 		qd := &fakeQdrant{}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"query": "x", "page": float64(3)}))
+		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+			"mode": "semantic_search", "query": "x", "page": float64(3),
+		}}))
 		if len(p.Results) != 0 || p.HasMore {
 			t.Errorf("got %+v, want no results and has_more false", p)
 		}
@@ -380,6 +455,141 @@ func TestSearchToolPagination(t *testing.T) {
 			t.Errorf("Note = %q, want %q", p.Note, want)
 		}
 	})
+}
+
+func TestSearchToolRetrieveChunkReturnsResult(t *testing.T) {
+	qd := &fakeQdrant{retrievePoints: []map[string]any{
+		{"id": "chunk-2-id", "payload": map[string]any{
+			"text": "chunk 2 text", "source_doc_id": "doc1", "chunk_index": "2", "total_chunks": "5",
+		}},
+	}}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(2),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	var payload struct {
+		Results []models.SearchResult `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Results) != 1 {
+		t.Fatalf("Results = %+v, want one chunk", payload.Results)
+	}
+	got := payload.Results[0]
+	if got.Text != "chunk 2 text" || got.SourceDocID != "doc1" || got.ChunkIndex != 2 || got.TotalChunks != 5 {
+		t.Errorf("got %+v, want text/source_doc_id/chunk_index/total_chunks to match the fetched chunk", got)
+	}
+	if !got.HasPrevious || !got.HasNext {
+		t.Errorf("got HasPrevious=%v HasNext=%v, want both true for chunk 2 of 5", got.HasPrevious, got.HasNext)
+	}
+}
+
+func TestSearchToolRetrieveChunkNotFoundReturnsNote(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(9),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	var payload struct {
+		Results []any  `json:"results"`
+		Note    string `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Results) != 0 {
+		t.Errorf("Results = %v, want empty", payload.Results)
+	}
+	if !strings.Contains(payload.Note, "doc1") || !strings.Contains(payload.Note, "9") {
+		t.Errorf("Note = %q, want it to mention the source_doc_id and chunk_index", payload.Note)
+	}
+}
+
+func TestSearchToolRetrieveChunkDoesNotCallEmbedding(t *testing.T) {
+	qd := &fakeQdrant{retrievePoints: []map[string]any{
+		{"id": "chunk-0-id", "payload": map[string]any{"text": "only chunk", "source_doc_id": "doc1"}},
+	}}
+	s, ctx := setup(t, qd, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(0),
+	}})
+	if result.IsError {
+		t.Fatalf("retrieve_chunk should not need the embedding backend: %s", resultText(t, result))
+	}
+}
+
+func TestSearchToolRetrieveChunkBackendErrorPropagatesAsToolError(t *testing.T) {
+	// setup's fakeQdrant only models a handful of endpoints and always
+	// returns 200 for anything else (see its default case), so a Qdrant
+	// failure on the retrieve endpoint specifically needs a raw httptest
+	// server that fails every request instead.
+	qdSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("qdrant down"))
+	}))
+	defer qdSrv.Close()
+	embedSrv := httptest.NewServer(fixedEmbedHandler(0, ""))
+	defer embedSrv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Embedding.BaseURL = embedSrv.URL
+	cfg.Embedding.MaxInputTokens = 8192
+	cfg.Qdrant.URL = qdSrv.URL
+	vectors := rag.NewVectorStore(cfg)
+	embedding := rag.NewEmbeddingService(cfg)
+	search := rag.NewSearchService(vectors, embedding, nil)
+	mem := memory.NewService(vectors, embedding)
+	mcpServer := server.NewMCPServer("test", "0.0.0")
+	RegisterTools(mcpServer, search, mem)
+
+	result := callTool(t, mcpServer, context.Background(), "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(0),
+	}})
+	if !result.IsError {
+		t.Fatal("expected IsError=true when the Qdrant backend fails")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "500") {
+		t.Errorf("error text = %q, want it to surface the HTTP 500 from Qdrant", got)
+	}
+}
+
+func TestSearchToolMissingSourceDocIDArgErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+		"request": map[string]any{"mode": "retrieve_chunk", "chunk_index": float64(0)},
+	})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing source_doc_id argument")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "source_doc_id") {
+		t.Errorf("error text = %q, want it to mention the missing source_doc_id argument", got)
+	}
+}
+
+func TestSearchToolMissingChunkIndexArgErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+		"request": map[string]any{"mode": "retrieve_chunk", "source_doc_id": "doc1"},
+	})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing chunk_index argument")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "chunk_index") {
+		t.Errorf("error text = %q, want it to mention the missing chunk_index argument", got)
+	}
 }
 
 func TestRetrieveExperienceReturnsResults(t *testing.T) {

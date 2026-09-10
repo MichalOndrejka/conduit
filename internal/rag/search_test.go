@@ -74,3 +74,172 @@ func TestSearchExcludesDisabledSources(t *testing.T) {
 		t.Error("enabled-1 should not be excluded")
 	}
 }
+
+func TestGetChunkFetchesByComputedID(t *testing.T) {
+	wantID := makeChunkID("doc1", 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if len(body.IDs) != 1 || body.IDs[0] != wantID {
+			t.Errorf("requested ids = %v, want [%s]", body.IDs, wantID)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": []map[string]any{
+				{"id": wantID, "payload": map[string]any{
+					"text": "chunk text", "source_doc_id": "doc1", "chunk_index": "2", "total_chunks": "5",
+				}},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	result, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected found=true")
+	}
+	if result.Text != "chunk text" || result.ChunkIndex != 2 || result.TotalChunks != 5 {
+		t.Errorf("got %+v, want chunk 2 of 5 with text %q", result, "chunk text")
+	}
+}
+
+func TestGetChunkFallsBackToSingleChunkPointID(t *testing.T) {
+	singleID := makeID("doc1")
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var body struct {
+			IDs []string `json:"ids"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if len(body.IDs) == 1 && body.IDs[0] == singleID {
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"result": []map[string]any{
+					{"id": singleID, "payload": map[string]any{"text": "single chunk doc", "source_doc_id": "doc1"}},
+				},
+			})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	result, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected found=true via the single-chunk fallback ID")
+	}
+	if result.Text != "single chunk doc" {
+		t.Errorf("Text = %q, want %q", result.Text, "single chunk doc")
+	}
+	if callCount != 2 {
+		t.Errorf("callCount = %d, want 2 (chunk-form lookup, then single-chunk fallback)", callCount)
+	}
+}
+
+func TestGetChunkNotFoundReturnsFalse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 9)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Error("expected found=false when no point matches either ID form")
+	}
+}
+
+func TestGetChunkPropagatesRetrieveError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 2)
+	if err == nil {
+		t.Fatal("expected the Retrieve error to propagate")
+	}
+	if found {
+		t.Error("expected found=false on error")
+	}
+}
+
+func TestGetChunkPropagatesFallbackRetrieveError(t *testing.T) {
+	callCount := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// First lookup (chunk-form ID) misses, forcing the chunkIndex==0 fallback.
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("boom"))
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 0)
+	if err == nil {
+		t.Fatal("expected the fallback Retrieve error to propagate")
+	}
+	if found {
+		t.Error("expected found=false on error")
+	}
+	if callCount != 2 {
+		t.Errorf("callCount = %d, want 2 (chunk-form lookup, then failing fallback)", callCount)
+	}
+}
+
+func TestGetChunkNegativeIndexSkipsRequest(t *testing.T) {
+	called := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": []map[string]any{}})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", -1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Error("expected found=false for a negative chunk index")
+	}
+	if called {
+		t.Error("expected no HTTP call for a negative chunk index")
+	}
+}
