@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -80,6 +82,44 @@ func (q retrieveChunkRequest) resolve(ctx context.Context, search *rag.SearchSer
 	return map[string]any{"results": []models.SearchResult{result}}, nil
 }
 
+// patternSearchRequest is request.mode == "pattern_search": a deterministic
+// literal-substring or regex scan of chunk text — no embedding call, for
+// exact matches semantic search can't guarantee (e.g. finding every usage of
+// a method or identifier). Matcher is built once by parseChunkQuery so
+// resolve doesn't need to know whether Pattern is literal or regex.
+type patternSearchRequest struct {
+	Pattern    string
+	SourceName string
+	Page       int
+	Matcher    func(string) bool
+}
+
+func (q patternSearchRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
+	var tags map[string]string
+	if q.SourceName != "" {
+		tags = map[string]string{"source_name": q.SourceName}
+	}
+	results, hasMore, truncated, err := search.PatternSearch(ctx, collection, q.Matcher, q.Page, tags)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{"results": results, "page": q.Page, "has_more": hasMore}
+	if len(results) == 0 {
+		payload["results"] = []any{}
+		switch {
+		case truncated:
+			payload["note"] = fmt.Sprintf(
+				"No match confirmed for page %d within the first several thousand chunks scanned — the collection "+
+					"may be larger than this tool scans in one call. Try narrowing the pattern.", q.Page)
+		case q.Page == 1:
+			payload["note"] = "No matches found for this pattern."
+		default:
+			payload["note"] = fmt.Sprintf("No further matches beyond page %d — this was the last page.", q.Page-1)
+		}
+	}
+	return payload, nil
+}
+
 // parseChunkQuery decodes the required "request" argument into the concrete
 // chunkQuery its "mode" field selects.
 func parseChunkQuery(args map[string]any) (chunkQuery, error) {
@@ -114,8 +154,34 @@ func parseChunkQuery(args map[string]any) (chunkQuery, error) {
 			return nil, fmt.Errorf(`request.chunk_index is required when mode is "retrieve_chunk"`)
 		}
 		return retrieveChunkRequest{SourceDocID: docID, ChunkIndex: int(idxF)}, nil
+	case "pattern_search":
+		pattern, ok := raw["pattern"].(string)
+		if !ok || pattern == "" {
+			return nil, fmt.Errorf(`request.pattern is required when mode is "pattern_search"`)
+		}
+		pageF, ok := raw["page"].(float64)
+		if !ok {
+			return nil, fmt.Errorf(`request.page is required when mode is "pattern_search"`)
+		}
+		page := int(pageF)
+		if page < 1 {
+			page = 1
+		}
+		sourceName, _ := raw["source_name"].(string)
+		useRegex, _ := raw["regex"].(bool)
+		var matcher func(string) bool
+		if useRegex {
+			re, err := regexp.Compile(pattern)
+			if err != nil {
+				return nil, fmt.Errorf("request.pattern is not a valid regular expression: %w", err)
+			}
+			matcher = re.MatchString
+		} else {
+			matcher = func(text string) bool { return strings.Contains(text, pattern) }
+		}
+		return patternSearchRequest{Pattern: pattern, SourceName: sourceName, Page: page, Matcher: matcher}, nil
 	default:
-		return nil, fmt.Errorf(`request.mode must be "semantic_search" or "retrieve_chunk", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "semantic_search", "retrieve_chunk", or "pattern_search", got %q`, mode)
 	}
 }
 
@@ -146,6 +212,19 @@ func requestParamSchema() map[string]any {
 				},
 				"required": []string{"mode", "source_doc_id", "chunk_index"},
 			},
+			map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"mode":    map[string]any{"const": "pattern_search"},
+					"pattern": map[string]any{"type": "string", "description": "Literal text to find, or a regular expression when regex is true"},
+					"regex": map[string]any{"type": "boolean", "description": "If true, interpret pattern as a Go RE2 regular expression instead " +
+						"of a literal substring. Defaults to false."},
+					"source_name": map[string]any{"type": "string", "description": "Optional: restrict results to a single source by name"},
+					"page": map[string]any{"type": "number", "description": "Which match to return, starting at 1 (the first match found, in " +
+						"index order — not ranked). Call again with a higher page number to see the next match if this one isn't sufficient. Start with 1."},
+				},
+				"required": []string{"mode", "pattern", "page"},
+			},
 		},
 	}
 }
@@ -166,11 +245,17 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	// dumped in one response. request.mode="retrieve_chunk" fetches one exact
 	// chunk of a document by ID (see chunk_index/has_previous/has_next on any
 	// result) — deterministic, no embedding call, for walking to a chunk that
-	// got cut off by the chunker.
+	// got cut off by the chunker. request.mode="pattern_search" is a
+	// deterministic literal/regex text scan — no embedding call, no ranking —
+	// for exact matches semantic search can't guarantee, such as finding
+	// every usage of a method or identifier.
 	const requestModeNote = ` Pass request={"mode":"semantic_search","query":...,"page":1} for a ranked search. ` +
 		`Each result includes chunk_index/total_chunks and has_previous/has_next; if a match looks cut off, pass ` +
 		`request={"mode":"retrieve_chunk","source_doc_id":...,"chunk_index":...} (from the result, chunk_index ± 1) ` +
-		`to fetch the exact adjacent chunk.`
+		`to fetch the exact adjacent chunk. For an exact/deterministic text or regex match — e.g. finding all usages ` +
+		`of a method or identifier — pass request={"mode":"pattern_search","pattern":...,"page":1} ` +
+		`(add "regex":true to treat pattern as a Go RE2 regular expression); page through further matches the ` +
+		`same way as semantic_search.`
 	makeSearchTool := func(collection, name, description string) {
 		tool := mcp.NewTool(name,
 			mcp.WithDescription(description+requestModeNote),

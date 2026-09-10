@@ -3,8 +3,12 @@ package rag
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -241,5 +245,201 @@ func TestGetChunkNegativeIndexSkipsRequest(t *testing.T) {
 	}
 	if called {
 		t.Error("expected no HTTP call for a negative chunk index")
+	}
+}
+
+func containsMatcher(pattern string) func(string) bool {
+	return func(text string) bool { return strings.Contains(text, pattern) }
+}
+
+func TestPatternSearchLiteralMatchFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"points": []map[string]any{
+					{"id": "1", "payload": map[string]any{"text": "no match here"}},
+					{"id": "2", "payload": map[string]any{"text": "calls FooBar() twice"}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	results, hasMore, truncated, err := svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Error("expected truncated=false")
+	}
+	if hasMore {
+		t.Error("expected hasMore=false with only one match")
+	}
+	if len(results) != 1 || results[0].Text != "calls FooBar() twice" {
+		t.Fatalf("results = %+v, want the single FooBar match", results)
+	}
+}
+
+func TestPatternSearchRegexMatcherFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"points": []map[string]any{
+					{"id": "1", "payload": map[string]any{"text": "fooBarBaz"}},
+					{"id": "2", "payload": map[string]any{"text": "FooBar123"}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	re := regexp.MustCompile(`^FooBar\d+$`)
+	results, _, _, err := svc.PatternSearch(context.Background(), "conduit_code", re.MatchString, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].Text != "FooBar123" {
+		t.Fatalf("results = %+v, want the single regex match", results)
+	}
+}
+
+func TestPatternSearchNoMatchReturnsEmpty(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{"points": []map[string]any{
+				{"id": "1", "payload": map[string]any{"text": "nothing relevant"}},
+			}},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	results, hasMore, truncated, err := svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasMore || truncated {
+		t.Errorf("hasMore=%v truncated=%v, want both false", hasMore, truncated)
+	}
+	if len(results) != 0 {
+		t.Errorf("results = %+v, want none", results)
+	}
+}
+
+func TestPatternSearchPaginatesAcrossMatches(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"points": []map[string]any{
+					{"id": "1", "payload": map[string]any{"text": "FooBar match one"}},
+					{"id": "2", "payload": map[string]any{"text": "irrelevant"}},
+					{"id": "3", "payload": map[string]any{"text": "FooBar match two"}},
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	results, hasMore, _, err := svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasMore || len(results) != 1 || results[0].Text != "FooBar match one" {
+		t.Fatalf("page 1 = %+v hasMore=%v, want match one with hasMore=true", results, hasMore)
+	}
+
+	results, hasMore, _, err = svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 2, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hasMore || len(results) != 1 || results[0].Text != "FooBar match two" {
+		t.Fatalf("page 2 = %+v hasMore=%v, want match two with hasMore=false", results, hasMore)
+	}
+}
+
+func TestPatternSearchExcludesDisabledSources(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"points": []map[string]any{}}})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	sources := fakeSourceLister{
+		{ID: "enabled-1", Disabled: false},
+		{ID: "disabled-1", Disabled: true},
+	}
+	svc := NewSearchService(NewVectorStore(cfg), nil, sources)
+
+	if _, _, _, err := svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("x"), 1, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	filter, ok := gotBody["filter"].(map[string]any)
+	if !ok {
+		t.Fatal("filter missing from scroll request body")
+	}
+	mustNot, ok := filter["must_not"].([]any)
+	if !ok || len(mustNot) != 1 {
+		t.Fatalf("must_not = %v, want 1 condition", filter["must_not"])
+	}
+	cond := mustNot[0].(map[string]any)
+	match := cond["match"].(map[string]any)
+	if match["value"] != "disabled-1" {
+		t.Errorf("excluded source = %v, want disabled-1", match["value"])
+	}
+}
+
+func TestPatternSearchStopsAtScanCapWhenNoMatchFound(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		points := make([]map[string]any, patternScrollBatch)
+		for i := range points {
+			points[i] = map[string]any{"id": fmt.Sprintf("p%d-%d", calls, i), "payload": map[string]any{"text": "no match"}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"result": map[string]any{
+				"points":           points,
+				"next_page_offset": strconv.Itoa(calls),
+			},
+		})
+	}))
+	defer srv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = srv.URL
+	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+
+	results, hasMore, truncated, err := svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated {
+		t.Error("expected truncated=true once the scan cap is reached")
+	}
+	if hasMore || len(results) != 0 {
+		t.Errorf("results = %+v hasMore=%v, want none and hasMore=false", results, hasMore)
+	}
+	wantCalls := patternScanCap / patternScrollBatch
+	if calls != wantCalls {
+		t.Errorf("scroll calls = %d, want %d (scan cap / batch size)", calls, wantCalls)
 	}
 }

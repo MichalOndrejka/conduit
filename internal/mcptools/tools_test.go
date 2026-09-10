@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -37,6 +38,12 @@ type fakeQdrant struct {
 
 	retrievePoints   []map[string]any // returned verbatim from the points-retrieve endpoint
 	lastRetrieveBody map[string]any
+
+	scrollPoints        []map[string]any // returned verbatim from the points/scroll endpoint
+	scrollErr           bool
+	scrollNeverExhausts bool // always returns a non-nil next_page_offset, for scan-cap tests
+	scrollCalls         int
+	lastScrollBody      map[string]any
 }
 
 func (q *fakeQdrant) handler() http.HandlerFunc {
@@ -74,6 +81,21 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			q.deleteCalls = append(q.deleteCalls, body.Points)
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points/scroll"):
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			q.lastScrollBody = body
+			if q.scrollErr {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte("scroll boom"))
+				return
+			}
+			q.scrollCalls++
+			result := map[string]any{"points": q.scrollPoints}
+			if q.scrollNeverExhausts {
+				result["next_page_offset"] = strconv.Itoa(q.scrollCalls)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points"):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -589,6 +611,271 @@ func TestSearchToolMissingChunkIndexArgErrors(t *testing.T) {
 	}
 	if got := resultText(t, result); !strings.Contains(got, "chunk_index") {
 		t.Errorf("error text = %q, want it to mention the missing chunk_index argument", got)
+	}
+}
+
+func TestSearchToolPatternSearchReturnsResult(t *testing.T) {
+	qd := &fakeQdrant{scrollPoints: []map[string]any{
+		{"id": "1", "payload": map[string]any{"text": "no match here"}},
+		{"id": "2", "payload": map[string]any{"text": "calls FooBar() twice", "source_doc_id": "doc1", "chunk_index": "0", "total_chunks": "1"}},
+	}}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	var payload struct {
+		Results []models.SearchResult `json:"results"`
+		Page    int                   `json:"page"`
+		HasMore bool                  `json:"has_more"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Results) != 1 || payload.Results[0].Text != "calls FooBar() twice" {
+		t.Fatalf("Results = %+v, want the single FooBar match", payload.Results)
+	}
+	if payload.HasMore {
+		t.Error("expected has_more=false with only one match")
+	}
+}
+
+func TestSearchToolPatternSearchRegexMode(t *testing.T) {
+	qd := &fakeQdrant{scrollPoints: []map[string]any{
+		{"id": "1", "payload": map[string]any{"text": "fooBarBaz"}},
+		{"id": "2", "payload": map[string]any{"text": "FooBar123"}},
+	}}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": `^FooBar\d+$`, "regex": true, "page": float64(1),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	var payload struct {
+		Results []models.SearchResult `json:"results"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Results) != 1 || payload.Results[0].Text != "FooBar123" {
+		t.Fatalf("Results = %+v, want the single regex match", payload.Results)
+	}
+}
+
+func TestSearchToolPatternSearchNoMatchReturnsNote(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	var payload struct {
+		Results []any  `json:"results"`
+		Note    string `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Results) != 0 {
+		t.Errorf("Results = %v, want empty", payload.Results)
+	}
+	if payload.Note == "" {
+		t.Error("expected a note explaining why results are empty")
+	}
+}
+
+func TestSearchToolPatternSearchDoesNotCallEmbedding(t *testing.T) {
+	qd := &fakeQdrant{scrollPoints: []map[string]any{
+		{"id": "1", "payload": map[string]any{"text": "FooBar"}},
+	}}
+	s, ctx := setup(t, qd, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	if result.IsError {
+		t.Fatalf("pattern_search should not need the embedding backend: %s", resultText(t, result))
+	}
+}
+
+func TestSearchToolPatternSearchInvalidRegexErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "(unclosed", "regex": true, "page": float64(1),
+	}})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for an invalid regular expression")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "regular expression") {
+		t.Errorf("error text = %q, want it to mention the invalid regular expression", got)
+	}
+}
+
+func TestSearchToolPatternSearchMissingPatternArgErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{
+		"request": map[string]any{"mode": "pattern_search", "page": float64(1)},
+	})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing pattern argument")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "pattern") {
+		t.Errorf("error text = %q, want it to mention the missing pattern argument", got)
+	}
+}
+
+func TestSearchToolPatternSearchMissingPageArgErrors(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{
+		"request": map[string]any{"mode": "pattern_search", "pattern": "FooBar"},
+	})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for missing page argument")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "page") {
+		t.Errorf("error text = %q, want it to mention the missing page argument", got)
+	}
+}
+
+func TestSearchToolPatternSearchClampsNonPositivePageToOne(t *testing.T) {
+	qd := &fakeQdrant{scrollPoints: []map[string]any{
+		{"id": "1", "payload": map[string]any{"text": "FooBar match"}},
+	}}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(0),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+	var payload struct {
+		Page int `json:"page"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Page != 1 {
+		t.Errorf("page = %d, want clamped to 1", payload.Page)
+	}
+}
+
+func TestSearchToolPatternSearchSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
+	qd := &fakeQdrant{}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "source_name": "my-source", "page": float64(1),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	qd.mu.Lock()
+	body := qd.lastScrollBody
+	qd.mu.Unlock()
+	filter, ok := body["filter"].(map[string]any)
+	if !ok {
+		t.Fatalf("filter missing or wrong shape in scroll body: %+v", body)
+	}
+	must, ok := filter["must"].([]any)
+	if !ok || len(must) != 1 {
+		t.Fatalf("must = %v, want 1 condition for source_name", filter["must"])
+	}
+	cond := must[0].(map[string]any)
+	if cond["key"] != models.TagKey("source_name") {
+		t.Errorf("must key = %v, want %v", cond["key"], models.TagKey("source_name"))
+	}
+}
+
+func TestSearchToolPatternSearchLastPageReturnsNote(t *testing.T) {
+	qd := &fakeQdrant{scrollPoints: []map[string]any{
+		{"id": "1", "payload": map[string]any{"text": "only FooBar match"}},
+	}}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(2),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+	var payload struct {
+		Note string `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload.Note, "1") {
+		t.Errorf("Note = %q, want it to mention page 1 was the last page", payload.Note)
+	}
+}
+
+func TestSearchToolPatternSearchBackendErrorPropagatesAsToolError(t *testing.T) {
+	qdSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("qdrant down"))
+	}))
+	defer qdSrv.Close()
+	embedSrv := httptest.NewServer(fixedEmbedHandler(0, ""))
+	defer embedSrv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Embedding.BaseURL = embedSrv.URL
+	cfg.Embedding.MaxInputTokens = 8192
+	cfg.Qdrant.URL = qdSrv.URL
+	vectors := rag.NewVectorStore(cfg)
+	embedding := rag.NewEmbeddingService(cfg)
+	search := rag.NewSearchService(vectors, embedding, nil)
+	mem := memory.NewService(vectors, embedding)
+	mcpServer := server.NewMCPServer("test", "0.0.0")
+	RegisterTools(mcpServer, search, mem)
+
+	result := callTool(t, mcpServer, context.Background(), "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	if !result.IsError {
+		t.Fatal("expected IsError=true when the Qdrant backend fails")
+	}
+	if got := resultText(t, result); !strings.Contains(got, "500") {
+		t.Errorf("error text = %q, want it to surface the HTTP 500 from Qdrant", got)
+	}
+}
+
+func TestSearchToolPatternSearchTruncatedScanReturnsNote(t *testing.T) {
+	qd := &fakeQdrant{
+		scrollPoints:        []map[string]any{{"id": "1", "payload": map[string]any{"text": "no match"}}},
+		scrollNeverExhausts: true,
+	}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+	var payload struct {
+		Note string `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(payload.Note, "scanned") {
+		t.Errorf("Note = %q, want it to mention the scan being cut short", payload.Note)
 	}
 }
 

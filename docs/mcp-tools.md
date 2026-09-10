@@ -23,20 +23,17 @@ A `.vscode/mcp.json` is already included in the repo for VS Code users.
 
 ## Search tools
 
-All search tools share the same signature — a single `request` object that is one of two shapes, selected by `mode`:
+Every search tool takes one `request` argument, shaped by `mode`:
 
 ```
-tool_name(request: { mode: "semantic_search", query: str, page: int, source_name?: str }) -> str
-tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int }) -> str
+tool_name(request: { mode: "semantic_search", query: str, page: int, source_name?: str })
+tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int })
+tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, source_name?: str })
 ```
 
-### `mode: "semantic_search"`
+`semantic_search` and `pattern_search` return one match per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1`. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
 
-- **`query`** — Required. Natural language query. The query is embedded and matched semantically.
-- **`page`** — Required. Which result to return by relevance rank, starting at `1` (the most relevant match). Each call returns only a single match; call again with a higher page number to see the next-most-relevant one if the first wasn't sufficient.
-- **`source_name`** — Optional filter. When set, only documents from sources with that exact name are returned. Useful when multiple sources of the same type exist (e.g. two different repositories).
-
-Results are returned as a JSON object with at most one entry in `results`, plus pagination info:
+Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If a match looks cut off mid-thought, use `retrieve_chunk` with the same `source_doc_id` and `chunk_index ± 1` to fetch the adjacent text deterministically — no new search needed.
 
 ```json
 {
@@ -59,64 +56,42 @@ Results are returned as a JSON object with at most one entry in `results`, plus 
 }
 ```
 
-`has_more: true` means a next-most-relevant match exists — call again with `page + 1` to fetch it. When `results` is empty, a `note` explains why: nothing is embedded yet for `page == 1`, or the ranked list is exhausted for `page > 1`.
+### `mode: "semantic_search"` — ranked, natural-language search
 
-Every result also reports where it sits inside its source document: `chunk_index`/`total_chunks` give its position, and `has_previous`/`has_next` say whether a chunk exists immediately before/after it. If a match looks cut off mid-thought, use `mode: "retrieve_chunk"` (below) with the same `source_doc_id` and `chunk_index ± 1` to fetch the adjacent text — no new search needed.
+- **`query`** (required) — natural-language query, embedded and matched by similarity.
+- **`page`** (required) — rank to return, starting at `1` (most relevant).
+- **`source_name`** (optional) — restrict results to one source.
 
-### `mode: "retrieve_chunk"`
+### `mode: "retrieve_chunk"` — deterministic fetch by ID
 
-- **`source_doc_id`** — Required. Copy this from a `semantic_search` result.
-- **`chunk_index`** — Required. The exact chunk to fetch. Use a prior result's `chunk_index - 1` or `chunk_index + 1` to walk to the previous/next chunk.
+- **`source_doc_id`**, **`chunk_index`** (both required) — copy from a prior result, adjusting `chunk_index` by ±1 to walk to the neighboring chunk.
 
-This is a deterministic point lookup, not a semantic search — no embedding call is made, so it's fast and always returns the exact chunk (or none) regardless of how well it would have scored against a query:
+No embedding call is made — it's a direct point lookup, so it always returns the exact chunk (or none, with a `note`) regardless of relevance:
 
 ```json
 { "results": [ { "text": "...continuation of the previous chunk...", "source_doc_id": "source_id_wi_12345", "chunk_index": 1, "total_chunks": 3, "has_previous": true, "has_next": true } ] }
 ```
 
-When `chunk_index` is out of range (or the document isn't indexed under this collection), `results` is empty and a `note` explains why.
+### `mode: "pattern_search"` — exact literal/regex match
 
-### `search_workitem`
+- **`pattern`** (required) — literal substring, or (with `regex: true`) a Go RE2 regular expression.
+- **`page`** (required) — match to return, starting at `1`, in storage order (not ranked).
+- **`regex`** (optional, default `false`).
+- **`source_name`** (optional) — restrict results to one source.
 
-Searches work items — bugs, tasks, user stories, features, epics.
+Use this instead of `semantic_search` when you need an exact match rather than a similarity ranking — e.g. finding every usage of a method or identifier. It's a client-side scan of chunk text, not a Qdrant full-text index, so `score` is always `0`.
 
-Best for: finding related issues, checking if a bug has been filed, understanding sprint scope.
+## Which tool to use
 
-### `search_requirement`
-
-Searches requirements — features, user stories, epics, product and software requirements.
-
-Best for: finding relevant requirements for a feature, checking acceptance criteria, understanding scope.
-
-### `search_source_code`
-
-Searches production source code at the code-unit level (classes, methods, functions). Does not include test files — use `search_test_code` for tests.
-
-Best for: finding implementations, understanding how a feature is built, locating where a concept is defined.
-
-### `search_test_code`
-
-Searches test code — unit tests, integration tests, and specs.
-
-Best for: finding existing test coverage, understanding how code is tested, finding test patterns and examples.
-
-### `search_testcase`
-
-Searches test case definitions including test steps.
-
-Best for: finding existing test coverage, understanding expected behaviour, checking automation status.
-
-### `search_documentation`
-
-Searches wiki pages, repo documentation sections, and manually uploaded documents.
-
-Best for: finding architectural decisions, process documentation, onboarding guides, design docs, ADRs.
-
-### `search_commit`
-
-Searches git commit history — messages, authors, file change summaries.
-
-Best for: understanding when a change was made, finding the commit that introduced a behaviour, reviewing recent activity.
+| Tool | Searches | Best for |
+|---|---|---|
+| `search_workitem` | Work items — bugs, tasks, user stories, features, epics | Finding related issues, checking if a bug's been filed, sprint scope |
+| `search_requirement` | Requirements — features, user stories, epics | Finding relevant requirements, acceptance criteria |
+| `search_source_code` | Production source code (classes, methods, functions) — no tests | Finding implementations, locating where a concept is defined |
+| `search_test_code` | Test code — unit, integration, specs | Finding test coverage, patterns, and examples |
+| `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
+| `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
+| `search_commit` | Git commit history — messages, authors, file changes | When a change was made, which commit introduced a behaviour |
 
 ---
 
@@ -128,23 +103,11 @@ Best for: understanding when a change was made, finding the commit that introduc
 retrieve_experience(query: str, top_k: int = 5) -> str
 ```
 
-Recalls relevant past experience: guidance, preferences, known mistakes, and past decisions. Returns a JSON object with an `experience` array of strings.
+Recalls relevant past experience — guidance, preferences, known mistakes, past decisions — as a JSON `experience` array of strings. **Call this at the start of every new task.**
 
-**Always call this at the start of every new task or user request.** The experience store is where project knowledge accumulates over time.
-
-Example:
 ```
 retrieve_experience("implementing authentication")
-```
-
-Returns:
-```json
-{
-  "experience": [
-    "For this project, always use the NTLM auth path for on-premise TFS...",
-    "The team prefers feature branches prefixed with feat/..."
-  ]
-}
+→ { "experience": ["For this project, always use the NTLM auth path for on-premise TFS...", ...] }
 ```
 
 ### `remember`
@@ -153,60 +116,41 @@ Returns:
 remember(situation: str, guidance: str) -> str
 ```
 
-Stores information that should be recalled in future sessions.
+Stores guidance for future sessions. Call proactively whenever you learn a preference, constraint, decision, or lesson the user would want enforced later.
 
-- **`situation`** — Describes when this guidance applies. Be specific: "When writing C# unit tests in this repo" is better than "writing tests".
-- **`guidance`** — The exact instruction or fact to recall. One clear, actionable statement per entry.
+- **`situation`** — when this applies. Be specific: "When writing C# unit tests in this repo" beats "writing tests".
+- **`guidance`** — the exact instruction or fact to recall.
 
-Call this proactively whenever you learn something the user would want enforced in future conversations — a preference, a constraint, a decision, or a lesson from a mistake.
-
-Example:
 ```
-remember(
-  situation="Deploying to the staging environment",
-  guidance="Always run the database migration script before deploying the API service. Missing this step caused an outage in March 2024."
-)
-```
-
-Returns:
-```json
-{ "status": "stored", "entry_id": "abc123..." }
+remember(situation="Deploying to staging", guidance="Always run the DB migration script before deploying — missing this caused an outage in March 2024.")
+→ { "status": "stored", "entry_id": "abc123..." }
 ```
 
 ---
 
 ## Usage patterns
 
-### Start of every task
+**Start of every task:** `retrieve_experience` → search tools for context → do the work → `remember` anything learned.
 
-```
-1. retrieve_experience("<brief description of current task>")
-2. Use search tools to gather relevant context
-3. Complete the task
-4. remember() any new guidance learned during the task
-```
-
-### Scoping a search to one source
-
-If you have multiple ADO sources (e.g. two different repos), use `source_name` to limit results:
-
+**Scoping to one source** (e.g. two ADO repos):
 ```
 search_source_code(request={"mode": "semantic_search", "query": "authentication middleware", "page": 1, "source_name": "Backend API"})
 ```
 
-### Following a cut-off match to its neighboring chunk
-
+**Following a cut-off match to its neighboring chunk:**
 ```
 1. search_documentation(request={"mode": "semantic_search", "query": "deployment rollback steps", "page": 1})
-   → result has chunk_index=2, total_chunks=4, has_next=true, and looks cut off mid-sentence
+   → chunk_index=2, total_chunks=4, has_next=true, looks cut off mid-sentence
 2. search_documentation(request={"mode": "retrieve_chunk", "source_doc_id": "<from step 1>", "chunk_index": 3})
-   → the next chunk of the same document, picking up where it left off
+   → the next chunk, picking up where it left off
 ```
 
-### Combining tools for context
+**Finding all usages of a method or identifier:**
+```
+1. search_source_code(request={"mode": "pattern_search", "pattern": "CalculateTotal", "page": 1})
+2. search_source_code(request={"mode": "pattern_search", "pattern": "CalculateTotal", "page": 2})
+   ... keep incrementing page until has_more is false
+```
+Use `search_test_code` the same way to find where a method is tested.
 
-For a code change task, a useful sequence is:
-1. `retrieve_experience` — check for relevant past decisions
-2. `search_source_code` — find the implementation
-3. `search_test_code` — find existing tests for that code
-4. `search_workitem` — find related requirements or bugs
+**Combining tools for a code change:** `retrieve_experience` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_workitem` (related requirements or bugs).

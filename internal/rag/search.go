@@ -3,6 +3,7 @@ package rag
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
@@ -30,6 +31,22 @@ func NewSearchService(store *VectorStore, embedding *EmbeddingService, sources S
 // number instead of asking for a batch up front.
 const pageSize = 1
 
+// excludedSourceIDs lists the disabled sources to keep out of results,
+// shared by Search and PatternSearch.
+func (s *SearchService) excludedSourceIDs() []string {
+	var excludeSourceIDs []string
+	if s.sources != nil {
+		if all, err := s.sources.ListAll(); err == nil {
+			for _, src := range all {
+				if src.Disabled {
+					excludeSourceIDs = append(excludeSourceIDs, src.ID)
+				}
+			}
+		}
+	}
+	return excludeSourceIDs
+}
+
 // Search returns the single most relevant match for page (1-based; values
 // below 1 are treated as 1). hasMore reports whether a further page exists.
 func (s *SearchService) Search(
@@ -42,18 +59,8 @@ func (s *SearchService) Search(
 	if err != nil {
 		return nil, false, err
 	}
-	var excludeSourceIDs []string
-	if s.sources != nil {
-		if all, err := s.sources.ListAll(); err == nil {
-			for _, src := range all {
-				if src.Disabled {
-					excludeSourceIDs = append(excludeSourceIDs, src.ID)
-				}
-			}
-		}
-	}
 	offset := (page - 1) * pageSize
-	points, err := s.store.Search(ctx, collection, vector, pageSize+1, offset, tags, excludeSourceIDs)
+	points, err := s.store.Search(ctx, collection, vector, pageSize+1, offset, tags, s.excludedSourceIDs())
 	if err != nil {
 		return nil, false, err
 	}
@@ -94,4 +101,70 @@ func (s *SearchService) GetChunk(ctx context.Context, collection, sourceDocID st
 	}
 	p := points[0]
 	return PointToSearchResult(ScoredPoint{ID: p.ID, Payload: p.Payload}), true, nil
+}
+
+// patternScanCap bounds how many points PatternSearch will scroll through per
+// call, mirroring scrollForStructure's structureScanCap in internal/web —
+// keeps an unbounded collection from turning one tool call into a full scan.
+const patternScanCap = 5000
+
+// patternScrollBatch is the page size PatternSearch requests from Qdrant on
+// each Scroll call while looking for matches.
+const patternScrollBatch = 200
+
+// PatternSearch scans a collection's chunk text for matches against match —
+// a literal-substring or regex predicate built by the caller — rather than
+// running a semantic/embedding search. Like Search, it returns one match per
+// page (1-based; values below 1 are treated as 1) and hasMore reports whether
+// a further match exists.
+//
+// Unlike Search, there's no way to ask Qdrant to jump straight to a given
+// page of matches — the collection is client-side filtered, so every call
+// re-scrolls from the start up to page+1 matches (or patternScanCap points,
+// whichever comes first). truncated is true when the scan hit that cap
+// without collecting enough matches to answer the current page with
+// certainty — the caller should say so rather than claim hasMore is false.
+func (s *SearchService) PatternSearch(
+	ctx context.Context, collection string, match func(string) bool, page int, tags map[string]string,
+) (results []models.SearchResult, hasMore, truncated bool, err error) {
+	if page < 1 {
+		page = 1
+	}
+	filter := buildFilter(tags, s.excludedSourceIDs())
+	need := page + 1
+
+	var matches []models.SearchResult
+	var offset json.RawMessage
+	scanned := 0
+	for {
+		points, next, err := s.store.Scroll(ctx, collection, filter, patternScrollBatch, offset, false)
+		if err != nil {
+			return nil, false, false, err
+		}
+		for _, p := range points {
+			scanned++
+			text, _ := p.Payload[models.PayloadText].(string)
+			if match(text) {
+				matches = append(matches, PointToSearchResult(ScoredPoint{ID: p.ID, Payload: p.Payload}))
+				if len(matches) >= need {
+					break
+				}
+			}
+		}
+		if len(matches) >= need || next == nil {
+			truncated = false
+			break
+		}
+		if scanned >= patternScanCap {
+			truncated = true
+			break
+		}
+		offset = next
+	}
+
+	hasMore = len(matches) > page
+	if len(matches) < page {
+		return []models.SearchResult{}, false, truncated, nil
+	}
+	return []models.SearchResult{matches[page-1]}, hasMore, truncated, nil
 }

@@ -251,10 +251,24 @@ func (v *VectorStore) Upsert(ctx context.Context, collection string, points []Po
 	return v.do(ctx, http.MethodPut, "/collections/"+collection+"/points?wait=true", body, nil)
 }
 
+// buildFilter combines a tag filter with a must_not exclusion on source_id —
 // excludeSourceIDs, if non-empty, excludes points tagged with any of those
-// source IDs — used to keep disabled sources out of search results without
-// deleting their vectors (they reappear immediately if the source is
-// re-enabled, no re-sync needed).
+// source IDs, used to keep disabled sources out of results without deleting
+// their vectors (they reappear immediately if the source is re-enabled, no
+// re-sync needed). Shared by VectorStore.Search and SearchService.PatternSearch.
+func buildFilter(tags map[string]string, excludeSourceIDs []string) *Filter {
+	f := TagFilter(tags)
+	if len(excludeSourceIDs) > 0 {
+		if f == nil {
+			f = &Filter{}
+		}
+		for _, id := range excludeSourceIDs {
+			f.MustNot = append(f.MustNot, FieldCondition{Key: models.TagKey("source_id"), Match: Match{Value: id}})
+		}
+	}
+	return f
+}
+
 func (v *VectorStore) Search(
 	ctx context.Context, collection string, vector []float32, limit, offset int, tags map[string]string, excludeSourceIDs []string,
 ) ([]ScoredPoint, error) {
@@ -266,16 +280,7 @@ func (v *VectorStore) Search(
 	if offset > 0 {
 		body["offset"] = offset
 	}
-	f := TagFilter(tags)
-	if len(excludeSourceIDs) > 0 {
-		if f == nil {
-			f = &Filter{}
-		}
-		for _, id := range excludeSourceIDs {
-			f.MustNot = append(f.MustNot, FieldCondition{Key: models.TagKey("source_id"), Match: Match{Value: id}})
-		}
-	}
-	if f != nil {
+	if f := buildFilter(tags, excludeSourceIDs); f != nil {
 		body["filter"] = f
 	}
 	var resp struct {
