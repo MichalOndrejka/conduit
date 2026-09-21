@@ -338,15 +338,20 @@ func TestPatternSearchNoMatchReturnsEmpty(t *testing.T) {
 }
 
 func TestPatternSearchPaginatesAcrossMatches(t *testing.T) {
+	// 7 matches ("FooBar match 1".."FooBar match 7") interleaved with
+	// irrelevant points: page 1 (pageSize 5) should return matches 1-5 with
+	// hasMore=true, page 2 should return the remaining matches 6-7 with
+	// hasMore=false.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		points := make([]map[string]any, 0, 14)
+		for i := 1; i <= 7; i++ {
+			points = append(points,
+				map[string]any{"id": fmt.Sprintf("irrelevant-%d", i), "payload": map[string]any{"text": "irrelevant"}},
+				map[string]any{"id": fmt.Sprintf("match-%d", i), "payload": map[string]any{"text": fmt.Sprintf("FooBar match %d", i)}},
+			)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": map[string]any{
-				"points": []map[string]any{
-					{"id": "1", "payload": map[string]any{"text": "FooBar match one"}},
-					{"id": "2", "payload": map[string]any{"text": "irrelevant"}},
-					{"id": "3", "payload": map[string]any{"text": "FooBar match two"}},
-				},
-			},
+			"result": map[string]any{"points": points},
 		})
 	}))
 	defer srv.Close()
@@ -359,16 +364,26 @@ func TestPatternSearchPaginatesAcrossMatches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasMore || len(results) != 1 || results[0].Text != "FooBar match one" {
-		t.Fatalf("page 1 = %+v hasMore=%v, want match one with hasMore=true", results, hasMore)
+	if !hasMore || len(results) != pageSize {
+		t.Fatalf("page 1 = %+v hasMore=%v, want %d matches with hasMore=true", results, hasMore, pageSize)
+	}
+	for i, r := range results {
+		if want := fmt.Sprintf("FooBar match %d", i+1); r.Text != want {
+			t.Errorf("page 1 result %d = %q, want %q", i, r.Text, want)
+		}
 	}
 
 	results, hasMore, _, err = svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hasMore || len(results) != 1 || results[0].Text != "FooBar match two" {
-		t.Fatalf("page 2 = %+v hasMore=%v, want match two with hasMore=false", results, hasMore)
+	if hasMore || len(results) != 2 {
+		t.Fatalf("page 2 = %+v hasMore=%v, want 2 matches with hasMore=false", results, hasMore)
+	}
+	for i, r := range results {
+		if want := fmt.Sprintf("FooBar match %d", pageSize+i+1); r.Text != want {
+			t.Errorf("page 2 result %d = %q, want %q", i, r.Text, want)
+		}
 	}
 }
 

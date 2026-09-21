@@ -3,6 +3,7 @@ package mcptools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -394,13 +395,13 @@ func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
 	qd.mu.Lock()
 	body := qd.lastSearchBody
 	qd.mu.Unlock()
-	// page 3 with pageSize 1 → offset 2 (skip ranks 1–2), limit 2 (fetch rank 3
-	// plus one lookahead to know whether a further page exists).
-	if got := body["limit"]; got != float64(2) {
-		t.Errorf("limit = %v, want 2", got)
+	// page 3 with pageSize 5 → offset 10 (skip pages 1–2), limit 6 (fetch page 3's
+	// 5 results plus one lookahead to know whether a further page exists).
+	if got := body["limit"]; got != float64(6) {
+		t.Errorf("limit = %v, want 6", got)
 	}
-	if got := body["offset"]; got != float64(2) {
-		t.Errorf("offset = %v, want 2", got)
+	if got := body["offset"]; got != float64(10) {
+		t.Errorf("offset = %v, want 10", got)
 	}
 	filter, ok := body["filter"].(map[string]any)
 	if !ok {
@@ -437,29 +438,36 @@ func TestSearchToolPagination(t *testing.T) {
 	}
 
 	t.Run("page 1 with a further match reports has_more", func(t *testing.T) {
-		qd := &fakeQdrant{searchPoints: []map[string]any{
-			{"id": "p1", "score": 0.9, "payload": map[string]any{"text": "most relevant"}},
-			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
-		}}
+		// pageSize+1 points lets Search see a lookahead match beyond the page.
+		points := make([]map[string]any, 0, 6)
+		for i := 1; i <= 6; i++ {
+			points = append(points, map[string]any{
+				"id": fmt.Sprintf("p%d", i), "score": 1.0 / float64(i),
+				"payload": map[string]any{"text": fmt.Sprintf("match %d", i)},
+			})
+		}
+		qd := &fakeQdrant{searchPoints: points}
 		s, ctx := setup(t, qd, nil)
 		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(1),
 		}}))
-		if len(p.Results) != 1 || p.Page != 1 || !p.HasMore {
-			t.Errorf("got %+v, want 1 result, page 1, has_more true", p)
+		if len(p.Results) != 5 || p.Page != 1 || !p.HasMore {
+			t.Errorf("got %+v, want 5 results, page 1, has_more true", p)
 		}
 	})
 
 	t.Run("last page reports has_more false", func(t *testing.T) {
+		// Fewer than pageSize points means the page is partially filled and final.
 		qd := &fakeQdrant{searchPoints: []map[string]any{
-			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "next most relevant"}},
+			{"id": "p1", "score": 0.9, "payload": map[string]any{"text": "match 1"}},
+			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "match 2"}},
 		}}
 		s, ctx := setup(t, qd, nil)
 		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(2),
 		}}))
-		if len(p.Results) != 1 || p.Page != 2 || p.HasMore {
-			t.Errorf("got %+v, want 1 result, page 2, has_more false", p)
+		if len(p.Results) != 2 || p.Page != 2 || p.HasMore {
+			t.Errorf("got %+v, want 2 results, page 2, has_more false", p)
 		}
 	})
 

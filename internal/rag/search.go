@@ -25,11 +25,13 @@ func NewSearchService(store *VectorStore, embedding *EmbeddingService, sources S
 	return &SearchService{store: store, embedding: embedding, sources: sources}
 }
 
-// pageSize is the number of ranked matches Search returns per page — always
-// 1, so a single search call can never return more than one full chunk of
-// text. Callers page to the next-most-relevant match with a higher page
-// number instead of asking for a batch up front.
-const pageSize = 1
+// pageSize is the number of matches Search and PatternSearch return per
+// page. 5 balances giving the caller enough of the ranked list to actually
+// notice a lower-ranked match (rather than treating page 1's top hit as the
+// whole answer) against the response staying a manageable size — at the
+// default ~2000-char chunk size that's roughly 2500 tokens per call.
+// Callers page to the next batch with a higher page number.
+const pageSize = 5
 
 // excludedSourceIDs lists the disabled sources to keep out of results,
 // shared by Search and PatternSearch.
@@ -47,7 +49,7 @@ func (s *SearchService) excludedSourceIDs() []string {
 	return excludeSourceIDs
 }
 
-// Search returns the single most relevant match for page (1-based; values
+// Search returns up to pageSize ranked matches for page (1-based; values
 // below 1 are treated as 1). hasMore reports whether a further page exists.
 func (s *SearchService) Search(
 	ctx context.Context, collection, query string, page int, tags map[string]string,
@@ -114,9 +116,9 @@ const patternScrollBatch = 200
 
 // PatternSearch scans a collection's chunk text for matches against match —
 // a literal-substring or regex predicate built by the caller — rather than
-// running a semantic/embedding search. Like Search, it returns one match per
-// page (1-based; values below 1 are treated as 1) and hasMore reports whether
-// a further match exists.
+// running a semantic/embedding search. Like Search, it returns up to
+// pageSize matches per page (1-based; values below 1 are treated as 1) and
+// hasMore reports whether a further match exists.
 //
 // Unlike Search, there's no way to ask Qdrant to jump straight to a given
 // page of matches — the collection is client-side filtered, so every call
@@ -131,7 +133,7 @@ func (s *SearchService) PatternSearch(
 		page = 1
 	}
 	filter := buildFilter(tags, s.excludedSourceIDs())
-	need := page + 1
+	need := page*pageSize + 1
 
 	var matches []models.SearchResult
 	var offset json.RawMessage
@@ -162,9 +164,14 @@ func (s *SearchService) PatternSearch(
 		offset = next
 	}
 
-	hasMore = len(matches) > page
-	if len(matches) < page {
+	hasMore = len(matches) > page*pageSize
+	start := (page - 1) * pageSize
+	if start >= len(matches) {
 		return []models.SearchResult{}, false, truncated, nil
 	}
-	return []models.SearchResult{matches[page-1]}, hasMore, truncated, nil
+	end := page * pageSize
+	if end > len(matches) {
+		end = len(matches)
+	}
+	return matches[start:end], hasMore, truncated, nil
 }

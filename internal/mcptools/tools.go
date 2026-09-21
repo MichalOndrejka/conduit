@@ -28,7 +28,8 @@ type chunkQuery interface {
 }
 
 // semanticSearchRequest is request.mode == "semantic_search": today's ranked
-// vector search, returning only the single most relevant match per call.
+// vector search, returning up to a page's worth of the most relevant matches
+// per call (see pageSize in internal/rag/search.go).
 type semanticSearchRequest struct {
 	Query      string
 	Page       int
@@ -85,7 +86,8 @@ func (q retrieveChunkRequest) resolve(ctx context.Context, search *rag.SearchSer
 // patternSearchRequest is request.mode == "pattern_search": a deterministic
 // literal-substring or regex scan of chunk text — no embedding call, for
 // exact matches semantic search can't guarantee (e.g. finding every usage of
-// a method or identifier). Matcher is built once by parseChunkQuery so
+// a method or identifier). Returns up to a page's worth of matches per call,
+// same as semantic_search. Matcher is built once by parseChunkQuery so
 // resolve doesn't need to know whether Pattern is literal or regex.
 type patternSearchRequest struct {
 	Pattern    string
@@ -196,8 +198,8 @@ func requestParamSchema() map[string]any {
 				"properties": map[string]any{
 					"mode":  map[string]any{"const": "semantic_search"},
 					"query": map[string]any{"type": "string", "description": "Natural-language search query"},
-					"page": map[string]any{"type": "number", "description": "Which result to return by relevance rank, starting at 1 (the most relevant match). " +
-						"Call again with a higher page number to see the next-most-relevant match if this one isn't sufficient. Start with 1."},
+					"page": map[string]any{"type": "number", "description": "Which page of ranked results to return, starting at 1 (the most relevant matches). " +
+						"Call again with a higher page number to see the next batch of matches if these aren't sufficient. Start with 1."},
 					"source_name": map[string]any{"type": "string", "description": "Optional: restrict results to a single source by name"},
 				},
 				"required": []string{"mode", "query", "page"},
@@ -220,8 +222,8 @@ func requestParamSchema() map[string]any {
 					"regex": map[string]any{"type": "boolean", "description": "If true, interpret pattern as a Go RE2 regular expression instead " +
 						"of a literal substring. Defaults to false."},
 					"source_name": map[string]any{"type": "string", "description": "Optional: restrict results to a single source by name"},
-					"page": map[string]any{"type": "number", "description": "Which match to return, starting at 1 (the first match found, in " +
-						"index order — not ranked). Call again with a higher page number to see the next match if this one isn't sufficient. Start with 1."},
+					"page": map[string]any{"type": "number", "description": "Which page of matches to return, starting at 1 (the first matches found, in " +
+						"index order — not ranked). Call again with a higher page number to see the next batch of matches if these aren't sufficient. Start with 1."},
 				},
 				"required": []string{"mode", "pattern", "page"},
 			},
@@ -240,16 +242,17 @@ func withRequestParam() mcp.ToolOption {
 func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.Service) {
 
 	// ── Knowledge search tools ─────────────────────────────────────────────
-	// request.mode="semantic_search" returns only the single most relevant
-	// match — the rest of the ranked list is reachable by paging, never
-	// dumped in one response. request.mode="retrieve_chunk" fetches one exact
-	// chunk of a document by ID (see chunk_index/has_previous/has_next on any
+	// request.mode="semantic_search" returns a page's worth of the most
+	// relevant matches — the rest of the ranked list is reachable by paging,
+	// never dumped in one response. request.mode="retrieve_chunk" fetches one
+	// exact chunk of a document by ID (see chunk_index/has_previous/has_next on any
 	// result) — deterministic, no embedding call, for walking to a chunk that
 	// got cut off by the chunker. request.mode="pattern_search" is a
 	// deterministic literal/regex text scan — no embedding call, no ranking —
 	// for exact matches semantic search can't guarantee, such as finding
 	// every usage of a method or identifier.
-	const requestModeNote = ` Pass request={"mode":"semantic_search","query":...,"page":1} for a ranked search. ` +
+	const requestModeNote = ` Pass request={"mode":"semantic_search","query":...,"page":1} for a ranked search — each ` +
+		`call returns a page of the top matches; call again with a higher page number for the next batch. ` +
 		`Each result includes chunk_index/total_chunks and has_previous/has_next; if a match looks cut off, pass ` +
 		`request={"mode":"retrieve_chunk","source_doc_id":...,"chunk_index":...} (from the result, chunk_index ± 1) ` +
 		`to fetch the exact adjacent chunk. For an exact/deterministic text or regex match — e.g. finding all usages ` +

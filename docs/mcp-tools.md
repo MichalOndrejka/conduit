@@ -31,9 +31,11 @@ tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: in
 tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, source_name?: str })
 ```
 
-`semantic_search` and `pattern_search` return one match per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1`. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
+`semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
 
 Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If a match looks cut off mid-thought, use `retrieve_chunk` with the same `source_doc_id` and `chunk_index ± 1` to fetch the adjacent text deterministically — no new search needed.
+
+`results` holds up to 5 matches (`page` 1 is the top 5, `page` 2 the next 5, and so on):
 
 ```json
 {
@@ -49,7 +51,8 @@ Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If 
       "total_chunks": 3,
       "has_previous": false,
       "has_next": true
-    }
+    },
+    { "id": "source_id_wi_12200", "score": 0.81, "text": "Work Item 12200: Session expires early...", "...": "4 more fields as above" }
   ],
   "page": 1,
   "has_more": true
@@ -59,7 +62,7 @@ Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If 
 ### `mode: "semantic_search"` — ranked, natural-language search
 
 - **`query`** (required) — natural-language query, embedded and matched by similarity.
-- **`page`** (required) — rank to return, starting at `1` (most relevant).
+- **`page`** (required) — batch of ranked results to return, starting at `1` (most relevant).
 - **`source_name`** (optional) — restrict results to one source.
 
 ### `mode: "retrieve_chunk"` — deterministic fetch by ID
@@ -75,7 +78,7 @@ No embedding call is made — it's a direct point lookup, so it always returns t
 ### `mode: "pattern_search"` — exact literal/regex match
 
 - **`pattern`** (required) — literal substring, or (with `regex: true`) a Go RE2 regular expression.
-- **`page`** (required) — match to return, starting at `1`, in storage order (not ranked).
+- **`page`** (required) — batch of matches to return, starting at `1`, in storage order (not ranked).
 - **`regex`** (optional, default `false`).
 - **`source_name`** (optional) — restrict results to one source.
 
