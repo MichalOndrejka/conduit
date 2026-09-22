@@ -12,9 +12,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -27,16 +29,6 @@ const workItemBatchSize = 200 // Azure DevOps' workitemsbatch hard limit
 // adoWiqlMaxTop is Azure DevOps' own hard limit on the WIQL $top parameter —
 // requesting more than this errors out server-side.
 const adoWiqlMaxTop = 19999
-
-// defaultWorkItemFields are fetched for every work item regardless of type —
-// covering the fields common process templates (Agile, Scrum, CMMI, Basic)
-// use for a work item's title, description and test-case steps.
-var defaultWorkItemFields = []string{
-	"System.Id", "System.Title", "System.WorkItemType", "System.State",
-	"System.AreaPath", "System.Tags", "System.AssignedTo", "System.Description",
-	"Microsoft.VSTS.Common.AcceptanceCriteria",
-	"Microsoft.VSTS.TCM.ReproSteps", "Microsoft.VSTS.TCM.Steps",
-}
 
 // parseWorkItemTypes splits a comma-separated work item type list (e.g.
 // "Bug,Task,User Story") into trimmed, non-empty type names.
@@ -188,7 +180,12 @@ func (a *APISource) workItemsBatch(ctx context.Context, client *http.Client, org
 				Message: fmt.Sprintf("Fetching work items %d-%d/%d", i+1, end, len(ids)),
 			})
 		}
-		reqBody, err := json.Marshal(map[string]any{"ids": chunk, "fields": defaultWorkItemFields})
+		// Request every field (system + custom) via $expand rather than a
+		// fixed allowlist — the workitemsbatch endpoint returns only the named
+		// fields when "fields" is set, dropping any custom project/org field.
+		// "$expand" and "fields" are mutually exclusive on this endpoint; the
+		// relations/links "all" also returns are ignored (we only read Fields).
+		reqBody, err := json.Marshal(map[string]any{"ids": chunk, "$expand": "all"})
 		if err != nil {
 			return nil, err
 		}
@@ -205,17 +202,10 @@ func (a *APISource) workItemsBatch(ctx context.Context, client *http.Client, org
 	return all, nil
 }
 
-// workItemsToDocuments converts fetched work item fields into documents,
-// applying ContentFields (if configured) to select which fields are
-// embedded — otherwise every fetched field is included.
+// workItemsToDocuments converts fetched work item fields into documents. Every
+// fetched field (system + custom) is embedded — sorted for stable output, and
+// with HTML rich-text values reduced to readable plain text.
 func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.SourceDocument {
-	var contentFields []string
-	for _, f := range strings.Split(a.src.GetConfig("ContentFields"), ",") {
-		if f = strings.TrimSpace(f); f != "" {
-			contentFields = append(contentFields, f)
-		}
-	}
-
 	docs := make([]models.SourceDocument, 0, len(items))
 	for _, item := range items {
 		title, _ := item.Fields["System.Title"].(string)
@@ -224,20 +214,26 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		}
 		wiType, _ := item.Fields["System.WorkItemType"].(string)
 
-		var parts []string
-		fieldNames := contentFields
-		if fieldNames == nil {
-			fieldNames = make([]string, 0, len(item.Fields))
-			for k := range item.Fields {
-				if k != "System.Title" {
-					fieldNames = append(fieldNames, k)
-				}
+		fieldNames := make([]string, 0, len(item.Fields))
+		for k := range item.Fields {
+			if k != "System.Title" {
+				fieldNames = append(fieldNames, k)
 			}
-			sort.Strings(fieldNames)
 		}
+		sort.Strings(fieldNames)
+
+		var parts []string
 		for _, f := range fieldNames {
-			if v, ok := item.Fields[f]; ok && v != nil {
-				parts = append(parts, fmt.Sprintf("%s: %v", f, v))
+			v, ok := item.Fields[f]
+			if !ok || v == nil {
+				continue
+			}
+			val := fmt.Sprintf("%v", v)
+			if s, isStr := v.(string); isStr {
+				val = stripHTML(s)
+			}
+			if val != "" {
+				parts = append(parts, fmt.Sprintf("%s: %s", f, val))
 			}
 		}
 
@@ -256,6 +252,38 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		})
 	}
 	return docs
+}
+
+var (
+	// htmlBlockTag matches the closing/void tags that imply a line break in
+	// rendered HTML, so ADO rich-text keeps some of its structure as newlines.
+	htmlBlockTag = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|li|tr|h[1-6])>`)
+	// htmlAnyTag matches any remaining HTML tag for removal.
+	htmlAnyTag = regexp.MustCompile(`<[^>]+>`)
+	// wsRun collapses runs of blank space (but not newlines) within a line.
+	wsRun = regexp.MustCompile(`[^\S\n]+`)
+	// blankLines collapses three-or-more newlines down to a paragraph break.
+	blankLines = regexp.MustCompile(`\n{3,}`)
+)
+
+// stripHTML converts an ADO rich-text (HTML) field value to readable plain
+// text: block/break tags become newlines, remaining tags are removed, HTML
+// entities are decoded, and runs of whitespace are collapsed. Plain-text
+// values pass through essentially unchanged.
+func stripHTML(s string) string {
+	s = htmlBlockTag.ReplaceAllString(s, "\n")
+	s = htmlAnyTag.ReplaceAllString(s, "")
+	s = html.UnescapeString(s)
+	// &nbsp; decodes to U+00A0; treat it as an ordinary space before collapsing.
+	s = strings.ReplaceAll(s, " ", " ")
+	s = wsRun.ReplaceAllString(s, " ")
+	s = blankLines.ReplaceAllString(s, "\n\n")
+	// Trim trailing spaces left on each line by the tag removal above.
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		lines[i] = strings.TrimRight(ln, " ")
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 // postJSON performs an authenticated POST with a JSON body and returns the

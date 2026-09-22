@@ -85,6 +85,98 @@ func TestFetchAdoWorkItemsQueriesAndBatches(t *testing.T) {
 	}
 }
 
+// TestFetchAdoWorkItemsRequestsAllFields asserts the batch request uses ADO's
+// $expand (which returns every field, incl. custom ones) rather than a fixed
+// "fields" allowlist that would drop custom project/org fields.
+func TestFetchAdoWorkItemsRequestsAllFields(t *testing.T) {
+	var gotBatchBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/wit/wiql"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"workItems": []map[string]any{{"id": 9}}})
+		case strings.HasSuffix(r.URL.Path, "/wit/workitemsbatch"):
+			_ = json.NewDecoder(r.Body).Decode(&gotBatchBody)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"value": []map[string]any{{"id": 9, "fields": map[string]any{"System.Title": "T"}}},
+			})
+		default:
+			http.Error(w, "unexpected request: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: workitemAdoSrc(srv.URL, nil)}
+	if _, err := s.FetchDocuments(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := gotBatchBody["$expand"]; !ok {
+		t.Errorf("batch request missing $expand, body = %v", gotBatchBody)
+	}
+	if _, ok := gotBatchBody["fields"]; ok {
+		t.Errorf("batch request should not send a fields allowlist, body = %v", gotBatchBody)
+	}
+}
+
+// TestFetchAdoWorkItemsEmbedsAllFieldsAndStripsHTML asserts every fetched field
+// (including custom ones) is embedded and that HTML rich-text values are reduced
+// to plain text.
+func TestFetchAdoWorkItemsEmbedsAllFieldsAndStripsHTML(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/wit/wiql"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"workItems": []map[string]any{{"id": 42}}})
+		case strings.HasSuffix(r.URL.Path, "/wit/workitemsbatch"):
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"value": []map[string]any{{"id": 42, "fields": map[string]any{
+					"System.Title":        "Custom field item",
+					"Custom.BusinessArea":  "Payments",
+					"System.Description":   "<div>Alpha&nbsp;Beta</div><br>Gamma",
+				}}},
+			})
+		default:
+			http.Error(w, "unexpected request: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	// ContentFields is deliberately set — work items must ignore it and embed all.
+	s := &APISource{src: workitemAdoSrc(srv.URL, map[string]string{"ContentFields": "System.Title"})}
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("got %d docs, want 1", len(docs))
+	}
+	text := docs[0].Text
+	if !strings.Contains(text, "Custom.BusinessArea: Payments") {
+		t.Errorf("custom field not embedded: %q", text)
+	}
+	if strings.Contains(text, "<div>") || strings.Contains(text, "&nbsp;") {
+		t.Errorf("HTML not stripped from field value: %q", text)
+	}
+	if !strings.Contains(text, "Alpha Beta") || !strings.Contains(text, "Gamma") {
+		t.Errorf("stripped description text missing: %q", text)
+	}
+}
+
+func TestStripHTML(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"<div>Alpha&nbsp;Beta</div>", "Alpha Beta"},
+		{"line1<br>line2", "line1\nline2"},
+		{"<p>a</p><p>b</p>", "a\nb"},
+		{"plain text", "plain text"},
+		{"a &amp; b &lt; c", "a & b < c"},
+		{"<ul><li>one</li><li>two</li></ul>", "one\ntwo"},
+	}
+	for _, c := range cases {
+		if got := stripHTML(c.in); got != c.want {
+			t.Errorf("stripHTML(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestFetchAdoWorkItemsNoTypeFilterWhenUnconfigured(t *testing.T) {
 	var gotWiqlQuery string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
