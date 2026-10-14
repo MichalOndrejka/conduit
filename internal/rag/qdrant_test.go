@@ -44,8 +44,12 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	points, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 5, 0,
-		map[string]string{"source_name": "my-source"}, nil)
+	since := float64(1700000000)
+	points, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 5, 0, []FieldCondition{
+		{Key: "f_project", Match: Match{Value: "payments"}},
+		{Key: "f_state", Match: Match{Any: []string{"active", "new"}}},
+		{Key: "f_date", Range: &Range{Gte: &since}},
+	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,9 +64,23 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 		t.Fatal("filter missing from request body")
 	}
 	must := filter["must"].([]any)
-	cond := must[0].(map[string]any)
-	if cond["key"] != "tag_source_name" {
-		t.Errorf("filter key = %v, want tag_source_name", cond["key"])
+	if len(must) != 3 {
+		t.Fatalf("filter.must = %v, want 3 conditions", must)
+	}
+	value := must[0].(map[string]any)
+	if value["key"] != "f_project" || value["match"].(map[string]any)["value"] != "payments" {
+		t.Errorf("value condition = %v", value)
+	}
+	anyCond := must[1].(map[string]any)
+	if got := anyCond["match"].(map[string]any)["any"]; len(got.([]any)) != 2 {
+		t.Errorf("match-any condition = %v", anyCond)
+	}
+	rangeCond := must[2].(map[string]any)
+	if _, hasMatch := rangeCond["match"]; hasMatch {
+		t.Errorf("range condition must not carry a match clause: %v", rangeCond)
+	}
+	if got := rangeCond["range"].(map[string]any)["gte"]; got != since {
+		t.Errorf("range.gte = %v, want %v", got, since)
 	}
 
 	res := PointToSearchResult(points[0])

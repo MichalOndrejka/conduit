@@ -179,6 +179,12 @@ dispatch:
 			for k, v := range job.doc.Properties {
 				payload[models.PropKey(k)] = v
 			}
+			for k, v := range job.doc.Filters.Fields {
+				payload[models.FilterKey(k)] = v
+			}
+			if d := job.doc.Filters.Date; !d.IsZero() {
+				payload[models.FilterDateKey] = d.Unix()
+			}
 			points[jobIdx] = Point{ID: pointID, Vector: vector, Payload: payload}
 
 			mu.Lock()

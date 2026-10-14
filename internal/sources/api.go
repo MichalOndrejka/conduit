@@ -300,6 +300,7 @@ type commitOutcome struct {
 	fullComment  string // set only when the listed comment was truncated
 	diff         string
 	filesChanged int
+	paths        []string
 }
 
 // commitDocuments turns listed commits into documents, each carrying the
@@ -361,12 +362,12 @@ func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, co
 				}
 				out.fullComment = comment
 			}
-			diff, filesChanged, err := a.fetchCommitDiff(workCtx, client, repoBase, commitID)
+			diff, filesChanged, paths, err := a.fetchCommitDiff(workCtx, client, repoBase, commitID)
 			if err != nil {
 				fail(fmt.Errorf("commit %s: %w", commitID, err))
 				return
 			}
-			out.diff, out.filesChanged = diff, filesChanged
+			out.diff, out.filesChanged, out.paths = diff, filesChanged, paths
 			outcomes[i] = out
 
 			mu.Lock()
@@ -397,6 +398,15 @@ func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, co
 			docs[i].Text = strings.TrimSpace(docs[i].Text + "\n\n" + out.diff)
 		}
 		docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
+
+		f := &docs[i].Filters
+		f.Add(models.FilterPath, out.paths...)
+		if author, ok := navigate(items[i], "author").(map[string]any); ok {
+			name, _ := author["name"].(string)
+			email, _ := author["email"].(string)
+			f.Add(models.FilterAuthor, name, email)
+			f.Date = parseTime(author["date"])
+		}
 	}
 	return docs, nil
 }
@@ -567,7 +577,13 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 		if webURL := a.webURL(item, url, idField); webURL != "" {
 			props["web_url"] = webURL
 		}
+		filters := a.scopeFilters(url, props)
+		if isFileContentType(cfg) {
+			p := fieldString(item, "path")
+			addFileFilters(&filters, p)
+		}
 		docs = append(docs, models.SourceDocument{
+			Filters: filters,
 			ID:   docID,
 			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
 			Tags: map[string]string{

@@ -381,12 +381,19 @@ func TestSearchToolEmbeddingFailurePropagatesAsToolError(t *testing.T) {
 	}
 }
 
-func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
+func TestSearchToolFiltersArePlumbedToQdrant(t *testing.T) {
 	qd := &fakeQdrant{}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_testcase", map[string]any{"request": map[string]any{
-		"mode": "semantic_search", "query": "login flow", "source_name": "my-source", "page": float64(3),
+	result := callTool(t, s, ctx, "search_commit", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "login flow", "page": float64(3),
+		"filters": map[string]any{
+			"project":    "Payments",
+			"repository": []any{"API", "web"},
+			"path":       `\src\Auth\`,
+			"since":      "2024-01-01",
+			"until":      "2024-01-31",
+		},
 	}})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
@@ -407,17 +414,160 @@ func TestSearchToolSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
 	if !ok {
 		t.Fatalf("filter missing or wrong shape in search body: %+v", body)
 	}
-	must, ok := filter["must"].([]any)
-	if !ok || len(must) != 1 {
-		t.Fatalf("filter.must = %+v, want one condition", filter["must"])
+	must, _ := filter["must"].([]any)
+	conds := map[string]map[string]any{}
+	for _, c := range must {
+		m := c.(map[string]any)
+		conds[m["key"].(string)] = m
 	}
-	cond, ok := must[0].(map[string]any)
-	if !ok || cond["key"] != "tag_source_name" {
-		t.Fatalf("filter.must[0] = %+v, want key=tag_source_name", must[0])
+	if len(conds) != 4 {
+		t.Fatalf("filter.must = %+v, want 4 conditions (path, project, repository, date)", must)
 	}
-	match, ok := cond["match"].(map[string]any)
-	if !ok || match["value"] != "my-source" {
-		t.Fatalf("filter.must[0].match = %+v, want value=my-source", cond["match"])
+	match := func(key string) map[string]any {
+		m, _ := conds[key]["match"].(map[string]any)
+		return m
+	}
+	if got := match("f_project")["value"]; got != "payments" {
+		t.Errorf("project match = %v, want lower-cased %q", got, "payments")
+	}
+	if got := match("f_path")["value"]; got != "src/auth" {
+		t.Errorf("path match = %v, want normalized %q", got, "src/auth")
+	}
+	if got, _ := match("f_repository")["any"].([]any); len(got) != 2 || got[0] != "api" || got[1] != "web" {
+		t.Errorf("repository match-any = %v, want [api web]", got)
+	}
+	rng, _ := conds["f_date"]["range"].(map[string]any)
+	if rng["gte"] != float64(1704067200) || rng["lte"] != float64(1706745599) {
+		t.Errorf("date range = %v, want 2024-01-01T00:00:00Z..2024-01-31T23:59:59Z", rng)
+	}
+}
+
+func TestSearchToolRejectsFilterNotSupportedByCollection(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	// "state" is a work item field — source code has no such thing.
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "x", "page": float64(1),
+		"filters": map[string]any{"state": "Active"},
+	}})
+	if !result.IsError {
+		t.Fatal("expected IsError=true for an unsupported filter")
+	}
+	got := resultText(t, result)
+	if !strings.Contains(got, `"state"`) || !strings.Contains(got, "repository") {
+		t.Errorf("error text = %q, want it to name the bad filter and list supported ones", got)
+	}
+}
+
+func TestSearchToolRejectsBadFilterDate(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	result := callTool(t, s, ctx, "search_commit", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "x", "page": float64(1),
+		"filters": map[string]any{"since": "last tuesday"},
+	}})
+	if !result.IsError || !strings.Contains(resultText(t, result), "not a YYYY-MM-DD") {
+		t.Fatalf("expected a since date error, got %s", resultText(t, result))
+	}
+}
+
+// Work item sources are already scoped to their area paths, and work items
+// aren't searched by date — neither is a work item filter.
+func TestWorkItemSearchRejectsAreaPathAndDateFilters(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+
+	for _, f := range []string{"area_path", "since", "until"} {
+		result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+			"mode": "semantic_search", "query": "x", "page": float64(1),
+			"filters": map[string]any{f: "2024-01-01"},
+		}})
+		if !result.IsError || !strings.Contains(resultText(t, result), "unknown filter") {
+			t.Errorf("filter %q: expected an unknown filter error, got %s", f, resultText(t, result))
+		}
+	}
+}
+
+func TestPatternSearchFiltersArePlumbedToQdrant(t *testing.T) {
+	qd := &fakeQdrant{}
+	s, ctx := setup(t, qd, nil)
+
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "NullReference", "page": float64(1),
+		"filters": map[string]any{"iteration_path": "Payments/Sprint 3", "state": "Active"},
+	}})
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", resultText(t, result))
+	}
+
+	qd.mu.Lock()
+	body := qd.lastScrollBody
+	qd.mu.Unlock()
+	filter, _ := body["filter"].(map[string]any)
+	must, _ := filter["must"].([]any)
+	if len(must) != 2 {
+		t.Fatalf("scroll filter.must = %v, want 2 conditions", must)
+	}
+	iter := must[0].(map[string]any)
+	if iter["key"] != "f_iteration_path" || iter["match"].(map[string]any)["value"] != `payments\sprint 3` {
+		t.Errorf("iteration condition = %v, want f_iteration_path = %q", iter, `payments\sprint 3`)
+	}
+}
+
+func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
+	s, ctx := setup(t, &fakeQdrant{}, nil)
+	resp := s.HandleMessage(ctx, []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+	data, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct {
+		Result struct {
+			Tools []struct {
+				Name        string         `json:"name"`
+				InputSchema map[string]any `json:"inputSchema"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(data, &list); err != nil {
+		t.Fatal(err)
+	}
+	filterProps := func(tool string) map[string]any {
+		for _, tl := range list.Result.Tools {
+			if tl.Name != tool {
+				continue
+			}
+			req := tl.InputSchema["properties"].(map[string]any)["request"].(map[string]any)
+			semantic := req["oneOf"].([]any)[0].(map[string]any)
+			filters := semantic["properties"].(map[string]any)["filters"].(map[string]any)
+			return filters["properties"].(map[string]any)
+		}
+		t.Fatalf("tool %s not registered", tool)
+		return nil
+	}
+
+	commit := filterProps("search_commit")
+	for _, f := range []string{"project", "repository", "author", "path", "since", "until"} {
+		if _, ok := commit[f]; !ok {
+			t.Errorf("search_commit missing filter %q", f)
+		}
+	}
+	if _, ok := commit["state"]; ok {
+		t.Error("search_commit must not offer the work item filter \"state\"")
+	}
+	// Only one branch is ever embedded per source, so branch isn't a filter.
+	for _, tool := range []string{"search_commit", "search_source_code", "search_requirement"} {
+		if _, ok := filterProps(tool)["branch"]; ok {
+			t.Errorf("%s must not offer a branch filter", tool)
+		}
+	}
+	workItem := filterProps("search_workitem")
+	if _, ok := workItem["repository"]; ok {
+		t.Error("search_workitem must not offer the repo filter \"repository\"")
+	}
+	for _, tl := range list.Result.Tools {
+		if strings.Contains(fmt.Sprint(tl.InputSchema), "source_name") {
+			t.Errorf("tool %s still exposes source_name", tl.Name)
+		}
 	}
 }
 
@@ -778,34 +928,6 @@ func TestSearchToolPatternSearchClampsNonPositivePageToOne(t *testing.T) {
 	}
 	if payload.Page != 1 {
 		t.Errorf("page = %d, want clamped to 1", payload.Page)
-	}
-}
-
-func TestSearchToolPatternSearchSourceNameFilterIsPlumbedToQdrant(t *testing.T) {
-	qd := &fakeQdrant{}
-	s, ctx := setup(t, qd, nil)
-
-	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
-		"mode": "pattern_search", "pattern": "FooBar", "source_name": "my-source", "page": float64(1),
-	}})
-	if result.IsError {
-		t.Fatalf("unexpected error result: %s", resultText(t, result))
-	}
-
-	qd.mu.Lock()
-	body := qd.lastScrollBody
-	qd.mu.Unlock()
-	filter, ok := body["filter"].(map[string]any)
-	if !ok {
-		t.Fatalf("filter missing or wrong shape in scroll body: %+v", body)
-	}
-	must, ok := filter["must"].([]any)
-	if !ok || len(must) != 1 {
-		t.Fatalf("must = %v, want 1 condition for source_name", filter["must"])
-	}
-	cond := must[0].(map[string]any)
-	if cond["key"] != models.TagKey("source_name") {
-		t.Errorf("must key = %v, want %v", cond["key"], models.TagKey("source_name"))
 	}
 }
 

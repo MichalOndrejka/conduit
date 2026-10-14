@@ -102,8 +102,9 @@ type adoChangeItem struct {
 }
 
 type adoChange struct {
-	ChangeType string        `json:"changeType"`
-	Item       adoChangeItem `json:"item"`
+	ChangeType       string        `json:"changeType"`
+	Item             adoChangeItem `json:"item"`
+	SourceServerItem string        `json:"sourceServerItem"` // a rename's original path
 }
 
 type adoChangesResponse struct {
@@ -149,12 +150,13 @@ func (a *APISource) fetchCommitChanges(ctx context.Context, client *http.Client,
 	}
 }
 
-// fetchCommitDiff builds a unified diff of every file changed by commitID.
-// Any file that can't be fetched fails the whole commit.
-func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, repoBase, commitID string) (diffText string, filesChanged int, err error) {
+// fetchCommitDiff builds a unified diff of every file changed by commitID,
+// and lists the changed file paths (a rename's original path included). Any
+// file that can't be fetched fails the whole commit.
+func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, repoBase, commitID string) (diffText string, filesChanged int, paths []string, err error) {
 	changes, err := a.fetchCommitChanges(ctx, client, repoBase, commitID)
 	if err != nil {
-		return "", 0, err
+		return "", 0, nil, err
 	}
 
 	var b strings.Builder
@@ -166,13 +168,17 @@ func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, re
 		if c.Item.Path == "" || strings.EqualFold(c.ChangeType, "none") || c.Item.IsFolder || strings.EqualFold(c.Item.GitObjectType, "tree") {
 			continue
 		}
+		paths = append(paths, c.Item.Path)
+		if c.SourceServerItem != "" && c.SourceServerItem != c.Item.Path {
+			paths = append(paths, c.SourceServerItem)
+		}
 		fileDiff, err := a.fileDiff(ctx, client, repoBase, c)
 		if err != nil {
-			return "", 0, fmt.Errorf("diffing %s: %w", c.Item.Path, err)
+			return "", 0, nil, fmt.Errorf("diffing %s: %w", c.Item.Path, err)
 		}
 		b.WriteString(fileDiff)
 	}
-	return b.String(), len(changes), nil
+	return b.String(), len(changes), paths, nil
 }
 
 // fileDiff fetches old/new blob content for one changed file and returns its

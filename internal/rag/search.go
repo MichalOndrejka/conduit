@@ -52,7 +52,7 @@ func (s *SearchService) excludedSourceIDs() []string {
 // Search returns up to pageSize ranked matches for page (1-based; values
 // below 1 are treated as 1). hasMore reports whether a further page exists.
 func (s *SearchService) Search(
-	ctx context.Context, collection, query string, page int, tags map[string]string,
+	ctx context.Context, collection, query string, page int, must []FieldCondition,
 ) (results []models.SearchResult, hasMore bool, err error) {
 	if page < 1 {
 		page = 1
@@ -62,7 +62,7 @@ func (s *SearchService) Search(
 		return nil, false, err
 	}
 	offset := (page - 1) * pageSize
-	points, err := s.store.Search(ctx, collection, vector, pageSize+1, offset, tags, s.excludedSourceIDs())
+	points, err := s.store.Search(ctx, collection, vector, pageSize+1, offset, must, s.excludedSourceIDs())
 	if err != nil {
 		return nil, false, err
 	}
@@ -127,12 +127,12 @@ const patternScrollBatch = 200
 // without collecting enough matches to answer the current page with
 // certainty — the caller should say so rather than claim hasMore is false.
 func (s *SearchService) PatternSearch(
-	ctx context.Context, collection string, match func(string) bool, page int, tags map[string]string,
+	ctx context.Context, collection string, match func(string) bool, page int, must []FieldCondition,
 ) (results []models.SearchResult, hasMore, truncated bool, err error) {
 	if page < 1 {
 		page = 1
 	}
-	filter := buildFilter(tags, s.excludedSourceIDs())
+	filter := buildFilter(must, s.excludedSourceIDs())
 	need := page*pageSize + 1
 
 	var matches []models.SearchResult

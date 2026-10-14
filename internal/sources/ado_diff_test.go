@@ -106,7 +106,7 @@ func TestFetchCommitDiffEditedFile(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(map[string]string{"Url": srv.URL + "/_apis/git/repositories/repo/commits"})}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "abc123")
+	diffText, filesChanged, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "abc123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestFetchCommitDiffAddedAndDeletedFile(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
+	diffText, filesChanged, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +168,7 @@ func TestFetchCommitDiffSkipsFolderChanges(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
+	diffText, filesChanged, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +202,7 @@ func TestFetchCommitDiffIncludesEveryFileAcrossChangesPages(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
+	diffText, filesChanged, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestFetchCommitDiffDiffsLargeTextFiles(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
+	diffText, _, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestFetchCommitDiffRecordsBinaryFiles(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
+	diffText, _, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}

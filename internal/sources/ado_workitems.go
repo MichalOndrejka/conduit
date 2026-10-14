@@ -242,15 +242,32 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 			}
 		}
 
+		project := fieldString(item.Fields, "System.TeamProject")
+		state := fieldString(item.Fields, "System.State")
+		area := fieldString(item.Fields, "System.AreaPath")
+		iteration := fieldString(item.Fields, "System.IterationPath")
 		props := map[string]string{
-			"title": title,
-			"type":  wiType,
-			"area":  fieldString(item.Fields, "System.AreaPath"),
+			"title":     title,
+			"type":      wiType,
+			"area":      area,
+			"project":   project,
+			"state":     state,
+			"iteration": iteration,
 		}
 		if webURL := a.workItemWebURL(item); webURL != "" {
 			props["web_url"] = webURL
 		}
+
+		var filters models.DocumentFilters
+		filters.Add(models.FilterProject, project)
+		filters.Add(models.FilterWorkItemType, wiType)
+		filters.Add(models.FilterState, state)
+		filters.Add(models.FilterIterationPath, iteration)
+		filters.Add(models.FilterAssignedTo, identityValues(item.Fields["System.AssignedTo"])...)
+		filters.Add(models.FilterTag, strings.Split(fieldString(item.Fields, "System.Tags"), ";")...)
+
 		docs = append(docs, models.SourceDocument{
+			Filters: filters,
 			ID:   fmt.Sprintf("%s_capi_%d", a.src.ID, item.ID),
 			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
 			Tags: map[string]string{

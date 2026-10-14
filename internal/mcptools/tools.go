@@ -31,17 +31,13 @@ type chunkQuery interface {
 // vector search, returning up to a page's worth of the most relevant matches
 // per call (see pageSize in internal/rag/search.go).
 type semanticSearchRequest struct {
-	Query      string
-	Page       int
-	SourceName string
+	Query   string
+	Page    int
+	Filters []rag.FieldCondition
 }
 
 func (q semanticSearchRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
-	var tags map[string]string
-	if q.SourceName != "" {
-		tags = map[string]string{"source_name": q.SourceName}
-	}
-	results, hasMore, err := search.Search(ctx, collection, q.Query, q.Page, tags)
+	results, hasMore, err := search.Search(ctx, collection, q.Query, q.Page, q.Filters)
 	if err != nil {
 		return nil, err
 	}
@@ -90,18 +86,14 @@ func (q retrieveChunkRequest) resolve(ctx context.Context, search *rag.SearchSer
 // same as semantic_search. Matcher is built once by parseChunkQuery so
 // resolve doesn't need to know whether Pattern is literal or regex.
 type patternSearchRequest struct {
-	Pattern    string
-	SourceName string
-	Page       int
-	Matcher    func(string) bool
+	Pattern string
+	Filters []rag.FieldCondition
+	Page    int
+	Matcher func(string) bool
 }
 
 func (q patternSearchRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
-	var tags map[string]string
-	if q.SourceName != "" {
-		tags = map[string]string{"source_name": q.SourceName}
-	}
-	results, hasMore, truncated, err := search.PatternSearch(ctx, collection, q.Matcher, q.Page, tags)
+	results, hasMore, truncated, err := search.PatternSearch(ctx, collection, q.Matcher, q.Page, q.Filters)
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +115,9 @@ func (q patternSearchRequest) resolve(ctx context.Context, search *rag.SearchSer
 }
 
 // parseChunkQuery decodes the required "request" argument into the concrete
-// chunkQuery its "mode" field selects.
-func parseChunkQuery(args map[string]any) (chunkQuery, error) {
+// chunkQuery its "mode" field selects; fields are the filters the calling
+// tool's collection supports.
+func parseChunkQuery(args map[string]any, fields []filterField) (chunkQuery, error) {
 	raw, ok := args["request"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf(`missing required "request" object argument`)
@@ -144,8 +137,11 @@ func parseChunkQuery(args map[string]any) (chunkQuery, error) {
 		if page < 1 {
 			page = 1
 		}
-		sourceName, _ := raw["source_name"].(string)
-		return semanticSearchRequest{Query: query, Page: page, SourceName: sourceName}, nil
+		filters, err := parseFilters(raw["filters"], fields)
+		if err != nil {
+			return nil, err
+		}
+		return semanticSearchRequest{Query: query, Page: page, Filters: filters}, nil
 	case "retrieve_chunk":
 		docID, ok := raw["source_doc_id"].(string)
 		if !ok || docID == "" {
@@ -169,7 +165,10 @@ func parseChunkQuery(args map[string]any) (chunkQuery, error) {
 		if page < 1 {
 			page = 1
 		}
-		sourceName, _ := raw["source_name"].(string)
+		filters, err := parseFilters(raw["filters"], fields)
+		if err != nil {
+			return nil, err
+		}
 		useRegex, _ := raw["regex"].(bool)
 		var matcher func(string) bool
 		if useRegex {
@@ -181,17 +180,18 @@ func parseChunkQuery(args map[string]any) (chunkQuery, error) {
 		} else {
 			matcher = func(text string) bool { return strings.Contains(text, pattern) }
 		}
-		return patternSearchRequest{Pattern: pattern, SourceName: sourceName, Page: page, Matcher: matcher}, nil
+		return patternSearchRequest{Pattern: pattern, Filters: filters, Page: page, Matcher: matcher}, nil
 	default:
 		return nil, fmt.Errorf(`request.mode must be "semantic_search", "retrieve_chunk", or "pattern_search", got %q`, mode)
 	}
 }
 
-// requestParamSchema is a discriminated union (JSON Schema oneOf) of the two
-// chunkQuery shapes above, keyed by a "mode" field.
-func requestParamSchema() map[string]any {
+// requestParamSchema is a discriminated union (JSON Schema oneOf) of the
+// three chunkQuery shapes above, keyed by a "mode" field; fields are the
+// filters the tool's collection supports.
+func requestParamSchema(fields []filterField) map[string]any {
 	return map[string]any{
-		"description": `Either a ranked semantic search or a deterministic fetch of one exact chunk by ID.`,
+		"description": `A ranked semantic search, an exact text/regex search, or a deterministic fetch of one exact chunk by ID.`,
 		"oneOf": []any{
 			map[string]any{
 				"type": "object",
@@ -200,7 +200,7 @@ func requestParamSchema() map[string]any {
 					"query": map[string]any{"type": "string", "description": "Natural-language search query"},
 					"page": map[string]any{"type": "number", "description": "Which page of ranked results to return, starting at 1 (the most relevant matches). " +
 						"Call again with a higher page number to see the next batch of matches if these aren't sufficient. Start with 1."},
-					"source_name": map[string]any{"type": "string", "description": "Optional: restrict results to a single source by name"},
+					"filters": filtersSchema(fields),
 				},
 				"required": []string{"mode", "query", "page"},
 			},
@@ -221,7 +221,7 @@ func requestParamSchema() map[string]any {
 					"pattern": map[string]any{"type": "string", "description": "Literal text to find, or a regular expression when regex is true"},
 					"regex": map[string]any{"type": "boolean", "description": "If true, interpret pattern as a Go RE2 regular expression instead " +
 						"of a literal substring. Defaults to false."},
-					"source_name": map[string]any{"type": "string", "description": "Optional: restrict results to a single source by name"},
+					"filters": filtersSchema(fields),
 					"page": map[string]any{"type": "number", "description": "Which page of matches to return, starting at 1 (the first matches found, in " +
 						"index order — not ranked). Call again with a higher page number to see the next batch of matches if these aren't sufficient. Start with 1."},
 				},
@@ -231,9 +231,9 @@ func requestParamSchema() map[string]any {
 	}
 }
 
-func withRequestParam() mcp.ToolOption {
+func withRequestParam(fields []filterField) mcp.ToolOption {
 	return func(t *mcp.Tool) {
-		t.InputSchema.Properties["request"] = requestParamSchema()
+		t.InputSchema.Properties["request"] = requestParamSchema(fields)
 		t.InputSchema.Required = append(t.InputSchema.Required, "request")
 	}
 }
@@ -258,16 +258,20 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		`to fetch the exact adjacent chunk. For an exact/deterministic text or regex match — e.g. finding all usages ` +
 		`of a method or identifier — pass request={"mode":"pattern_search","pattern":...,"page":1} ` +
 		`(add "regex":true to treat pattern as a Go RE2 regular expression); page through further matches the ` +
-		`same way as semantic_search. When a result has properties.web_url, it is the browser link to the ` +
+		`same way as semantic_search. Both search modes accept an optional "filters" object to narrow results by ` +
+		`source-system fields — e.g. "filters":{"project":"Payments","repository":"api"} — see the schema for ` +
+		`the fields this tool supports; result properties (project, repository, state, …) show the values ` +
+		`available. When a result has properties.web_url, it is the browser link to the ` +
 		`source item (work item, file, commit, wiki page) — cite it as a markdown link, e.g. [title](web_url), ` +
 		`whenever you reference that result in an answer.`
 	makeSearchTool := func(collection, name, description string) {
+		fields := collectionFilters[collection]
 		tool := mcp.NewTool(name,
 			mcp.WithDescription(description+requestModeNote),
-			withRequestParam(),
+			withRequestParam(fields),
 		)
 		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			query, err := parseChunkQuery(req.GetArguments())
+			query, err := parseChunkQuery(req.GetArguments(), fields)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -285,10 +289,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 
 	makeSearchTool(models.CollectionWorkItems, "search_workitem",
 		"Semantic search over work items (bugs, tasks, defects). "+
-			"Optionally filter by source_name to target a specific source.")
+			"Filter by project, type, state, iteration path, assignee or tags.")
 	makeSearchTool(models.CollectionRequirements, "search_requirement",
-		"Semantic search over requirements (features, user stories, epics). "+
-			"Optionally filter by source_name to target a specific source.")
+		"Semantic search over requirements (features, user stories, epics).")
 	makeSearchTool(models.CollectionSourceCode, "search_source_code",
 		"Semantic search over production source code (classes, methods, functions). "+
 			"Does not include test files — use search_test_code for tests.")
@@ -300,7 +303,8 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	makeSearchTool(models.CollectionDocumentation, "search_documentation",
 		"Semantic search over wiki pages, repo documentation and uploaded documents.")
 	makeSearchTool(models.CollectionCommits, "search_commit",
-		"Semantic search over git commit history — messages, authors and change summaries.")
+		"Semantic search over git commit history — each commit's message, author and complete code diff. "+
+			"Filter by project, repository, author, changed path or author date.")
 
 	// ── Experience tools ───────────────────────────────────────────────────
 

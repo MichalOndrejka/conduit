@@ -93,6 +93,9 @@ type SourceDocument struct {
 	Text       string            `json:"text"`
 	Tags       map[string]string `json:"tags"`
 	Properties map[string]string `json:"properties"`
+	// Filters holds the document's filterable categories (see filters.go),
+	// copied onto every chunk at index time.
+	Filters DocumentFilters `json:"-"`
 }
 
 type TextChunk struct {

@@ -56,13 +56,23 @@ type Filter struct {
 	MustNot []FieldCondition `json:"must_not,omitempty"`
 }
 
+// FieldCondition is one Qdrant field condition: a Match (exact value, or any
+// of several values) or a numeric Range — exactly one of the two is set.
 type FieldCondition struct {
 	Key   string `json:"key"`
-	Match Match  `json:"match"`
+	Match Match  `json:"match,omitzero"`
+	Range *Range `json:"range,omitempty"`
 }
 
 type Match struct {
-	Value any `json:"value"`
+	Value any      `json:"value,omitempty"`
+	Any   []string `json:"any,omitempty"`
+}
+
+// Range bounds a numeric payload field (inclusive); nil bounds are open.
+type Range struct {
+	Gte *float64 `json:"gte,omitempty"`
+	Lte *float64 `json:"lte,omitempty"`
 }
 
 // TagFilter mirrors _build_filter in app/rag/vector_store.py.
@@ -251,13 +261,17 @@ func (v *VectorStore) Upsert(ctx context.Context, collection string, points []Po
 	return v.do(ctx, http.MethodPut, "/collections/"+collection+"/points?wait=true", body, nil)
 }
 
-// buildFilter combines a tag filter with a must_not exclusion on source_id —
-// excludeSourceIDs, if non-empty, excludes points tagged with any of those
-// source IDs, used to keep disabled sources out of results without deleting
-// their vectors (they reappear immediately if the source is re-enabled, no
-// re-sync needed). Shared by VectorStore.Search and SearchService.PatternSearch.
-func buildFilter(tags map[string]string, excludeSourceIDs []string) *Filter {
-	f := TagFilter(tags)
+// buildFilter combines the caller's must conditions with a must_not exclusion
+// on source_id — excludeSourceIDs, if non-empty, excludes points tagged with
+// any of those source IDs, used to keep disabled sources out of results
+// without deleting their vectors (they reappear immediately if the source is
+// re-enabled, no re-sync needed). Shared by VectorStore.Search and
+// SearchService.PatternSearch.
+func buildFilter(must []FieldCondition, excludeSourceIDs []string) *Filter {
+	var f *Filter
+	if len(must) > 0 {
+		f = &Filter{Must: must}
+	}
 	if len(excludeSourceIDs) > 0 {
 		if f == nil {
 			f = &Filter{}
@@ -270,7 +284,7 @@ func buildFilter(tags map[string]string, excludeSourceIDs []string) *Filter {
 }
 
 func (v *VectorStore) Search(
-	ctx context.Context, collection string, vector []float32, limit, offset int, tags map[string]string, excludeSourceIDs []string,
+	ctx context.Context, collection string, vector []float32, limit, offset int, must []FieldCondition, excludeSourceIDs []string,
 ) ([]ScoredPoint, error) {
 	body := map[string]any{
 		"query":        vector,
@@ -280,7 +294,7 @@ func (v *VectorStore) Search(
 	if offset > 0 {
 		body["offset"] = offset
 	}
-	if f := buildFilter(tags, excludeSourceIDs); f != nil {
+	if f := buildFilter(must, excludeSourceIDs); f != nil {
 		body["filter"] = f
 	}
 	var resp struct {
