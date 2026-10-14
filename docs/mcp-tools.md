@@ -131,6 +131,29 @@ remember(situation="Deploying to staging", guidance="Always run the DB migration
 
 ---
 
+## Sync tool
+
+### `sync_sources`
+
+Starts syncs and reports sync status, so an agent can refresh a source before relying on its search results.
+
+```
+sync_sources(request: { mode: "status", source_ids?: [str] })
+sync_sources(request: { mode: "trigger", source_ids: [str] })
+```
+
+- **`status`** lists every source (or just `source_ids`) with `id`, `name`, `type`, `disabled`, `sync_status` (`idle`, `syncing`, `completed`, `failed`), `last_synced_at`, `sync_error` / `sync_error_phase` when the last sync failed, and live `progress` (`phase`, `current`, `total`) while a sync runs. IDs that match no source are listed under `not_found`. Source config is never returned.
+- **`trigger`** starts the given sources syncing in the background (at most 4 at once, same as **Sync selected** in the UI) and returns immediately with one outcome per ID: `started`, `already_syncing`, `disabled` or `not_found`. Poll `status` until `sync_status` is `completed` or `failed`.
+
+```
+sync_sources(request={"mode":"trigger","source_ids":["a1b2"]})
+→ { "outcomes": { "a1b2": "started" } }
+```
+
+The tool can't yet tell whether a source is out of date with its upstream system; `last_synced_at` is the only freshness signal.
+
+---
+
 ## Usage patterns
 
 **Start of every task:** `retrieve_experience` → search tools for context → do the work → `remember` anything learned.

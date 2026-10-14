@@ -53,6 +53,13 @@ func New(
 func (s *Service) Progress() *syncctl.ProgressStore { return s.progress }
 func (s *Service) Control() *syncctl.ControlStore   { return s.control }
 
+// IsSyncing reports whether a sync of sourceID is running right now.
+func (s *Service) IsSyncing(sourceID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.inflight[sourceID]
+}
+
 // Sync runs the full pipeline for one source. Mirrors SyncService.sync.
 // A no-op if a sync for this source is already running.
 func (s *Service) Sync(ctx context.Context, sourceID string) {

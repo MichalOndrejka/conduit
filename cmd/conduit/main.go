@@ -70,6 +70,7 @@ func main() {
 	// ── MCP server (streamable HTTP at /mcp) ───────────────────────────────
 	mcpServer := server.NewMCPServer("Conduit", version)
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
+	mcptools.RegisterSyncTool(mcpServer, sourceStore, syncSvc)
 	mcpHTTP := server.NewStreamableHTTPServer(mcpServer, server.WithEndpointPath("/mcp"))
 
 	// ── HTTP wiring ─────────────────────────────────────────────────────────
