@@ -68,6 +68,10 @@ type wiqlResponse struct {
 type workItemBatchItem struct {
 	ID     int            `json:"id"`
 	Fields map[string]any `json:"fields"`
+	// Links holds the item's _links; "html" is its browser (UI) page.
+	Links map[string]struct {
+		Href string `json:"href"`
+	} `json:"_links"`
 }
 
 type workItemBatchResponse struct {
@@ -183,8 +187,9 @@ func (a *APISource) workItemsBatch(ctx context.Context, client *http.Client, org
 		// Request every field (system + custom) via $expand rather than a
 		// fixed allowlist — the workitemsbatch endpoint returns only the named
 		// fields when "fields" is set, dropping any custom project/org field.
-		// "$expand" and "fields" are mutually exclusive on this endpoint; the
-		// relations/links "all" also returns are ignored (we only read Fields).
+		// "$expand" and "fields" are mutually exclusive on this endpoint; of
+		// the relations/links "all" also returns, only _links.html (the web
+		// page) is read.
 		reqBody, err := json.Marshal(map[string]any{"ids": chunk, "$expand": "all"})
 		if err != nil {
 			return nil, err
@@ -237,6 +242,14 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 			}
 		}
 
+		props := map[string]string{
+			"title": title,
+			"type":  wiType,
+			"area":  fieldString(item.Fields, "System.AreaPath"),
+		}
+		if webURL := a.workItemWebURL(item); webURL != "" {
+			props["web_url"] = webURL
+		}
 		docs = append(docs, models.SourceDocument{
 			ID:   fmt.Sprintf("%s_capi_%d", a.src.ID, item.ID),
 			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
@@ -244,14 +257,24 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 				"source_id":   a.src.ID,
 				"source_name": a.src.Name,
 			},
-			Properties: map[string]string{
-				"title": title,
-				"type":  wiType,
-				"area":  fieldString(item.Fields, "System.AreaPath"),
-			},
+			Properties: props,
 		})
 	}
 	return docs
+}
+
+// workItemWebURL returns item's browser link: the html link ADO returns with
+// $expand=all, else one built from the configured organization and the
+// item's own project (which may differ from AdoProject for moved items).
+func (a *APISource) workItemWebURL(item workItemBatchItem) string {
+	if link := item.Links["html"].Href; isWebURL(link) {
+		return link
+	}
+	project := fieldString(item.Fields, "System.TeamProject")
+	if project == "" {
+		project = a.src.GetConfig("AdoProject")
+	}
+	return adoWorkItemWebURL(a.src.GetConfig("AdoOrg"), project, item.ID)
 }
 
 var (

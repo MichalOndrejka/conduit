@@ -137,8 +137,10 @@ docker run -d --name conduit -p 8000:8000 \
 
 The volume at `/data` (`CONDUIT_DATA_DIR=/data`) persists sources, config, and
 credentials across restarts. `host.docker.internal` reaches services running
-on the host; point `QDRANT_URL`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL`
-at wherever those services actually run instead (another container, a remote
+on the host, and is also what the Settings page pre-fills on first start when
+Conduit detects it's in a container (instead of `localhost`). On Linux hosts,
+add `--add-host=host.docker.internal:host-gateway` for that name to resolve.
+Point `QDRANT_URL`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL` at wherever those services actually run instead (another container, a remote
 host, etc.) — or leave them out and configure the connections
 from the **Settings** page after the container starts.
 

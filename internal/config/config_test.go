@@ -14,7 +14,45 @@ func useConfigFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "config.json")
 	t.Setenv("CONDUIT_CONFIG", path)
+	// Pin host detection so localhost defaults hold even when the tests
+	// themselves run inside a container (e.g. CI).
+	t.Setenv("CONDUIT_IN_CONTAINER", "0")
 	return path
+}
+
+func TestLoadDefaultsInContainerPointAtDockerHost(t *testing.T) {
+	useConfigFile(t)
+	t.Setenv("CONDUIT_IN_CONTAINER", "1")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Qdrant.URL != "http://host.docker.internal:6333" {
+		t.Errorf("Qdrant.URL = %q, want host.docker.internal default", cfg.Qdrant.URL)
+	}
+	if cfg.Embedding.BaseURL != "http://host.docker.internal:11434/v1" {
+		t.Errorf("Embedding.BaseURL = %q, want host.docker.internal default", cfg.Embedding.BaseURL)
+	}
+	if cfg.Preprocessing.BaseURL != "http://host.docker.internal:11434/v1" {
+		t.Errorf("Preprocessing.BaseURL = %q, want host.docker.internal default", cfg.Preprocessing.BaseURL)
+	}
+}
+
+func TestLoadInContainerKeepsSavedURLs(t *testing.T) {
+	path := useConfigFile(t)
+	t.Setenv("CONDUIT_IN_CONTAINER", "1")
+	if err := os.WriteFile(path, []byte(`{"qdrant":{"url":"http://qdrant:6333"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Qdrant.URL != "http://qdrant:6333" {
+		t.Errorf("Qdrant.URL = %q, want saved value to win over container default", cfg.Qdrant.URL)
+	}
 }
 
 func TestLoadDefaultsWhenNoConfigFile(t *testing.T) {

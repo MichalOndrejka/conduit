@@ -26,5 +26,7 @@ COPY --from=build --chown=65532:65532 /app-empty /app
 
 VOLUME /data
 ENV CONDUIT_DATA_DIR=/data
+# First-run Settings defaults point at host.docker.internal instead of localhost
+ENV CONDUIT_IN_CONTAINER=1
 EXPOSE 8000
 ENTRYPOINT ["/conduit"]

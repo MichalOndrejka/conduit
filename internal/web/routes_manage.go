@@ -64,7 +64,7 @@ func labelForType(t string) string {
 var apiConfigKeys = []string{
 	"Url", "HttpMethod", "Body", "Headers", "AuthType",
 	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
-	"ItemsPath", "IdField", "TitleField", "ContentFields",
+	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
 	"MaxFilesPerCommit", "MaxDiffChars", "Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
 	"FetchMode",

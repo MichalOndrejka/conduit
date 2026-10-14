@@ -2,6 +2,8 @@
 
 Conduit stores its runtime configuration in `config.json` (location controlled by `CONDUIT_CONFIG` env var). All settings are also editable via the **Settings** page in the web UI.
 
+The `localhost` URL defaults below become `host.docker.internal` when Conduit runs in a container (detected via `CONDUIT_IN_CONTAINER`, which the Docker image sets, or `/.dockerenv` / `/run/.containerenv`). Defaults only fill fields absent from `config.json`; saved values and env-var overrides always win.
+
 ## Full schema
 
 ```json

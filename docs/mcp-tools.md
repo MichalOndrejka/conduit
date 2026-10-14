@@ -45,7 +45,7 @@ Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If 
       "score": 0.87,
       "text": "Work Item 12345: Fix login timeout...",
       "tags": { "source_name": "My ADO Source", "state": "Active" },
-      "properties": { "title": "Fix login timeout", "url": "https://..." },
+      "properties": { "title": "Fix login timeout", "web_url": "https://dev.azure.com/org/proj/_workitems/edit/12345" },
       "source_doc_id": "source_id_wi_12345",
       "chunk_index": 0,
       "total_chunks": 3,

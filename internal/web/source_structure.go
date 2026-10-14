@@ -40,7 +40,7 @@ func buildDocSummaries(points []rag.ScrolledPoint) []docSummary {
 		if title == "" {
 			title = docID
 		}
-		url, _ := p.Payload[models.PropKey("url")].(string)
+		url, _ := p.Payload[models.PropKey("web_url")].(string)
 		typ, _ := p.Payload[models.PropKey("type")].(string)
 		area, _ := p.Payload[models.PropKey("area")].(string)
 		filesChanged, _ := p.Payload[models.PropKey("files_changed")].(string)

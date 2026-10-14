@@ -258,7 +258,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		`to fetch the exact adjacent chunk. For an exact/deterministic text or regex match — e.g. finding all usages ` +
 		`of a method or identifier — pass request={"mode":"pattern_search","pattern":...,"page":1} ` +
 		`(add "regex":true to treat pattern as a Go RE2 regular expression); page through further matches the ` +
-		`same way as semantic_search.`
+		`same way as semantic_search. When a result has properties.web_url, it is the browser link to the ` +
+		`source item (work item, file, commit, wiki page) — cite it as a markdown link, e.g. [title](web_url), ` +
+		`whenever you reference that result in an answer.`
 	makeSearchTool := func(collection, name, description string) {
 		tool := mcp.NewTool(name,
 			mcp.WithDescription(description+requestModeNote),

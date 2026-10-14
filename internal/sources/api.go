@@ -17,6 +17,11 @@
 //	IdField        item field used for stable document IDs (default: position)
 //	TitleField     item field used as the document title (default "title")
 //	ContentFields  comma-separated fields to index (default: all fields)
+//	WebUrlField    dot-path to the item's browser (UI) link, stored as the
+//	               web_url property (default: the first of _links.html.href,
+//	               _links.web.href, remoteUrl, webUrl, html_url, web_url;
+//	               ADO repo files and commits fall back to a link built
+//	               from Url)
 //	NextUrlPath    dot-path to a full next-page URL in the response (pagination)
 //	Top            max items to fetch across all pages (default: unlimited —
 //	               every item the source has is fetched)
@@ -525,6 +530,10 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 			}
 		}
 
+		props := map[string]string{"title": title}
+		if webURL := a.webURL(item, url, idField); webURL != "" {
+			props["web_url"] = webURL
+		}
 		docs = append(docs, models.SourceDocument{
 			ID:   docID,
 			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
@@ -532,13 +541,26 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 				"source_id":   a.src.ID,
 				"source_name": a.src.Name,
 			},
-			Properties: map[string]string{
-				"title": title,
-				"url":   url,
-			},
+			Properties: props,
 		})
 	}
 	return docs
+}
+
+// webURL returns item's browser link: one the item carries itself, else one
+// built from the ADO API url it was listed from (repo files and commits,
+// whose list responses carry no web link of their own).
+func (a *APISource) webURL(item any, url, idField string) string {
+	if link := itemWebURL(item, a.src.GetConfig("WebUrlField")); link != "" {
+		return link
+	}
+	switch {
+	case isFileContentType(a.src):
+		return adoFileWebURL(url, fieldString(item, "path"))
+	case a.src.Type == models.SourceGitCommits:
+		return adoCommitWebURL(url, fieldString(item, idField))
+	}
+	return ""
 }
 
 // ── JSON helpers (ports of _navigate/_field in custom_api.py) ───────────────

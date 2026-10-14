@@ -23,6 +23,7 @@ Fetches from any endpoint that returns JSON. Configured via `internal/sources/ap
 | Items path | `ItemsPath` | Dot-notation path into the response JSON to the array of items, e.g. `value` or `data.records`. Leave empty if the root is the array. |
 | ID field | `IdField` | Item field used to build stable document IDs. Defaults to the item's position in the response. |
 | Title field | `TitleField` | Field used as the document title. Defaults to `title`. |
+| Web URL field | `WebUrlField` | Dot-notation path to the item's browser (UI) link, stored as the `web_url` property that search results cite. Defaults to the first of `_links.html.href`, `_links.web.href`, `remoteUrl`, `webUrl`, `html_url`, `web_url` present on the item (API URLs containing `/_apis/` are ignored). Azure DevOps repo files and commits without one get a link built from `Url`. |
 | Content fields | `ContentFields` | Comma-separated field names to include in the document body. Leave empty to include every field except the title field. |
 | Next page path | `NextUrlPath` | Dot-notation path to a full next-page URL in the response, for pagination. |
 | Top | `Top` | Maximum items to fetch across all pages. Default: unlimited (every item the source has, up to 50 pages). |

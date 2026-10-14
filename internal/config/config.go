@@ -44,19 +44,46 @@ type AppConfig struct {
 	SourcesFilePath string              `json:"sources_file_path"`
 }
 
+// inContainer reports whether Conduit is running inside a container. The
+// Dockerfile sets CONDUIT_IN_CONTAINER=1; the marker files cover images built
+// elsewhere (/.dockerenv for Docker, /run/.containerenv for Podman).
+func inContainer() bool {
+	if v := os.Getenv("CONDUIT_IN_CONTAINER"); v != "" {
+		b, err := strconv.ParseBool(v)
+		return err == nil && b
+	}
+	for _, p := range []string{"/.dockerenv", "/run/.containerenv"} {
+		if _, err := os.Stat(p); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// defaultHost is where Qdrant/Ollama are assumed to run on first start:
+// the host machine. Inside a container localhost is the container itself,
+// so point at the host via Docker's host.docker.internal alias instead.
+func defaultHost() string {
+	if inContainer() {
+		return "host.docker.internal"
+	}
+	return "localhost"
+}
+
 func defaults() AppConfig {
+	host := defaultHost()
 	return AppConfig{
 		Embedding: EmbeddingConfig{
 			Model:          "nomic-embed-text-v2-moe",
-			BaseURL:        "http://localhost:11434/v1",
+			BaseURL:        "http://" + host + ":11434/v1",
 			Dimensions:     768,
 			MaxInputTokens: 8192,
 			Concurrency:    4,
 		},
-		Qdrant:   QdrantConfig{URL: "http://localhost:6333"},
+		Qdrant:   QdrantConfig{URL: "http://" + host + ":6333"},
 		Chunking: ChunkingConfig{MaxChunkSize: 2000, Overlap: 200},
 		Preprocessing: PreprocessingConfig{
-			BaseURL:     "http://localhost:11434/v1",
+			BaseURL:     "http://" + host + ":11434/v1",
 			Concurrency: 4,
 			SourceTypes: map[string]bool{
 				"work-item": true, "requirements": true, "test-case": true,
