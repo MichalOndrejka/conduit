@@ -1,27 +1,34 @@
-// Azure DevOps commit-diff enrichment for APISource. ADO's Git REST API has
-// no single "get this commit as a patch" endpoint (unlike GitHub's
-// /commit/{sha}.diff), so a real diff has to be assembled client-side:
-// list the changed files for a commit, fetch each file's old/new blob text,
-// and diff them locally.
+// Azure DevOps commit enrichment for APISource. ADO's Git REST API has no
+// single "get this commit as a patch" endpoint (unlike GitHub's
+// /commit/{sha}.diff), so a real diff has to be assembled client-side: list
+// the changed files for a commit, fetch each file's old/new blob text, and
+// diff them locally.
+//
+// Enrichment is lossless by design: every changed file of every commit is
+// diffed in full, and anything that can't be fetched fails the sync rather
+// than being silently dropped or truncated.
 package sources
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/pmezard/go-difflib/difflib"
 )
 
 const (
-	defaultMaxDiffChars      = 20000
-	defaultMaxFilesPerCommit = 20
-	maxBlobFetchBytes        = 200 << 10 // skip diffing anything larger (likely binary/generated)
+	// maxRawResponseBytes bounds a single blob/changes/commit response. A
+	// response over it is an error, never silently truncated.
+	maxRawResponseBytes = 64 << 20
 
 	// adoCommitsPageSize is the page size requested per call when paging
 	// through Azure DevOps' commits-list endpoint (see withAdoCommitsPaging).
@@ -30,10 +37,21 @@ const (
 	// otherwise silently stop at without manual pagination.
 	adoCommitsPageSize = 100
 
+	// adoChangesPageSize is the page size requested per call when paging
+	// through a single commit's changed-files list.
+	adoChangesPageSize = 100
+
 	// defaultCommitsBranch is the branch a commit-history source reads from
 	// when Branch is left unset.
 	defaultCommitsBranch = "main"
+
+	maxFetchAttempts = 4
+	maxRetryAfter    = 30 * time.Second
 )
+
+// retryBaseDelay is the first retry's backoff, doubled per attempt. A var so
+// tests can shrink it.
+var retryBaseDelay = time.Second
 
 // withAdoCommitsPaging appends Azure DevOps' commits-list pagination
 // parameters (searchCriteria.$top/$skip) to a commits API URL. The endpoint
@@ -92,96 +110,86 @@ type adoChangesResponse struct {
 	Changes []adoChange `json:"changes"`
 }
 
-// fetchCommitDiff builds a unified diff of every file changed by commitID,
-// bounded by maxFiles and maxChars so a single pathological commit can't blow
-// up the embedded document.
-func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, repoBase, commitID string, maxFiles, maxChars int) (diffText string, filesChanged int, err error) {
-	changesURL := fmt.Sprintf("%s/commits/%s/changes?api-version=7.1", repoBase, commitID)
-	data, err := a.getRaw(ctx, client, changesURL)
+// fetchCommitComment fetches a single commit's full message. ADO's
+// commits-list endpoint truncates long messages (flagging commentTruncated);
+// the single-commit endpoint returns them whole.
+func (a *APISource) fetchCommitComment(ctx context.Context, client *http.Client, repoBase, commitID string) (string, error) {
+	data, err := a.getRaw(ctx, client, fmt.Sprintf("%s/commits/%s?api-version=7.1", repoBase, commitID))
+	if err != nil {
+		return "", err
+	}
+	var commit struct {
+		Comment string `json:"comment"`
+	}
+	if err := json.Unmarshal(data, &commit); err != nil {
+		return "", fmt.Errorf("commit response is not valid JSON: %w", err)
+	}
+	return commit.Comment, nil
+}
+
+// fetchCommitChanges lists every change in commitID, paging through ADO's
+// changes endpoint so large commits aren't cut off at one page.
+func (a *APISource) fetchCommitChanges(ctx context.Context, client *http.Client, repoBase, commitID string) ([]adoChange, error) {
+	var all []adoChange
+	for skip := 0; ; {
+		changesURL := fmt.Sprintf("%s/commits/%s/changes?top=%d&skip=%d&api-version=7.1", repoBase, commitID, adoChangesPageSize, skip)
+		data, err := a.getRaw(ctx, client, changesURL)
+		if err != nil {
+			return nil, err
+		}
+		var page adoChangesResponse
+		if err := json.Unmarshal(data, &page); err != nil {
+			return nil, fmt.Errorf("changes response is not valid JSON: %w", err)
+		}
+		all = append(all, page.Changes...)
+		if len(page.Changes) < adoChangesPageSize {
+			return all, nil
+		}
+		skip += len(page.Changes)
+	}
+}
+
+// fetchCommitDiff builds a unified diff of every file changed by commitID.
+// Any file that can't be fetched fails the whole commit.
+func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, repoBase, commitID string) (diffText string, filesChanged int, err error) {
+	changes, err := a.fetchCommitChanges(ctx, client, repoBase, commitID)
 	if err != nil {
 		return "", 0, err
 	}
-	var changes adoChangesResponse
-	if err := json.Unmarshal(data, &changes); err != nil {
-		return "", 0, fmt.Errorf("changes response is not valid JSON: %w", err)
-	}
-
-	filesChanged = len(changes.Changes)
-	limit := filesChanged
-	if maxFiles > 0 && limit > maxFiles {
-		limit = maxFiles
-	}
 
 	var b strings.Builder
-	processed := 0 // files actually accounted for (diffed, errored, or deliberately no-op)
-	for _, c := range changes.Changes[:limit] {
+	for _, c := range changes {
 		// Folder/tree entries show up in a commit's changes alongside real
 		// file changes (e.g. a commit that adds a new directory) but have no
 		// blob to diff — fetching one by its tree objectId as if it were a
 		// blob gets rejected by Azure DevOps with 400 Bad Request.
 		if c.Item.Path == "" || strings.EqualFold(c.ChangeType, "none") || c.Item.IsFolder || strings.EqualFold(c.Item.GitObjectType, "tree") {
-			processed++
 			continue
 		}
-		fileDiff, err := a.fileDiff(ctx, client, repoBase, c.Item.Path, c.Item.OriginalObjectID, c.Item.ObjectID)
-		processed++
+		fileDiff, err := a.fileDiff(ctx, client, repoBase, c)
 		if err != nil {
-			fmt.Fprintf(&b, "--- %s\n(diff unavailable: %v)\n\n", c.Item.Path, err)
-			continue
+			return "", 0, fmt.Errorf("diffing %s: %w", c.Item.Path, err)
 		}
 		b.WriteString(fileDiff)
-		if maxChars > 0 && b.Len() > maxChars {
-			break // maxChars cap hit — remaining files (if any) are reported as skipped below
-		}
 	}
-	diffText = b.String()
-	// Hard-truncate the diffed content itself first, then append the
-	// skipped/truncated trailer notes afterwards so a large diff body can
-	// never eat into (or cut off) the notes that follow it.
-	truncatedMidContent := false
-	if maxChars > 0 && len(diffText) > maxChars {
-		diffText = truncateRuneSafe(diffText, maxChars)
-		truncatedMidContent = true
-	}
-	if skipped := filesChanged - processed; skipped > 0 {
-		diffText += fmt.Sprintf("\n… %d more files changed (skipped)\n", skipped)
-	}
-	if truncatedMidContent {
-		diffText += "\n… (diff truncated)\n"
-	}
-	return diffText, filesChanged, nil
-}
-
-// truncateRuneSafe cuts s to at most maxBytes bytes without splitting a
-// multi-byte UTF-8 rune in half.
-func truncateRuneSafe(s string, maxBytes int) string {
-	if len(s) <= maxBytes {
-		return s
-	}
-	cut := s[:maxBytes]
-	for len(cut) > 0 {
-		r, size := utf8.DecodeLastRuneInString(cut)
-		if r != utf8.RuneError || size != 1 {
-			break
-		}
-		cut = cut[:len(cut)-1]
-	}
-	return cut
+	return b.String(), len(changes), nil
 }
 
 // fileDiff fetches old/new blob content for one changed file and returns its
-// unified diff. Either sha may be empty (add or delete).
-func (a *APISource) fileDiff(ctx context.Context, client *http.Client, repoBase, path, oldSHA, newSHA string) (string, error) {
-	oldText, oldSkipped, err := a.blobText(ctx, client, repoBase, oldSHA)
+// unified diff. Either sha may be empty (add or delete). Binary files can't be
+// embedded as text, so they're recorded by path and change type instead.
+func (a *APISource) fileDiff(ctx context.Context, client *http.Client, repoBase string, c adoChange) (string, error) {
+	path := c.Item.Path
+	oldText, err := a.blobText(ctx, client, repoBase, c.Item.OriginalObjectID)
 	if err != nil {
 		return "", err
 	}
-	newText, newSkipped, err := a.blobText(ctx, client, repoBase, newSHA)
+	newText, err := a.blobText(ctx, client, repoBase, c.Item.ObjectID)
 	if err != nil {
 		return "", err
 	}
-	if oldSkipped || newSkipped {
-		return fmt.Sprintf("--- %s\n(binary or large file skipped)\n\n", path), nil
+	if isBinary(oldText) || isBinary(newText) {
+		return fmt.Sprintf("--- %s\n(binary file, %s)\n\n", path, c.ChangeType), nil
 	}
 
 	diff := difflib.UnifiedDiff{
@@ -201,44 +209,89 @@ func (a *APISource) fileDiff(ctx context.Context, client *http.Client, repoBase,
 	return text + "\n", nil
 }
 
-// blobText fetches a blob's text content by SHA. An empty sha (add/delete
-// side) returns an empty string. skipped reports content too large to diff.
-func (a *APISource) blobText(ctx context.Context, client *http.Client, repoBase, sha string) (text string, skipped bool, err error) {
-	if sha == "" {
-		return "", false, nil
-	}
-	blobURL := fmt.Sprintf("%s/blobs/%s?api-version=7.1&$format=text", repoBase, sha)
-	data, err := a.getRaw(ctx, client, blobURL)
-	if err != nil {
-		return "", false, err
-	}
-	if len(data) > maxBlobFetchBytes {
-		return "", true, nil
-	}
-	return string(data), false, nil
+// isBinary reports whether blob content isn't diffable text.
+func isBinary(s string) bool {
+	return strings.IndexByte(s, 0) >= 0 || !utf8.ValidString(s)
 }
 
+// blobText fetches a blob's content by SHA. An empty sha (add/delete side)
+// returns an empty string.
+func (a *APISource) blobText(ctx context.Context, client *http.Client, repoBase, sha string) (string, error) {
+	if sha == "" {
+		return "", nil
+	}
+	data, err := a.getRaw(ctx, client, fmt.Sprintf("%s/blobs/%s?api-version=7.1&$format=text", repoBase, sha))
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// errRetryable marks a getRaw failure worth retrying (network error, 429,
+// 5xx); anything else (404, 401, …) fails immediately.
+var errRetryable = errors.New("retryable")
+
 // getRaw performs an authenticated GET and returns the raw response body,
-// reusing the source's existing auth/header/TLS configuration.
+// reusing the source's existing auth/header/TLS configuration. Transient
+// failures are retried with backoff, honouring Retry-After.
 func (a *APISource) getRaw(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	var lastErr error
+	for attempt := 0; attempt < maxFetchAttempts; attempt++ {
+		data, retryAfter, err := a.getRawOnce(ctx, client, url)
+		if err == nil {
+			return data, nil
+		}
+		if !errors.Is(err, errRetryable) || ctx.Err() != nil {
+			return nil, err
+		}
+		lastErr = err
+		if attempt == maxFetchAttempts-1 {
+			break
+		}
+		delay := retryBaseDelay << attempt
+		if retryAfter > 0 {
+			delay = retryAfter
+		}
+		select {
+		case <-time.After(delay):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, fmt.Errorf("giving up after %d attempts: %w", maxFetchAttempts, lastErr)
+}
+
+func (a *APISource) getRawOnce(ctx context.Context, client *http.Client, url string) (data []byte, retryAfter time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	a.applyAuth(req)
 	a.applyExtraHeaders(req)
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, 0, ctx.Err()
+		}
+		return nil, 0, fmt.Errorf("%w: %v", errRetryable, err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	data, err = io.ReadAll(io.LimitReader(resp.Body, maxRawResponseBytes+1))
 	if err != nil {
-		return nil, err
+		return nil, 0, fmt.Errorf("%w: reading %s: %v", errRetryable, url, err)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
+			retryAfter = min(time.Duration(s)*time.Second, maxRetryAfter)
+		}
+		return nil, retryAfter, fmt.Errorf("%w: HTTP %d from %s", errRetryable, resp.StatusCode, url)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return nil, 0, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
-	return data, nil
+	if len(data) > maxRawResponseBytes {
+		return nil, 0, fmt.Errorf("response from %s exceeds %d MB", url, maxRawResponseBytes>>20)
+	}
+	return data, 0, nil
 }

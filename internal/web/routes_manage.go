@@ -66,7 +66,7 @@ var apiConfigKeys = []string{
 	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
 	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
-	"MaxFilesPerCommit", "MaxDiffChars", "Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
+	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
 	"FetchMode",
 }
 
@@ -222,16 +222,6 @@ func validateSourceConfig(srcType string, cfg map[string]string) string {
 		if top := cfg["Top"]; top != "" {
 			if n, err := strconv.Atoi(top); err != nil || n <= 0 {
 				return "Max items must be a positive number."
-			}
-		}
-		if maxFiles := cfg["MaxFilesPerCommit"]; maxFiles != "" {
-			if n, err := strconv.Atoi(maxFiles); err != nil || n <= 0 {
-				return "Max files per commit must be a positive number."
-			}
-		}
-		if maxChars := cfg["MaxDiffChars"]; maxChars != "" {
-			if n, err := strconv.Atoi(maxChars); err != nil || n <= 0 {
-				return "Max diff chars must be a positive number."
 			}
 		}
 		if srcType == models.SourceGitCommits {

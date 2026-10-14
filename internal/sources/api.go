@@ -31,19 +31,20 @@
 //	               documentation sources only
 //
 //	For sources of type commit-history only, each item is automatically enriched
-//	with its real code diff, fetched from Azure DevOps' Git REST API — not
-//	user-configurable, and never applied to any other source type. Requires
-//	Url to be an ADO ".../_apis/git/repositories/{repo}/commits" endpoint;
-//	IdField defaults to "commitId" if unset. Since ADO's commits endpoint has
-//	no next-page link, more than one page (adoCommitsPageSize items) is
-//	fetched by paging manually via searchCriteria.$top/$skip until Top is
-//	reached or the repo runs out of commits.
+//	with its full commit message and complete code diff (every changed file,
+//	untruncated), fetched from Azure DevOps' Git REST API — not
+//	user-configurable, and never applied to any other source type. A commit
+//	that can't be fetched after retries fails the sync rather than being
+//	indexed partially. Requires Url to be an ADO
+//	".../_apis/git/repositories/{repo}/commits" endpoint; IdField defaults to
+//	"commitId" if unset. Since ADO's commits endpoint has no next-page link,
+//	more than one page (adoCommitsPageSize items) is fetched by paging
+//	manually via searchCriteria.$top/$skip until Top is reached or the repo
+//	runs out of commits.
 //	Branch             branch whose history is listed (default "main") —
 //	                   otherwise ADO's commits endpoint walks every branch,
 //	                   duplicating shared commits and pulling in stray
 //	                   feature-branch work.
-//	MaxFilesPerCommit  cap on changed files diffed per commit (default 20)
-//	MaxDiffChars       cap on total diff text per commit (default 20000)
 //
 //	For sources of type code or test-code, each item is automatically enriched
 //	with its real file content (in place of the raw JSON metadata), fetched
@@ -189,6 +190,11 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	// commit-history source silently stops at that page size regardless of
 	// its own Top setting.
 	paginateAdoCommits := cfg.Type == models.SourceGitCommits && cfg.GetConfig("NextUrlPath") == ""
+	if cfg.Type == models.SourceGitCommits {
+		if _, ok := AdoRepoAPIBase(url); !ok {
+			return nil, fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", url)
+		}
+	}
 	if paginateAdoCommits {
 		// Unfiltered, ADO's commits endpoint walks every branch's history,
 		// which duplicates commits shared with the default branch and pulls
@@ -201,9 +207,13 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		fetchURL = withAdoBranchFilter(fetchURL, branch)
 	}
 	skip := 0
+	lastPageFirstID := ""
 	var items []any
 	pageURL := fetchURL
-	for page := 0; page < maxPages && pageURL != "" && len(items) < top; page++ {
+	// maxPages guards against a cyclic NextUrlPath; ADO commit paging can't
+	// cycle (it stops on the first empty page), so it's exempt — capping it
+	// would silently drop the oldest commits of a long history.
+	for page := 0; (paginateAdoCommits || page < maxPages) && pageURL != "" && len(items) < top; page++ {
 		reqURL := pageURL
 		if paginateAdoCommits {
 			pageSize := adoCommitsPageSize
@@ -223,6 +233,16 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 			return nil, err
 		}
 		pageItems := resolveItems(data, itemsPath)
+		if paginateAdoCommits && page > 0 && len(pageItems) > 0 {
+			// Uncapped paging relies on $skip advancing; a server that ignores
+			// it would otherwise return the same page forever.
+			if first := fieldString(pageItems[0], "commitId"); first != "" && first == lastPageFirstID {
+				return nil, fmt.Errorf("commits endpoint returned the same page twice (commit %s) — it is ignoring searchCriteria.$skip", first)
+			}
+		}
+		if len(pageItems) > 0 {
+			lastPageFirstID = fieldString(pageItems[0], "commitId")
+		}
 		items = append(items, pageItems...)
 		pageURL = ""
 		if paginateAdoCommits {
@@ -266,106 +286,119 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	if len(items) > top {
 		items = items[:top]
 	}
-	docs := a.itemsToDocuments(items, url)
-	// Diff enrichment is automatic for commit-history sources only — never a
-	// user-configurable option, and never applied to any other source type
-	// (it previously ran for whatever source had FetchDiffs=true in its
-	// config, regardless of type).
+	// Commit enrichment is automatic for commit-history sources only — never
+	// a user-configurable option, and never applied to any other source type.
 	if cfg.Type == models.SourceGitCommits {
-		if err := a.enrichWithDiffs(ctx, client, url, items, docs, progress); err != nil {
-			return nil, err
-		}
+		return a.commitDocuments(ctx, client, url, items, progress)
 	}
-	return docs, nil
+	return a.itemsToDocuments(items, url), nil
 }
 
-// diffOutcome is one commit's enrichment result, computed off the main
+// commitOutcome is one commit's enrichment result, computed off the main
 // goroutine and applied to its document afterwards.
-type diffOutcome struct {
-	text         string
+type commitOutcome struct {
+	fullComment  string // set only when the listed comment was truncated
+	diff         string
 	filesChanged int
-	err          error
 }
 
-// enrichWithDiffs appends each commit's real code diff (fetched from Azure
-// DevOps) to its document text. items and docs must be the same length and
-// order, as produced by itemsToDocuments. Diffs are fetched with bounded
-// concurrency since each commit needs several sequential HTTP calls; a
-// single commit's diff failing (rate limit, deleted commit, …) is recorded
-// as a note on that document rather than failing the whole sync — the other
-// commits' documents are still worth keeping.
-func (a *APISource) enrichWithDiffs(ctx context.Context, client *http.Client, commitsURL string, items []any, docs []models.SourceDocument, progress ProgressCallback) error {
-	cfg := a.src
+// commitDocuments turns listed commits into documents, each carrying the
+// commit's full message and complete code diff fetched from Azure DevOps.
+// Commits are fetched with bounded concurrency since each needs several
+// sequential HTTP calls. Any commit that still can't be fetched after retries
+// fails the whole sync: indexing a partial result would silently miss
+// changes, whereas failing leaves the previous index intact.
+func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, commitsURL string, items []any, progress ProgressCallback) ([]models.SourceDocument, error) {
 	repoBase, ok := AdoRepoAPIBase(commitsURL)
 	if !ok {
-		return fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", commitsURL)
+		return nil, fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", commitsURL)
 	}
-	idField := cfg.GetConfig("IdField")
+	idField := a.src.GetConfig("IdField")
 	if idField == "" {
 		idField = "commitId" // Azure DevOps' commit list items always key their id this way
 	}
-	maxFiles := configInt(cfg, "MaxFilesPerCommit", defaultMaxFilesPerCommit)
-	maxChars := configInt(cfg, "MaxDiffChars", defaultMaxDiffChars)
 
 	n := len(items)
-	if len(docs) < n {
-		n = len(docs)
+	outcomes := make([]commitOutcome, n)
+
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg        sync.WaitGroup
+		mu        sync.Mutex
+		firstErr  error
+		completed int
+		sem       = make(chan struct{}, diffFetchConcurrency)
+	)
+	fail := func(err error) {
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+		}
+		mu.Unlock()
+		cancel()
 	}
-	outcomes := make([]diffOutcome, n)
 
-	var wg sync.WaitGroup
-	var progressMu sync.Mutex
-	completed := 0
-	sem := make(chan struct{}, diffFetchConcurrency)
-
-	for i := 0; i < n; i++ {
+	for i := 0; i < n && workCtx.Err() == nil; i++ {
 		commitID := fieldString(items[i], idField)
 		if commitID == "" {
-			continue // nothing to diff without a commit id; leave the zero-value outcome
+			fail(fmt.Errorf("commit item %d has no %q field", i, idField))
+			break
 		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int, commitID string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			text, filesChanged, err := a.fetchCommitDiff(ctx, client, repoBase, commitID, maxFiles, maxChars)
-			outcomes[i] = diffOutcome{text: text, filesChanged: filesChanged, err: err}
 
-			progressMu.Lock()
+			var out commitOutcome
+			if truncated, _ := navigate(items[i], "commentTruncated").(bool); truncated {
+				comment, err := a.fetchCommitComment(workCtx, client, repoBase, commitID)
+				if err != nil {
+					fail(fmt.Errorf("commit %s: fetching full message: %w", commitID, err))
+					return
+				}
+				out.fullComment = comment
+			}
+			diff, filesChanged, err := a.fetchCommitDiff(workCtx, client, repoBase, commitID)
+			if err != nil {
+				fail(fmt.Errorf("commit %s: %w", commitID, err))
+				return
+			}
+			out.diff, out.filesChanged = diff, filesChanged
+			outcomes[i] = out
+
+			mu.Lock()
 			completed++
 			if progress != nil {
 				progress(models.SyncProgress{
 					Phase: "fetching", Current: completed, Total: n,
-					Message: fmt.Sprintf("Fetching diff %d/%d", completed, n),
+					Message: fmt.Sprintf("Fetching commit %d/%d", completed, n),
 				})
 			}
-			progressMu.Unlock()
+			mu.Unlock()
 		}(i, commitID)
 	}
 	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
 
 	for i, out := range outcomes {
-		switch {
-		case out.err != nil:
-			docs[i].Text = strings.TrimSpace(docs[i].Text + fmt.Sprintf("\n\n(diff fetch failed: %v)", out.err))
-			docs[i].Properties["files_changed"] = "0"
-		case out.text != "":
-			docs[i].Text = strings.TrimSpace(docs[i].Text + "\n\n" + out.text)
-			docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
-		default:
-			docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
+		if m, ok := items[i].(map[string]any); ok && out.fullComment != "" {
+			m["comment"] = out.fullComment
+			delete(m, "commentTruncated")
 		}
 	}
-	return nil
-}
-
-func configInt(cfg *models.SourceDefinition, key string, def int) int {
-	if v := cfg.GetConfig(key); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			return n
+	docs := a.itemsToDocuments(items, commitsURL)
+	for i, out := range outcomes {
+		if out.diff != "" {
+			docs[i].Text = strings.TrimSpace(docs[i].Text + "\n\n" + out.diff)
 		}
+		docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
 	}
-	return def
+	return docs, nil
 }
 
 func (a *APISource) httpClient() *http.Client {

@@ -95,24 +95,3 @@ func TestValidateSourceConfigCodeRepoAcceptsAdoItemsURL(t *testing.T) {
 	}
 }
 
-func TestValidateSourceConfigMaxFilesPerCommitMustBePositive(t *testing.T) {
-	cfg := map[string]string{
-		"Provider":          "api",
-		"Url":               "https://api.example.com/items",
-		"MaxFilesPerCommit": "-1",
-	}
-	if msg := validateSourceConfig(models.SourceCodeRepo, cfg); msg == "" {
-		t.Error("expected an error for a non-positive MaxFilesPerCommit")
-	}
-}
-
-func TestValidateSourceConfigMaxDiffCharsMustBePositive(t *testing.T) {
-	cfg := map[string]string{
-		"Provider":     "api",
-		"Url":          "https://api.example.com/items",
-		"MaxDiffChars": "not-a-number",
-	}
-	if msg := validateSourceConfig(models.SourceCodeRepo, cfg); msg == "" {
-		t.Error("expected an error for a non-numeric MaxDiffChars")
-	}
-}

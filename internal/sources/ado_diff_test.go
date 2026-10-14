@@ -6,12 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
@@ -20,29 +18,6 @@ import (
 // driven entirely by Type rather than a config flag.
 func commitSrc(cfg map[string]string) *models.SourceDefinition {
 	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: models.SourceGitCommits, Config: cfg}
-}
-
-func TestTruncateRuneSafeDoesNotSplitMultiByteRune(t *testing.T) {
-	// "€" is 3 bytes (E2 82 AC); cutting at byte 4 of "ab€cd" (a=1,b=1,€=3)
-	// would land inside the € rune without rune-aware trimming.
-	s := "ab€cd"
-	got := truncateRuneSafe(s, 4)
-	if !utf8.ValidString(got) {
-		t.Fatalf("truncateRuneSafe produced invalid UTF-8: %q (bytes: %v)", got, []byte(got))
-	}
-	if got != "ab" {
-		t.Errorf("truncateRuneSafe(%q, 4) = %q, want %q", s, got, "ab")
-	}
-
-	// A cut point that already lands on a boundary should be unaffected.
-	if got := truncateRuneSafe("hello world", 5); got != "hello" {
-		t.Errorf("truncateRuneSafe on ASCII = %q, want %q", got, "hello")
-	}
-
-	// A string shorter than the limit is returned unchanged.
-	if got := truncateRuneSafe("hi", 10); got != "hi" {
-		t.Errorf("truncateRuneSafe short string = %q, want %q", got, "hi")
-	}
 }
 
 func TestAdoRepoAPIBase(t *testing.T) {
@@ -77,7 +52,8 @@ func TestAdoRepoAPIBase(t *testing.T) {
 	}
 }
 
-// adoStub serves a fake ADO repo: /commits/{id}/changes and /blobs/{sha}.
+// adoStub serves a fake ADO repo: /commits/{id}/changes (honouring top/skip
+// paging like the real endpoint) and /blobs/{sha}.
 func adoStub(t *testing.T, changesByCommit map[string]adoChangesResponse, blobs map[string]string) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +67,7 @@ func adoStub(t *testing.T, changesByCommit map[string]adoChangesResponse, blobs 
 				http.Error(w, "no such commit", http.StatusNotFound)
 				return
 			}
-			_ = json.NewEncoder(w).Encode(resp)
+			_ = json.NewEncoder(w).Encode(pageChanges(resp, r))
 		case strings.Contains(r.URL.Path, "/blobs/"):
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 			sha := parts[len(parts)-1]
@@ -107,6 +83,18 @@ func adoStub(t *testing.T, changesByCommit map[string]adoChangesResponse, blobs 
 	}))
 }
 
+// pageChanges slices resp to the request's top/skip window.
+func pageChanges(resp adoChangesResponse, r *http.Request) adoChangesResponse {
+	skip, _ := strconv.Atoi(r.URL.Query().Get("skip"))
+	top, err := strconv.Atoi(r.URL.Query().Get("top"))
+	if err != nil || top <= 0 {
+		top = len(resp.Changes)
+	}
+	start := min(skip, len(resp.Changes))
+	end := min(start+top, len(resp.Changes))
+	return adoChangesResponse{Changes: resp.Changes[start:end]}
+}
+
 func TestFetchCommitDiffEditedFile(t *testing.T) {
 	changes := adoChangesResponse{Changes: []adoChange{
 		{ChangeType: "edit", Item: adoChangeItem{Path: "main.go", ObjectID: "newsha", OriginalObjectID: "oldsha"}},
@@ -118,7 +106,7 @@ func TestFetchCommitDiffEditedFile(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(map[string]string{"Url": srv.URL + "/_apis/git/repositories/repo/commits"})}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "abc123", defaultMaxFilesPerCommit, defaultMaxDiffChars)
+	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "abc123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +136,7 @@ func TestFetchCommitDiffAddedAndDeletedFile(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1", defaultMaxFilesPerCommit, defaultMaxDiffChars)
+	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +168,7 @@ func TestFetchCommitDiffSkipsFolderChanges(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1", defaultMaxFilesPerCommit, defaultMaxDiffChars)
+	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,43 +183,144 @@ func TestFetchCommitDiffSkipsFolderChanges(t *testing.T) {
 	}
 }
 
-func TestFetchCommitDiffRespectsMaxFilesAndMaxChars(t *testing.T) {
+// Every changed file must be diffed — across multiple pages of ADO's changes
+// endpoint, and without any total-size truncation.
+func TestFetchCommitDiffIncludesEveryFileAcrossChangesPages(t *testing.T) {
+	const files = adoChangesPageSize*2 + 7
 	var changes adoChangesResponse
 	blobs := map[string]string{}
-	for i := 0; i < 5; i++ {
-		path := "f" + strconv.Itoa(i) + ".go"
+	for i := 0; i < files; i++ {
 		oldSHA, newSHA := "old"+strconv.Itoa(i), "new"+strconv.Itoa(i)
 		blobs[oldSHA] = "a\n"
-		blobs[newSHA] = "b\n"
+		blobs[newSHA] = strings.Repeat("changed line\n", 100)
 		changes.Changes = append(changes.Changes, adoChange{
 			ChangeType: "edit",
-			Item:       adoChangeItem{Path: path, ObjectID: newSHA, OriginalObjectID: oldSHA},
+			Item:       adoChangeItem{Path: fmt.Sprintf("f%d.go", i), ObjectID: newSHA, OriginalObjectID: oldSHA},
 		})
 	}
 	srv := adoStub(t, map[string]adoChangesResponse{"c1": changes}, blobs)
 	defer srv.Close()
 
 	s := &APISource{src: src(nil)}
-
-	// maxFiles=2 should skip the remaining 3 with a note, but still report the true count.
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1", 2, defaultMaxDiffChars)
+	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filesChanged != 5 {
-		t.Errorf("filesChanged = %d, want 5", filesChanged)
+	if filesChanged != files {
+		t.Errorf("filesChanged = %d, want %d", filesChanged, files)
 	}
-	if !strings.Contains(diffText, "more files changed (skipped)") {
-		t.Errorf("expected skipped-files note: %q", diffText)
+	for i := 0; i < files; i++ {
+		if !strings.Contains(diffText, fmt.Sprintf("--- f%d.go\n", i)) {
+			t.Fatalf("diff missing file f%d.go", i)
+		}
 	}
+	if got, want := strings.Count(diffText, "+changed line"), files*100; got != want {
+		t.Errorf("diff has %d added lines, want %d (content truncated?)", got, want)
+	}
+}
 
-	// maxChars=10 should truncate.
-	diffText2, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1", defaultMaxFilesPerCommit, 10)
+// Large text files used to be skipped outright (>200 KB); they must now be
+// diffed in full.
+func TestFetchCommitDiffDiffsLargeTextFiles(t *testing.T) {
+	big := strings.Repeat("generated line of text\n", 20000) // ~460 KB
+	changes := adoChangesResponse{Changes: []adoChange{
+		{ChangeType: "add", Item: adoChangeItem{Path: "big.txt", ObjectID: "bigsha"}},
+	}}
+	srv := adoStub(t, map[string]adoChangesResponse{"c1": changes}, map[string]string{"bigsha": big})
+	defer srv.Close()
+
+	s := &APISource{src: src(nil)}
+	diffText, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(diffText2, "(diff truncated)") {
-		t.Errorf("expected truncation note: %q", diffText2)
+	if got := strings.Count(diffText, "+generated line of text"); got != 20000 {
+		t.Errorf("large file diff has %d added lines, want 20000", got)
+	}
+}
+
+func TestFetchCommitDiffRecordsBinaryFiles(t *testing.T) {
+	changes := adoChangesResponse{Changes: []adoChange{
+		{ChangeType: "add", Item: adoChangeItem{Path: "logo.png", ObjectID: "pngsha"}},
+	}}
+	srv := adoStub(t, map[string]adoChangesResponse{"c1": changes}, map[string]string{"pngsha": "\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"})
+	defer srv.Close()
+
+	s := &APISource{src: src(nil)}
+	diffText, _, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(diffText, "--- logo.png\n(binary file, add)") {
+		t.Errorf("binary file not recorded: %q", diffText)
+	}
+	if strings.Contains(diffText, "IHDR") {
+		t.Errorf("binary content leaked into diff text: %q", diffText)
+	}
+}
+
+func TestGetRawRetriesTransientFailures(t *testing.T) {
+	defer func(d time.Duration) { retryBaseDelay = d }(retryBaseDelay)
+	retryBaseDelay = time.Millisecond
+
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			http.Error(w, "busy", http.StatusServiceUnavailable)
+		case 2:
+			http.Error(w, "slow down", http.StatusTooManyRequests)
+		default:
+			_, _ = w.Write([]byte("ok"))
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: src(nil)}
+	data, err := s.getRaw(context.Background(), s.httpClient(), srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "ok" || calls != 3 {
+		t.Errorf("got %q after %d calls, want \"ok\" after 3", data, calls)
+	}
+}
+
+func TestGetRawDoesNotRetryClientErrors(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "nope", http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: src(nil)}
+	if _, err := s.getRaw(context.Background(), s.httpClient(), srv.URL); err == nil {
+		t.Fatal("expected an error for HTTP 404")
+	}
+	if calls != 1 {
+		t.Errorf("404 was requested %d times, want 1 (not retryable)", calls)
+	}
+}
+
+func TestGetRawGivesUpAfterMaxAttempts(t *testing.T) {
+	defer func(d time.Duration) { retryBaseDelay = d }(retryBaseDelay)
+	retryBaseDelay = time.Millisecond
+
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "down", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: src(nil)}
+	if _, err := s.getRaw(context.Background(), s.httpClient(), srv.URL); err == nil {
+		t.Fatal("expected an error after exhausting retries")
+	}
+	if calls != maxFetchAttempts {
+		t.Errorf("got %d calls, want %d", calls, maxFetchAttempts)
 	}
 }
 
@@ -342,52 +431,10 @@ func TestFetchDocumentsFetchDiffsRequiresAdoURL(t *testing.T) {
 	}
 }
 
-func TestFetchCommitDiffSkippedCountAccurateWhenMaxCharsBreaksEarly(t *testing.T) {
-	var changes adoChangesResponse
-	blobs := map[string]string{}
-	for i := 0; i < 5; i++ {
-		path := "f" + strconv.Itoa(i) + ".go"
-		oldSHA, newSHA := "old"+strconv.Itoa(i), "new"+strconv.Itoa(i)
-		blobs[oldSHA] = "a\n"
-		blobs[newSHA] = "b\n"
-		changes.Changes = append(changes.Changes, adoChange{
-			ChangeType: "edit",
-			Item:       adoChangeItem{Path: path, ObjectID: newSHA, OriginalObjectID: oldSHA},
-		})
-	}
-	srv := adoStub(t, map[string]adoChangesResponse{"c1": changes}, blobs)
-	defer srv.Close()
-
-	s := &APISource{src: src(nil)}
-
-	// maxFiles left high (no file-count cap in play) but maxChars small
-	// enough that the byte budget runs out partway through the 5 files.
-	diffText, filesChanged, err := s.fetchCommitDiff(context.Background(), s.httpClient(), srv.URL+"/_apis/git/repositories/repo", "c1", defaultMaxFilesPerCommit, 50)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if filesChanged != 5 {
-		t.Fatalf("filesChanged = %d, want 5", filesChanged)
-	}
-	// Count "--- f" header starts rather than complete entries: a file whose
-	// diff was fetched but then cut off by the maxChars hard-truncation still
-	// counts as "processed" internally, even though its trailing "+++"/hunk
-	// lines may not have survived the truncation.
-	processed := strings.Count(diffText, "--- f")
-	m := regexp.MustCompile(`… (\d+) more files changed \(skipped\)`).FindStringSubmatch(diffText)
-	if m == nil {
-		t.Fatalf("expected a skipped-files note, got %q", diffText)
-	}
-	skipped, _ := strconv.Atoi(m[1])
-	if processed+skipped != filesChanged {
-		t.Errorf("processed(%d) + skipped(%d) != filesChanged(%d); diffText=%q", processed, skipped, filesChanged, diffText)
-	}
-	if processed >= filesChanged {
-		t.Errorf("expected maxChars to stop before processing all files, processed=%d", processed)
-	}
-}
-
-func TestFetchDocumentsGracefullyDegradesOnPerCommitDiffFailure(t *testing.T) {
+// A commit whose diff can't be fetched must fail the sync, not be indexed
+// with a note in place of its changes — a partial index silently misses
+// changes, while a failed sync leaves the previous index intact.
+func TestFetchDocumentsFailsOnUnfetchableCommit(t *testing.T) {
 	changesOK := adoChangesResponse{Changes: []adoChange{
 		{ChangeType: "edit", Item: adoChangeItem{Path: "main.go", ObjectID: "newsha", OriginalObjectID: "oldsha"}},
 	}}
@@ -420,41 +467,90 @@ func TestFetchDocumentsGracefullyDegradesOnPerCommitDiffFailure(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: commitSrc(map[string]string{
-		"Url":           srv.URL + "/_apis/git/repositories/repo/commits",
-		"ItemsPath":     "value",
-		"IdField":       "commitId",
-		"TitleField":    "comment",
-		"ContentFields": "comment",
+		"Url": srv.URL + "/_apis/git/repositories/repo/commits",
+	})}
+
+	_, err := s.FetchDocuments(context.Background(), nil)
+	if err == nil || !strings.Contains(err.Error(), "bad1") {
+		t.Fatalf("expected the sync to fail naming commit bad1, got %v", err)
+	}
+}
+
+// ADO's commits list truncates long messages (commentTruncated: true); the
+// full message must be fetched from the single-commit endpoint.
+func TestFetchDocumentsFetchesFullTruncatedCommitMessage(t *testing.T) {
+	full := "Fix login bug\n\n" + strings.Repeat("Long explanation of the root cause. ", 50)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
+				{"commitId": "c1", "comment": full[:40], "commentTruncated": true},
+			}})
+		case r.URL.Path == "/_apis/git/repositories/repo/commits/c1":
+			_ = json.NewEncoder(w).Encode(map[string]any{"commitId": "c1", "comment": full})
+		case strings.Contains(r.URL.Path, "/changes"):
+			_ = json.NewEncoder(w).Encode(adoChangesResponse{})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: commitSrc(map[string]string{
+		"Url": srv.URL + "/_apis/git/repositories/repo/commits",
 	})}
 
 	docs, err := s.FetchDocuments(context.Background(), nil)
 	if err != nil {
-		t.Fatalf("expected sync to succeed despite one commit's diff failing, got err: %v", err)
+		t.Fatal(err)
 	}
-	if len(docs) != 2 {
-		t.Fatalf("got %d docs, want 2", len(docs))
+	if len(docs) != 1 {
+		t.Fatalf("got %d docs, want 1", len(docs))
 	}
+	if !strings.Contains(docs[0].Text, full) {
+		t.Errorf("document lacks the full commit message: %q", docs[0].Text)
+	}
+	if strings.Contains(docs[0].Text, "commentTruncated") {
+		t.Errorf("stale commentTruncated flag left in document: %q", docs[0].Text)
+	}
+}
 
-	var good, bad *models.SourceDocument
-	for i := range docs {
+// A long history must not stop at the generic maxPages guard — that used to
+// cap commit-history sources at maxPages*adoCommitsPageSize commits.
+func TestFetchDocumentsCommitHistoryPagesPastMaxPages(t *testing.T) {
+	const total = maxPages*adoCommitsPageSize + 1
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case strings.Contains(docs[i].Text, "Good commit"):
-			good = &docs[i]
-		case strings.Contains(docs[i].Text, "Bad commit"):
-			bad = &docs[i]
+		case r.URL.Path == "/_apis/git/repositories/repo/commits":
+			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
+			top, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$top"))
+			var items []map[string]any
+			for i := skip; i < min(skip+top, total); i++ {
+				items = append(items, map[string]any{"commitId": fmt.Sprintf("c%d", i), "comment": "x"})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": items})
+		case strings.Contains(r.URL.Path, "/changes"):
+			_ = json.NewEncoder(w).Encode(adoChangesResponse{})
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: commitSrc(map[string]string{
+		"Url": srv.URL + "/_apis/git/repositories/repo/commits",
+	})}
+
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if good == nil || bad == nil {
-		t.Fatalf("expected both commits' documents present: %+v", docs)
-	}
-	if !strings.Contains(good.Text, "@@") {
-		t.Errorf("good commit missing diff: %q", good.Text)
-	}
-	if !strings.Contains(bad.Text, "diff fetch failed") {
-		t.Errorf("bad commit missing failure note: %q", bad.Text)
-	}
-	if bad.Properties["files_changed"] != "0" {
-		t.Errorf("bad commit files_changed = %q, want 0", bad.Properties["files_changed"])
+	if len(docs) != total {
+		t.Fatalf("got %d docs, want %d", len(docs), total)
 	}
 }
 
@@ -698,6 +794,10 @@ func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 				switch {
 				case r.URL.Path == "/_apis/git/repositories/repo/commits":
 					gotBranch = r.URL.Query().Get("searchCriteria.itemVersion.version")
+					if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
+						_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+						return
+					}
 					_ = json.NewEncoder(w).Encode(map[string]any{
 						"value": []map[string]any{{"commitId": "c1", "comment": "hi"}},
 					})

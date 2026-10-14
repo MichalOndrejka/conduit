@@ -18,6 +18,10 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
+// maxRepoFileBytes skips indexing repo files larger than this (likely
+// binary/generated).
+const maxRepoFileBytes = 200 << 10
+
 // AdoItemsAPIBase derives the ADO git-repository API base
 // (".../_apis/git/repositories/{repo}") from an items-list endpoint URL such
 // as ".../_apis/git/repositories/{repo}/items?recursionLevel=Full&api-version=7.1".
@@ -145,7 +149,11 @@ func (a *APISource) enrichWithFileContent(ctx context.Context, client *http.Clie
 		go func(i int, sha string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			text, skipped, err := a.blobText(ctx, client, repoBase, sha)
+			text, err := a.blobText(ctx, client, repoBase, sha)
+			skipped := len(text) > maxRepoFileBytes
+			if skipped {
+				text = ""
+			}
 			outcomes[i] = fileContentOutcome{text: text, skipped: skipped, err: err}
 
 			progressMu.Lock()
