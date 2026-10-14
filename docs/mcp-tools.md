@@ -95,6 +95,7 @@ Use this instead of `semantic_search` when you need an exact match rather than a
 | `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
 | `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
 | `search_commit` | Git commit history — messages, authors, file changes | When a change was made, which commit introduced a behaviour |
+| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`) | Why a run failed, whether an error or test failed before, which commit a run built |
 
 ---
 

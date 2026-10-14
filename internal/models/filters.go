@@ -22,6 +22,8 @@ const (
 	FilterIterationPath = "iteration_path" // hierarchical ("\")
 	FilterAssignedTo    = "assigned_to"    // display name and unique name
 	FilterTag           = "tags"           // work item tags
+	FilterResult        = "result"         // pipeline run result
+	FilterBranch        = "branch"         // pipeline run source branch
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey

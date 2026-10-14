@@ -216,7 +216,7 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 	want := []string{
 		"search_workitem", "search_requirement", "search_source_code",
 		"search_test_code", "search_testcase", "search_documentation",
-		"search_commit", "retrieve_experience", "remember",
+		"search_commit", "search_pipeline_run", "retrieve_experience", "remember",
 	}
 	for _, name := range want {
 		if !got[name] {
@@ -559,6 +559,10 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 		if _, ok := filterProps(tool)["branch"]; ok {
 			t.Errorf("%s must not offer a branch filter", tool)
 		}
+	}
+	pipeline := filterProps("search_pipeline_run")
+	if len(pipeline) != 2 || pipeline["result"] == nil || pipeline["branch"] == nil {
+		t.Errorf("search_pipeline_run filters = %v, want exactly result and branch", pipeline)
 	}
 	workItem := filterProps("search_workitem")
 	if _, ok := workItem["repository"]; ok {

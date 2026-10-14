@@ -1,10 +1,12 @@
 package rag
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
 func chunkerWith(maxSize, overlap int) *TextChunker {
@@ -80,5 +82,33 @@ func TestChunkIndicesAreSequential(t *testing.T) {
 		if c.Index != i {
 			t.Errorf("chunk %d has index %d", i, c.Index)
 		}
+	}
+}
+
+func TestChunkDocumentPrefixesHeaderAndStaysWithinMaxSize(t *testing.T) {
+	c := chunkerWith(300, 20)
+	doc := &models.SourceDocument{Text: strings.Repeat("log line without breaks ", 100), ChunkHeader: "Run #7 > Build > Job > Test"}
+	chunks := WithChunkHeaders(doc.ChunkHeader, c.ChunkDocument(doc))
+	if len(chunks) < 2 {
+		t.Fatalf("expected several chunks, got %d", len(chunks))
+	}
+	for i, ch := range chunks {
+		want := fmt.Sprintf("[Run #7 > Build > Job > Test | chunk %d/%d]\n", i+1, len(chunks))
+		if !strings.HasPrefix(ch.Text, want) {
+			t.Errorf("chunk %d does not start with %q: %q", i, want, ch.Text[:min(len(ch.Text), 60)])
+		}
+		if len(ch.Text) > 300 {
+			t.Errorf("chunk %d is %d chars including its header, exceeds max 300", i, len(ch.Text))
+		}
+		if ch.Index != i {
+			t.Errorf("chunk %d has index %d", i, ch.Index)
+		}
+	}
+}
+
+func TestWithChunkHeadersLeavesChunksUnchangedWithoutHeader(t *testing.T) {
+	in := chunkerWith(100, 10).Chunk("short text")
+	if got := WithChunkHeaders("", in); got[0].Text != "short text" {
+		t.Errorf("chunk text = %q, want unchanged", got[0].Text)
 	}
 }

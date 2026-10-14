@@ -241,14 +241,22 @@ var errRetryable = errors.New("retryable")
 // reusing the source's existing auth/header/TLS configuration. Transient
 // failures are retried with backoff, honouring Retry-After.
 func (a *APISource) getRaw(ctx context.Context, client *http.Client, url string) ([]byte, error) {
+	data, _, err := a.getRawWithHeader(ctx, client, url)
+	return data, err
+}
+
+// getRawWithHeader is getRaw that also returns the successful response's
+// headers, for APIs that page via a response header (e.g. ADO's
+// x-ms-continuationtoken).
+func (a *APISource) getRawWithHeader(ctx context.Context, client *http.Client, url string) ([]byte, http.Header, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxFetchAttempts; attempt++ {
-		data, retryAfter, err := a.getRawOnce(ctx, client, url)
+		data, header, retryAfter, err := a.getRawOnce(ctx, client, url)
 		if err == nil {
-			return data, nil
+			return data, header, nil
 		}
 		if !errors.Is(err, errRetryable) || ctx.Err() != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		lastErr = err
 		if attempt == maxFetchAttempts-1 {
@@ -261,16 +269,16 @@ func (a *APISource) getRaw(ctx context.Context, client *http.Client, url string)
 		select {
 		case <-time.After(delay):
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		}
 	}
-	return nil, fmt.Errorf("giving up after %d attempts: %w", maxFetchAttempts, lastErr)
+	return nil, nil, fmt.Errorf("giving up after %d attempts: %w", maxFetchAttempts, lastErr)
 }
 
-func (a *APISource) getRawOnce(ctx context.Context, client *http.Client, url string) (data []byte, retryAfter time.Duration, err error) {
+func (a *APISource) getRawOnce(ctx context.Context, client *http.Client, url string) (data []byte, header http.Header, retryAfter time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, 0, err
+		return nil, nil, 0, err
 	}
 	a.applyAuth(req)
 	a.applyExtraHeaders(req)
@@ -278,26 +286,26 @@ func (a *APISource) getRawOnce(ctx context.Context, client *http.Client, url str
 	resp, err := client.Do(req)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, 0, ctx.Err()
+			return nil, nil, 0, ctx.Err()
 		}
-		return nil, 0, fmt.Errorf("%w: %v", errRetryable, err)
+		return nil, nil, 0, fmt.Errorf("%w: %v", errRetryable, err)
 	}
 	defer resp.Body.Close()
 	data, err = io.ReadAll(io.LimitReader(resp.Body, maxRawResponseBytes+1))
 	if err != nil {
-		return nil, 0, fmt.Errorf("%w: reading %s: %v", errRetryable, url, err)
+		return nil, nil, 0, fmt.Errorf("%w: reading %s: %v", errRetryable, url, err)
 	}
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
 		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
 			retryAfter = min(time.Duration(s)*time.Second, maxRetryAfter)
 		}
-		return nil, retryAfter, fmt.Errorf("%w: HTTP %d from %s", errRetryable, resp.StatusCode, url)
+		return nil, nil, retryAfter, fmt.Errorf("%w: HTTP %d from %s", errRetryable, resp.StatusCode, url)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, 0, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return nil, nil, 0, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
 	if len(data) > maxRawResponseBytes {
-		return nil, 0, fmt.Errorf("response from %s exceeds %d MB", url, maxRawResponseBytes>>20)
+		return nil, nil, 0, fmt.Errorf("response from %s exceeds %d MB", url, maxRawResponseBytes>>20)
 	}
-	return data, 0, nil
+	return data, resp.Header, 0, nil
 }

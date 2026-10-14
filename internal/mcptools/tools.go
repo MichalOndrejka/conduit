@@ -262,7 +262,7 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		`source-system fields — e.g. "filters":{"project":"Payments","repository":"api"} — see the schema for ` +
 		`the fields this tool supports; result properties (project, repository, state, …) show the values ` +
 		`available. When a result has properties.web_url, it is the browser link to the ` +
-		`source item (work item, file, commit, wiki page) — cite it as a markdown link, e.g. [title](web_url), ` +
+		`source item (work item, file, commit, wiki page, pipeline run) — cite it as a markdown link, e.g. [title](web_url), ` +
 		`whenever you reference that result in an answer.`
 	makeSearchTool := func(collection, name, description string) {
 		fields := collectionFilters[collection]
@@ -305,6 +305,13 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	makeSearchTool(models.CollectionCommits, "search_commit",
 		"Semantic search over git commit history — each commit's message, author and complete code diff. "+
 			"Filter by project, repository, author, changed path or author date.")
+	makeSearchTool(models.CollectionPipelineRuns, "search_pipeline_run",
+		"Semantic search over completed Azure DevOps build pipeline runs. Every run has a summary document "+
+			"(result, reason, branch, triggering commit, requester, timing). Failed and partially succeeded runs "+
+			"also list their timeline errors/warnings and have separate documents for each failed step (its complete "+
+			"log) and each failed test (error message and stack trace); properties.type is run, step or test, and "+
+			"step/test documents carry properties.parent_doc_id, the source_doc_id of their run document. "+
+			"Filter by run result or branch.")
 
 	// ── Experience tools ───────────────────────────────────────────────────
 

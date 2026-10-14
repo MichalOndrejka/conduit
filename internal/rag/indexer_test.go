@@ -484,3 +484,52 @@ func TestIndexBatchCheckpointAbortsBeforeDispatch(t *testing.T) {
 		t.Errorf("upsertCalls = %d, want 0", qd.upsertCalls)
 	}
 }
+
+// TestIndexBatchPrefixesChunkHeaders asserts a document's ChunkHeader is
+// embedded at the start of every chunk, on both the normal chunking path and
+// the PrecomputedChunks (preprocessing) path.
+func TestIndexBatchPrefixesChunkHeaders(t *testing.T) {
+	var mu sync.Mutex
+	var embedded []string
+	embedHandler := func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		embedded = append(embedded, body.Input)
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{{"embedding": []float32{0.1, 0.2, 0.3}}},
+		})
+	}
+	indexer, _ := testIndexer(t, embedHandler, 2)
+
+	docs := []models.SourceDocument{
+		{ID: "step", Text: strings.Repeat("error: build broke ", 300), ChunkHeader: "Run #9 > Build > Compile"},
+		{ID: "summarized", Text: "ignored", ChunkHeader: "Run #9"},
+	}
+	opts := IndexBatchOptions{PrecomputedChunks: [][]models.TextChunk{nil, {{Text: "summary", Index: 0}}}}
+	if err := indexer.IndexBatch(context.Background(), "conduit_test", docs, opts); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var stepChunks int
+	for _, text := range embedded {
+		switch {
+		case strings.HasPrefix(text, "[Run #9 > Build > Compile | chunk "):
+			stepChunks++
+			if len(text) > 2000 {
+				t.Errorf("header-prefixed chunk is %d chars, exceeds max 2000", len(text))
+			}
+		case text == "[Run #9 | chunk 1/1]\nsummary":
+		default:
+			t.Errorf("embedded text without the expected header: %q", text[:min(len(text), 60)])
+		}
+	}
+	if stepChunks < 2 {
+		t.Errorf("embedded %d step chunks, want several", stepChunks)
+	}
+}

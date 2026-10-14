@@ -54,6 +54,8 @@ func CollectionFor(src *models.SourceDefinition) string {
 		return models.CollectionTestCases
 	case models.SourceGitCommits:
 		return models.CollectionCommits
+	case models.SourcePipelineRun:
+		return models.CollectionPipelineRuns
 	case models.SourceCodeRepo:
 		return models.CollectionSourceCode
 	case models.SourceTestCodeRepo:

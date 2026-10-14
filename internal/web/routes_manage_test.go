@@ -95,3 +95,26 @@ func TestValidateSourceConfigCodeRepoAcceptsAdoItemsURL(t *testing.T) {
 	}
 }
 
+func TestValidateSourceConfigPipelineRun(t *testing.T) {
+	valid := func() map[string]string {
+		return map[string]string{
+			"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example", "AdoProject": "proj",
+			"Url": "https://ado.example/proj", "DefinitionId": "12", "Days": "30",
+		}
+	}
+	if msg := validateSourceConfig(models.SourcePipelineRun, valid()); msg != "" {
+		t.Errorf("valid pipeline-run config rejected: %q", msg)
+	}
+	for key, bad := range map[string]string{"DefinitionId": "abc", "Days": "0", "Platform": ""} {
+		cfg := valid()
+		cfg[key] = bad
+		if msg := validateSourceConfig(models.SourcePipelineRun, cfg); msg == "" {
+			t.Errorf("%s=%q: expected a validation error", key, bad)
+		}
+	}
+	cfg := valid()
+	delete(cfg, "Days")
+	if msg := validateSourceConfig(models.SourcePipelineRun, cfg); msg == "" {
+		t.Error("missing Days: expected a validation error")
+	}
+}

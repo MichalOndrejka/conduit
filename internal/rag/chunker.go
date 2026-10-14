@@ -2,6 +2,7 @@
 package rag
 
 import (
+	"fmt"
 	"log"
 	"regexp"
 	"strings"
@@ -43,12 +44,50 @@ func NewTextChunker(cfg *config.AppConfig) *TextChunker {
 //  2. Last newline inside the window — natural for code
 //  3. Hard character cut — absolute fallback
 func (c *TextChunker) Chunk(text string) []models.TextChunk {
+	return c.chunk(text, c.maxSize)
+}
+
+// ChunkDocument chunks doc's text, leaving room in every chunk for the
+// header WithChunkHeaders adds when doc.ChunkHeader is set, so the final
+// chunk text still fits the embedding model's input limit.
+func (c *TextChunker) ChunkDocument(doc *models.SourceDocument) []models.TextChunk {
+	if doc.ChunkHeader == "" {
+		return c.Chunk(doc.Text)
+	}
+	reserve := len(formatChunkHeader(doc.ChunkHeader, maxHeaderChunkCount, maxHeaderChunkCount))
+	return c.chunk(doc.Text, max(c.maxSize-reserve, 1))
+}
+
+// maxHeaderChunkCount sizes the reserved "chunk k/N" part of a chunk header;
+// a document never realistically splits into more chunks than this.
+const maxHeaderChunkCount = 9999999
+
+func formatChunkHeader(header string, index, total int) string {
+	return fmt.Sprintf("[%s | chunk %d/%d]\n", header, index, total)
+}
+
+// WithChunkHeaders returns chunks with "[header | chunk k/N]" (k 1-based)
+// prepended to each chunk's text; chunks are returned unchanged when header
+// is empty.
+func WithChunkHeaders(header string, chunks []models.TextChunk) []models.TextChunk {
+	if header == "" {
+		return chunks
+	}
+	out := make([]models.TextChunk, len(chunks))
+	for i, ch := range chunks {
+		ch.Text = formatChunkHeader(header, i+1, len(chunks)) + ch.Text
+		out[i] = ch
+	}
+	return out
+}
+
+func (c *TextChunker) chunk(text string, maxSize int) []models.TextChunk {
 	if text == "" {
 		return nil
 	}
 
 	// Fast path: fits in one chunk
-	if len(text) <= c.maxSize {
+	if len(text) <= maxSize {
 		return []models.TextChunk{{Text: text, Index: 0, StartOffset: 0, EndOffset: len(text)}}
 	}
 
@@ -57,7 +96,7 @@ func (c *TextChunker) Chunk(text string) []models.TextChunk {
 	idx := 0
 
 	for start < len(text) {
-		end := min(start+c.maxSize, len(text))
+		end := min(start+maxSize, len(text))
 
 		if end < len(text) {
 			window := text[start:end]
@@ -77,7 +116,7 @@ func (c *TextChunker) Chunk(text string) []models.TextChunk {
 
 			// Reject a break too close to the start (< 25% of window) to
 			// avoid tiny slivers that stall progress.
-			minBreak := max(1, c.maxSize/4)
+			minBreak := max(1, maxSize/4)
 			if bestBreak >= 0 && bestBreak < minBreak {
 				bestBreak = -1 // fall through to hard cut
 			}

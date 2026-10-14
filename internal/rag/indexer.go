@@ -94,8 +94,9 @@ func (d *DocumentIndexer) IndexBatch(
 		if opts.PrecomputedChunks != nil && opts.PrecomputedChunks[i] != nil {
 			chunks = opts.PrecomputedChunks[i]
 		} else {
-			chunks = d.chunker.Chunk(docs[i].Text)
+			chunks = d.chunker.ChunkDocument(&docs[i])
 		}
+		chunks = WithChunkHeaders(docs[i].ChunkHeader, chunks)
 		remaining[i] = len(chunks)
 		for _, chunk := range chunks {
 			jobs = append(jobs, embedJob{docIdx: i, doc: &docs[i], chunk: chunk, totalChunks: len(chunks)})

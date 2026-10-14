@@ -179,6 +179,23 @@
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
       </div>
+      {{else if eq $s.Type "pipeline-run"}}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Pipeline definition ID <span class="text-red-400">*</span></label>
+          <input type="number" name="DefinitionId" min="1" required value="{{$s.GetConfig `DefinitionId`}}" placeholder="42"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+          <p class="text-xs text-slate-500 mt-1">The <span class="font-mono">definitionId</span> in the pipeline's URL.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> <span class="text-slate-500">(completed runs of the last N days)</span></label>
+          <input type="number" name="Days" min="1" required value="{{or ($s.GetConfig `Days`) `30`}}" placeholder="30"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+      <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
+        Every run gets a summary <span class="text-slate-500">(failed and partially succeeded runs also embed the complete log of each failed step and every failed test's error and stack trace)</span>
+      </p>
       {{else}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
@@ -300,7 +317,11 @@ function prepareSubmit() {
     var proj = encodeURIComponent(adoVal('AdoProject'));
     var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
       ((SOURCE_TYPE === 'requirements' || SOURCE_TYPE === 'test-case') && currentFetchMode() === 'workitems');
-    if (isWorkItemMode) {
+    if (SOURCE_TYPE === 'pipeline-run') {
+      // Pipeline runs are fetched from AdoOrg/AdoProject/DefinitionId (see
+      // fetchAdoPipelineRuns) — this URL is only stored, like work items'.
+      document.getElementById('ado-url').value = org + '/' + proj;
+    } else if (isWorkItemMode) {
       // Work items are fetched by a server-side WIQL query + batch fetch
       // (see fetchAdoWorkItems), not a single GET — this URL is only stored
       // so the source re-opens on the right tab, pre-filled.

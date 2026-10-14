@@ -32,6 +32,7 @@ var sourceTypes = []struct{ Value, Label, Description string }{
 	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
+	{models.SourcePipelineRun, "Pipeline Runs", "Build pipeline runs with failed-step logs and failed test results."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
 	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
@@ -67,7 +68,7 @@ var apiConfigKeys = []string{
 	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
 	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"FetchMode",
+	"FetchMode", "DefinitionId", "Days",
 }
 
 // presetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
@@ -214,6 +215,17 @@ func validateSourceConfig(srcType string, cfg map[string]string) string {
 	case "api":
 		if cfg["Platform"] == "ado" && cfg["AdoProject"] == "" {
 			return "Project is required for Azure DevOps sources."
+		}
+		if srcType == models.SourcePipelineRun {
+			if cfg["Platform"] != "ado" {
+				return "Pipeline Runs sources require the Azure DevOps provider."
+			}
+			if n, err := strconv.Atoi(strings.TrimSpace(cfg["DefinitionId"])); err != nil || n <= 0 {
+				return "Pipeline definition ID must be a positive number."
+			}
+			if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
+				return "Days must be a positive number."
+			}
 		}
 		u, err := url.Parse(cfg["Url"])
 		if cfg["Url"] == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {

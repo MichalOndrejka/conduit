@@ -111,7 +111,7 @@ func (p *DocumentPreprocessor) Preprocess(
 	var jobs []chunkJob
 	remaining := make([]int, len(docs)) // chunks left to summarize, per document — drives progress
 	for i := range docs {
-		chunksPerDoc[i] = p.chunker.Chunk(docs[i].Text)
+		chunksPerDoc[i] = p.chunker.ChunkDocument(&docs[i])
 		remaining[i] = len(chunksPerDoc[i])
 		for c := range chunksPerDoc[i] {
 			jobs = append(jobs, chunkJob{docIdx: i, chunkIdx: c})

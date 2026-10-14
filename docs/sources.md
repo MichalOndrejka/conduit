@@ -58,6 +58,7 @@ The source **type** only decides which Qdrant collection a source's documents la
 | Requirements | `conduit_requirements` |
 | Test Cases | `conduit_testcases` |
 | Commit History | `conduit_commits` |
+| Pipeline Runs | `conduit_pipeline_runs` |
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
@@ -80,6 +81,24 @@ The generic API config keys aren't tied to Azure DevOps — the backend runs any
 Work Items sources on the Azure DevOps tab don't use a hand-built URL at all: Conduit runs a WIQL query scoped to the configured project, then batch-fetches each matching work item's fields directly from Azure DevOps' Work Item Tracking API. The **Work item types** checkboxes restrict which types the WIQL query matches — `WorkItemTypes` config key, comma-separated; at least one type must be selected. **Area paths** further scopes the query to one or more team areas — `AreaPaths` config key, comma-separated (e.g. `MyProject\Team A, MyProject\Team B`), matched with WIQL's `UNDER` operator so sub-areas are included; left blank, every area in the project is fetched. Unlike the generic API source, work items always embed **every** fetched field — including custom project/organization fields — via Azure DevOps' `$expand`; `ContentFields` does not apply. Rich-text (HTML) field values such as Description, Repro Steps and Acceptance Criteria are stripped to plain text before embedding.
 
 The type picker shows a preset set of tiles per source type — Work Items: Epic, Feature, User Story, Bug, Task, Issue; Requirements: Product Requirement, Software Requirements, Risk, Architecture Item; Test Cases: Test Case. Only these presets are selectable; a source saved before custom types were removed may still carry a `WorkItemTypes` value outside the presets, which re-appears as its own (unaddable) tile when the source is reopened for editing.
+
+### Azure DevOps Pipeline Runs
+
+Pipeline Runs sources (`pipeline-run`) are Azure DevOps-only and fetched entirely server-side — one source covers one build definition (YAML or classic). Config keys: `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), **Pipeline definition ID** (`DefinitionId`, the `definitionId` in the pipeline's URL, required) and **Days** (`Days`, required, form default `30`). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
+
+Each sync lists every **completed** run of the definition that finished in the last `Days` days — all branches, including PR validation runs — following ADO's `x-ms-continuationtoken` paging, and fully replaces the source's previous documents. The index is a snapshot of the last successful sync: runs, logs and test results deleted from Azure DevOps afterwards stay searchable (their `web_url` may then be stale) until the next successful sync.
+
+Documents (all in `conduit_pipeline_runs`):
+
+| Document | ID | When | Text |
+|---|---|---|---|
+| Run | `{source}_run_{buildId}` | every run | Pipeline, run number, result, status, reason, branch, triggering commit, trigger info, requester, timing; for failed / partially succeeded runs also every timeline error/warning (with its `Stage > Job > Task` path) and the IDs of its step and test documents |
+| Step | `{source}_run_{buildId}_step_{timelineRecordId}` | failed / partially succeeded runs | The **complete** log of each failed timeline record that has no failed child (so a job that failed without a failed task, e.g. a timeout, is captured too). Per-line timestamps and ANSI color codes are stripped; every line is kept |
+| Test | `{source}_run_{buildId}_test_{testRunId}_{resultId}` | failed / partially succeeded runs | Each test result with outcome Failed, Aborted or Error: name, storage, test run, duration, error message and full stack trace |
+
+Properties: `type` (`run`, `step`, `test`), `build_id`, `result`, `branch`, `commit`, `project`, `repository`, `web_url`; step and test documents also carry `parent_doc_id` (the run document's ID) and steps `step_path`; run documents of Azure Repos runs carry `commit_web_url`. Every chunk's text starts with a `[Run #<number> > Stage > Job > Task | chunk k/N]` header (`[Run #<number> > test <name> | …]` for tests, `[Run #<number> | …]` for runs), so a chunk deep inside a long log still names the run and step it belongs to.
+
+Fetching is lossless: any run, timeline, log or test-result request that still fails after retries — including a 404 for a log Azure DevOps already purged — fails the sync, leaving the previous snapshot untouched.
 
 ### Requirements and Test Cases (dual-mode)
 

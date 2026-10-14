@@ -147,6 +147,11 @@ func isFileContentBestEffort(cfg *models.SourceDefinition) bool {
 
 func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
 	cfg := a.src
+	// Pipeline-run sources are Azure DevOps-only and built from AdoOrg /
+	// AdoProject / DefinitionId, never from a hand-written Url.
+	if cfg.Type == models.SourcePipelineRun {
+		return a.fetchAdoPipelineRuns(ctx, a.httpClient(), progress)
+	}
 	url := cfg.GetConfig("Url")
 	if url == "" {
 		return nil, fmt.Errorf("API source requires a Url")

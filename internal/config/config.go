@@ -87,7 +87,7 @@ func defaults() AppConfig {
 			Concurrency: 4,
 			SourceTypes: map[string]bool{
 				"work-item": true, "requirements": true, "test-case": true,
-				"commit-history": false, "code": false,
+				"commit-history": false, "pipeline-run": false, "code": false,
 				"test-code": false, "documentation": true,
 			},
 		},

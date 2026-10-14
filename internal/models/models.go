@@ -16,6 +16,7 @@ const (
 	CollectionTestCases     = "conduit_testcases"
 	CollectionDocumentation = "conduit_documentation"
 	CollectionCommits       = "conduit_commits"
+	CollectionPipelineRuns  = "conduit_pipeline_runs"
 	CollectionExperience    = "conduit_experience"
 )
 
@@ -23,12 +24,8 @@ const (
 var AllCollections = []string{
 	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
 	CollectionTestCode, CollectionTestCases,
-	CollectionDocumentation, CollectionCommits,
+	CollectionDocumentation, CollectionCommits, CollectionPipelineRuns,
 	CollectionExperience,
-	// Legacy collections from the removed Build Results / Test Results
-	// source types: no longer written to, but kept here so "Clean source
-	// embeddings" can still delete any left over from before the removal.
-	"conduit_builds", "conduit_testresults",
 }
 
 // ── Source types ─────────────────────────────────────────────────────────────
@@ -41,6 +38,7 @@ const (
 	SourceTestCodeRepo  = "test-code"
 	SourceDocumentation = "documentation"
 	SourceGitCommits    = "commit-history"
+	SourcePipelineRun   = "pipeline-run"
 )
 
 // ── Core domain models ────────────────────────────────────────────────────────
@@ -96,6 +94,10 @@ type SourceDocument struct {
 	// Filters holds the document's filterable categories (see filters.go),
 	// copied onto every chunk at index time.
 	Filters DocumentFilters `json:"-"`
+	// ChunkHeader, when set, is prepended to every chunk of the document as
+	// "[<ChunkHeader> | chunk k/N]" so a chunk deep inside a long text still
+	// names what it belongs to (see rag.WithChunkHeaders).
+	ChunkHeader string `json:"-"`
 }
 
 type TextChunk struct {

@@ -31,6 +31,9 @@ var (
 	fIteration = filterField{name: models.FilterIterationPath, desc: `Iteration path, e.g. Project\Sprint 12 — matches that iteration and every child`}
 	fAssigned  = filterField{name: models.FilterAssignedTo, desc: "Assignee's display name or unique name (email)"}
 	fTag       = filterField{name: models.FilterTag, desc: "Work item tag"}
+	fResult    = filterField{name: models.FilterResult, desc: "Pipeline run result: succeeded, partiallySucceeded, failed or canceled"}
+	fBranch    = filterField{name: models.FilterBranch, desc: "Pipeline run source branch, as a full ref (refs/heads/main, " +
+		"refs/pull/42/merge) or short name (main, pull/42/merge)"}
 )
 
 func dateFields(what string) []filterField {
@@ -60,6 +63,7 @@ var collectionFilters = map[string][]filterField{
 	models.CollectionCommits: append([]filterField{fProject, fRepository, fAuthor,
 		{name: models.FilterPath, desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}},
 		dateFields("author date")...),
+	models.CollectionPipelineRuns: {fResult, fBranch},
 }
 
 // filtersSchema is the JSON Schema of the "filters" object for fields.
