@@ -2,6 +2,8 @@ module github.com/MichalOndrejka/conduit
 
 go 1.24
 
+toolchain go1.27.3
+
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/fernet/fernet-go v0.0.0-20240119011108-303da6aec611

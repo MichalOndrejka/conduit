@@ -1,6 +1,6 @@
 # Conduit (Go) — multi-stage build producing a ~25 MB distroless image
 # (vs the ~1–2 GB Python image), idling at ~20–50 MB RSS.
-FROM golang:1.26 AS build
+FROM golang:1.27.3 AS build
 WORKDIR /src
 
 # Cache module downloads separately from source changes

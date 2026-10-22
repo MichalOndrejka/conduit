@@ -107,8 +107,10 @@ services:
     build: .
     image: michalondrejka/conduit:latest
     restart: unless-stopped
+    # Loopback only: Conduit has no authentication, so it must not be
+    # reachable from other machines on the network.
     ports:
-      - "${CONDUIT_PORT:-8000}:8000"
+      - "127.0.0.1:${CONDUIT_PORT:-8000}:8000"
     volumes:
       - conduit_data:/data
       - ${CONDUIT_CERTS_DIR:-./certs}:/certs:ro

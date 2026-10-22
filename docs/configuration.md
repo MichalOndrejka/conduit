@@ -154,7 +154,7 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `PREPROCESSING_MODEL` | Overrides `preprocessing.model`. |
 | `PREPROCESSING_BASE_URL` | Overrides `preprocessing.base_url`. |
 | `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
-| `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`, or `0.0.0.0` in a container so the port mapping works. |
+| `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`, or `0.0.0.0` in a container so the port mapping works. Requests must be addressed to `localhost`, `127.0.0.1`, `::1` or this value, and cross-site browser POSTs are rejected (DNS-rebinding/CSRF protection). |
 | `PORT` | HTTP listen port. Default: `8000`. |
 
 Every variable above always overrides the matching `config.json` value on process

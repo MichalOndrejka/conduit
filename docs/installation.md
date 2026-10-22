@@ -72,7 +72,7 @@ docker compose up --build
 Only Conduit, against Qdrant and Ollama you run yourself:
 
 ```bash
-docker run -d --name conduit -p 8000:8000 -v conduit_data:/data \
+docker run -d --name conduit -p 127.0.0.1:8000:8000 -v conduit_data:/data \
   -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   michalondrejka/conduit:latest

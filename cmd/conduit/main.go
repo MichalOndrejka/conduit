@@ -131,7 +131,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	srv := &http.Server{Addr: listenAddr(), Handler: mux}
+	// Every route, /mcp included, rejects DNS-rebinding and cross-site requests.
+	// An explicit CONDUIT_HOST bind address is also accepted as a Host value.
+	srv := &http.Server{
+		Addr:              listenAddr(),
+		Handler:           web.LocalOnly(mux, os.Getenv("CONDUIT_HOST")),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
 	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s",
