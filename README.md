@@ -25,6 +25,9 @@ docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-comp
                -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.nvidia.yml up
 ```
 
+AMD GPUs work on Linux only (`docker-compose.amd.yml`); other setups run on
+CPU — see [GPU](docs/installation.md#gpu).
+
 **Corporate proxy** (PowerShell):
 
 ```powershell
