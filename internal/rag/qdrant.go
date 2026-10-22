@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -196,6 +197,24 @@ func (v *VectorStore) CollectionExists(ctx context.Context, name string) bool {
 		}
 	}
 	return false
+}
+
+// EnsureCollections creates whichever of names don't exist yet, so tools and
+// memory writes never hit a missing collection. Existing collections are left
+// alone, even if sized for another model: the indexer recreates those on the
+// next sync.
+func (v *VectorStore) EnsureCollections(ctx context.Context, names []string, dimensions int) error {
+	existing, err := v.ListCollections(ctx)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, name := range names {
+		if !slices.Contains(existing, name) {
+			errs = append(errs, v.CreateCollection(ctx, name, dimensions))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // CreateCollection creates a cosine-distance collection; dimensions <= 0 uses

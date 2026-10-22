@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
@@ -48,8 +49,11 @@ func Start(cfg *config.AppConfig, vectors *rag.VectorStore, embedding *rag.Embed
 		embedding: ProbeState{Status: "pending"},
 	}
 
+	// The Qdrant probe also recreates collections that disappeared (Qdrant
+	// was down at startup, or its volume was wiped), so tools keep finding
+	// every collection.
 	go m.probe(func(ctx context.Context) error {
-		return vectors.HealthCheck(ctx)
+		return vectors.EnsureCollections(ctx, models.AllCollections, cfg.Embedding.Dimensions)
 	}, m.setQdrant, qdrantRecheck)
 
 	go m.probe(func(ctx context.Context) error {

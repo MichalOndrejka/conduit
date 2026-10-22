@@ -97,6 +97,49 @@ func TestRememberUpsertsSituationAndGuidance(t *testing.T) {
 	}
 }
 
+func TestRememberCreatesMissingCollection(t *testing.T) {
+	var created bool
+	var createdSize float64
+	var upserts int
+	qdrant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPut && r.URL.Path == "/collections/"+Collection:
+			var body struct {
+				Vectors struct {
+					Size float64 `json:"size"`
+				} `json:"vectors"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			created, createdSize = true, body.Vectors.Size
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/points"):
+			upserts++
+			if !created {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"status":{"error":"Not found: Collection doesn't exist!"}}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer qdrant.Close()
+	embed := embeddingServer(t, []float32{0.1, 0.2, 0.3, 0.4}, false)
+	defer embed.Close()
+
+	svc := NewService(newVectorStore(t, qdrant), newEmbeddingService(t, embed))
+	if _, err := svc.Remember(context.Background(), "situation", "guidance"); err != nil {
+		t.Fatal(err)
+	}
+	if !created || createdSize != 4 {
+		t.Errorf("created = %v size = %v, want collection sized from the vector (4)", created, createdSize)
+	}
+	if upserts != 2 {
+		t.Errorf("upserts = %d, want 2 (404, then retry)", upserts)
+	}
+}
+
 func TestRememberReturnsErrorWhenEmbedFails(t *testing.T) {
 	qdrant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("qdrant should not be called when embedding fails")

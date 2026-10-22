@@ -22,6 +22,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/health"
 	"github.com/MichalOndrejka/conduit/internal/mcptools"
 	"github.com/MichalOndrejka/conduit/internal/memory"
+	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/setup"
@@ -95,6 +96,15 @@ func main() {
 	case err != nil:
 		log.Printf("warning: could not check embedding model state: %v", err)
 	}
+
+	// Create every collection before the tools are served, so none of them
+	// can hit a missing one. If Qdrant isn't reachable yet, the health probe
+	// below creates them once it is.
+	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 30*time.Second)
+	if err := vectors.EnsureCollections(ensureCtx, models.AllCollections, cfg.Embedding.Dimensions); err != nil {
+		log.Printf("warning: could not create collections yet (retried by the Qdrant health probe): %v", err)
+	}
+	cancelEnsure()
 
 	// ── Sync engine (generic sources: API + manual) ────────────────────────
 	chunker := rag.NewTextChunker(cfg)

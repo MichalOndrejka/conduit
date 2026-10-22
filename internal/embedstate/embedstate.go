@@ -62,9 +62,9 @@ func Save(dataDir string, ec config.EmbeddingConfig) error {
 	return os.Rename(tmp, path)
 }
 
-// DropAll deletes every collection, recreates an empty experience collection
-// (memory upserts don't create it), and flags all sources for reindex — what
-// a vector-incompatible embedding change requires.
+// DropAll deletes every collection, recreates them empty at the new size so
+// tools never see one missing, and flags all sources for reindex — what a
+// vector-incompatible embedding change requires.
 func DropAll(ctx context.Context, vectors *rag.VectorStore, sources *store.SourceConfigStore, dimensions int) error {
 	existing, err := vectors.ListCollections(ctx)
 	if err != nil {
@@ -79,7 +79,7 @@ func DropAll(ctx context.Context, vectors *rag.VectorStore, sources *store.Sourc
 		}
 	}
 	errs = append(errs,
-		vectors.CreateCollection(ctx, models.CollectionExperience, dimensions),
+		vectors.EnsureCollections(ctx, models.AllCollections, dimensions),
 		sources.ResetAllSyncStatus("needs-reindex"),
 	)
 	return errors.Join(errs...)

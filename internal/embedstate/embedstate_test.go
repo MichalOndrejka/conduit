@@ -137,11 +137,11 @@ func TestReconcileModelChangeDropsAndFlags(t *testing.T) {
 	if prev.Model != "a" {
 		t.Errorf("prev = %+v", prev)
 	}
-	if _, ok := qd.size(models.CollectionWorkItems); ok {
-		t.Error("work items collection should be dropped")
-	}
-	if n, _ := qd.size(models.CollectionExperience); n != 1024 {
-		t.Errorf("experience recreated with size %d, want 1024", n)
+	// Dropped and recreated empty at the new size, so no tool sees one missing.
+	for _, col := range models.AllCollections {
+		if n, _ := qd.size(col); n != 1024 {
+			t.Errorf("%s recreated with size %d, want 1024", col, n)
+		}
 	}
 	if s := status(t, st); s != "needs-reindex" {
 		t.Errorf("status = %q, want needs-reindex", s)

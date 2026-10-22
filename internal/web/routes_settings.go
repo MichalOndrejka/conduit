@@ -228,6 +228,8 @@ func (s *Server) handleCleanSourceEmbeddings(w http.ResponseWriter, r *http.Requ
 			_ = s.vectors.DeleteCollection(r.Context(), col)
 		}
 	}
+	// Recreate them empty so search tools never see a missing collection.
+	_ = s.vectors.EnsureCollections(r.Context(), models.AllCollections, s.cfg.Embedding.Dimensions)
 	_ = s.sources.ResetAllSyncStatus("needs-reindex")
 	http.Redirect(w, r, "/settings?notice=source_embeddings_cleaned", http.StatusSeeOther)
 }
@@ -239,8 +241,8 @@ func (s *Server) handleCleanExperienceEmbeddings(w http.ResponseWriter, r *http.
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
-// recreateExperience drops and recreates the experience collection so the
-// memory store stays usable (its upserts don't auto-create the collection).
+// recreateExperience drops and recreates the experience collection, so it is
+// emptied but never missing.
 func (s *Server) recreateExperience(ctx context.Context) {
 	_ = s.vectors.DeleteCollection(ctx, models.CollectionExperience)
 	_ = s.vectors.CreateCollection(ctx, models.CollectionExperience, s.cfg.Embedding.Dimensions)

@@ -5,6 +5,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -48,7 +49,16 @@ func (s *Service) Remember(ctx context.Context, situation, guidance string) (str
 			models.PropKey("created_at"): now.Format(time.RFC3339Nano),
 		},
 	}
-	if err := s.store.Upsert(ctx, Collection, []rag.Point{point}); err != nil {
+	err = s.store.Upsert(ctx, Collection, []rag.Point{point})
+	if errors.Is(err, rag.ErrCollectionNotFound) {
+		// Startup and the Qdrant health probe create every collection; this
+		// covers one wiped since the last probe. Size it from the vector, as
+		// the indexer does for sources.
+		if err = s.store.CreateCollection(ctx, Collection, len(vector)); err == nil {
+			err = s.store.Upsert(ctx, Collection, []rag.Point{point})
+		}
+	}
+	if err != nil {
 		log.Printf("warning: upsert failed for experience %s — rolling back", entryID)
 		_ = s.store.DeleteByIDs(ctx, Collection, []string{entryID})
 		return "", err

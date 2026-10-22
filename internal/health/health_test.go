@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
@@ -202,5 +203,34 @@ func TestStartStaysPendingAgainstUnreachableQdrant(t *testing.T) {
 	}
 	if got := m.Qdrant().Status; got != "pending" {
 		t.Errorf("Qdrant().Status = %q, want still pending this early", got)
+	}
+}
+
+// TestStartCreatesMissingCollections confirms the Qdrant probe creates every
+// collection, so tools never hit a missing one — including after Qdrant was
+// unreachable at startup.
+func TestStartCreatesMissingCollections(t *testing.T) {
+	embedSrv := httptest.NewServer(fixedEmbedHandler())
+	defer embedSrv.Close()
+
+	var created atomic.Int32
+	qdSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			created.Add(1)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": []any{}}})
+	}))
+	defer qdSrv.Close()
+
+	cfg := &config.AppConfig{}
+	cfg.Embedding.BaseURL = embedSrv.URL
+	cfg.Embedding.MaxInputTokens = 8192
+	cfg.Embedding.Dimensions = 3
+	cfg.Qdrant.URL = qdSrv.URL
+
+	m := Start(cfg, rag.NewVectorStore(cfg), rag.NewEmbeddingService(cfg))
+	waitFor(t, m.IsReady, 2*time.Second, "Qdrant probe to become ready")
+	if got, want := int(created.Load()), len(models.AllCollections); got != want {
+		t.Errorf("created %d collections, want %d", got, want)
 	}
 }

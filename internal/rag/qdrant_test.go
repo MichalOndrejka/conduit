@@ -172,6 +172,51 @@ func TestCollectionLifecycle(t *testing.T) {
 	}
 }
 
+func TestEnsureCollectionsCreatesOnlyMissing(t *testing.T) {
+	var created []string
+	var sizes []float64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/collections":
+			_, _ = w.Write([]byte(`{"result": {"collections": [{"name": "existing"}]}}`))
+		case r.Method == http.MethodPut:
+			var body struct {
+				Vectors struct {
+					Size float64 `json:"size"`
+				} `json:"vectors"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			created = append(created, strings.TrimPrefix(r.URL.Path, "/collections/"))
+			sizes = append(sizes, body.Vectors.Size)
+			_, _ = w.Write([]byte(`{"result": true}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	v := storeFor(t, srv)
+	if err := v.EnsureCollections(context.Background(), []string{"existing", "a", "b"}, 768); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(created, ",") != "a,b" {
+		t.Errorf("created = %v, want [a b]", created)
+	}
+	for _, s := range sizes {
+		if s != 768 {
+			t.Errorf("created with size %v, want 768", s)
+		}
+	}
+}
+
+func TestEnsureCollectionsErrorsWhenUnreachable(t *testing.T) {
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = "http://127.0.0.1:1"
+	if err := NewVectorStore(cfg).EnsureCollections(context.Background(), []string{"a"}, 3); err == nil {
+		t.Fatal("expected an error when Qdrant is unreachable")
+	}
+}
+
 func TestTagFilterNilForEmpty(t *testing.T) {
 	if TagFilter(nil) != nil || TagFilter(map[string]string{}) != nil {
 		t.Error("empty tags should produce nil filter")
