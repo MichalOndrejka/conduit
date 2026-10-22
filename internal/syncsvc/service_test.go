@@ -632,3 +632,56 @@ func TestSyncPipelineRunSnapshot(t *testing.T) {
 		t.Errorf("after failed resync points = %d, want the previous 2 kept", got)
 	}
 }
+
+func TestShutdownCancelsRunningSyncAndLeavesIdle(t *testing.T) {
+	started := make(chan struct{})
+	var once sync.Once
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(started) })
+		<-r.Context().Done() // hang until the sync's ctx aborts the fetch
+	}))
+	defer apiSrv.Close()
+
+	svc, st, _, src := setupPipeline(t, apiSrv.URL)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		svc.Sync(context.Background(), src.ID)
+	}()
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := svc.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	<-done
+
+	saved, _ := st.Get(src.ID)
+	if saved.SyncStatus != "idle" {
+		t.Errorf("status after shutdown = %q, want idle", saved.SyncStatus)
+	}
+}
+
+func TestSyncAfterShutdownIsRefused(t *testing.T) {
+	var fetchCount int32
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&fetchCount, 1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+	}))
+	defer apiSrv.Close()
+
+	svc, st, _, src := setupPipeline(t, apiSrv.URL)
+	if err := svc.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+	svc.Sync(context.Background(), src.ID)
+
+	if n := atomic.LoadInt32(&fetchCount); n != 0 {
+		t.Errorf("fetches after shutdown = %d, want 0", n)
+	}
+	saved, _ := st.Get(src.ID)
+	if saved.SyncStatus != "idle" {
+		t.Errorf("status = %q, want idle", saved.SyncStatus)
+	}
+}

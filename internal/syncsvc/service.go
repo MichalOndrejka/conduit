@@ -33,6 +33,16 @@ type Service struct {
 	// run just wrote.
 	mu       sync.Mutex
 	inflight map[string]bool
+
+	// root is cancelled by Shutdown. Every sync is tied to it regardless of
+	// the caller's ctx (handlers pass context.Background()), so a container
+	// stop aborts in-flight work and records it as idle instead of leaving
+	// the source stuck in "syncing". closing (guarded by mu) refuses new
+	// syncs once shutdown has begun, so running.Add never races running.Wait.
+	root    context.Context
+	stopAll context.CancelFunc
+	running sync.WaitGroup
+	closing bool
 }
 
 func New(
@@ -43,10 +53,33 @@ func New(
 	progress *syncctl.ProgressStore,
 	control *syncctl.ControlStore,
 ) *Service {
+	root, stopAll := context.WithCancel(context.Background())
 	return &Service{
 		cfg: cfg, store: st, secrets: secretsStore,
 		indexer: indexer, progress: progress, control: control,
 		inflight: map[string]bool{},
+		root:     root, stopAll: stopAll,
+	}
+}
+
+// Shutdown refuses new syncs, cancels running ones, and waits until each has
+// persisted its final status, or ctx ends first.
+func (s *Service) Shutdown(ctx context.Context) error {
+	s.mu.Lock()
+	s.closing = true
+	s.mu.Unlock()
+	s.stopAll()
+
+	done := make(chan struct{})
+	go func() {
+		s.running.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -64,13 +97,20 @@ func (s *Service) IsSyncing(sourceID string) bool {
 // A no-op if a sync for this source is already running.
 func (s *Service) Sync(ctx context.Context, sourceID string) {
 	s.mu.Lock()
+	if s.closing {
+		s.mu.Unlock()
+		log.Printf("shutting down — ignoring sync request for source %s", sourceID)
+		return
+	}
 	if s.inflight[sourceID] {
 		s.mu.Unlock()
 		log.Printf("sync already running for source %s — ignoring duplicate request", sourceID)
 		return
 	}
 	s.inflight[sourceID] = true
+	s.running.Add(1)
 	s.mu.Unlock()
+	defer s.running.Done()
 	defer func() {
 		s.mu.Lock()
 		delete(s.inflight, sourceID)
@@ -103,6 +143,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	// on a large source, and would otherwise keep its concurrency slot stuck.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer context.AfterFunc(s.root, cancel)()
 	s.control.SetCancelFunc(sourceID, cancel)
 
 	finish := func() {

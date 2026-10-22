@@ -7,9 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -26,6 +30,19 @@ import (
 )
 
 func main() {
+	// Container HEALTHCHECK probe (see Dockerfile): the distroless image has
+	// no shell or curl, so the binary checks its own /health endpoint.
+	// Dispatched before any setup so a probe never starts health monitors or
+	// touches the data dir.
+	//   conduit healthcheck
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := runHealthcheck(); err != nil {
+			fmt.Fprintln(os.Stderr, "unhealthy:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -79,28 +96,96 @@ func main() {
 	webServer.Routes(mux)
 	mux.Handle("/mcp", mcpHTTP)
 
-	// Bind to loopback by default so a local `go run` doesn't trigger the
-	// Windows "allow this app on public/private networks" firewall prompt,
-	// which only fires for listeners reachable from other interfaces.
-	// Docker needs the container-internal 0.0.0.0 so the port mapping works —
-	// set CONDUIT_HOST=0.0.0.0 there, e.g. `docker run -e CONDUIT_HOST=0.0.0.0 ...`.
+	// Docker sends SIGTERM on `docker stop` (SIGINT covers Ctrl+C locally).
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	srv := &http.Server{Addr: listenAddr(), Handler: mux}
+	serveErr := make(chan error, 1)
+	go func() { serveErr <- srv.ListenAndServe() }()
+	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s",
+		srv.Addr, cfg.Qdrant.URL, cfg.Embedding.Model)
+
+	select {
+	case err := <-serveErr:
+		log.Fatal(err)
+	case <-ctx.Done():
+	}
+	stop() // a second signal now kills the process immediately
+	shutdown(srv, syncSvc)
+}
+
+const version = "0.1.0"
+
+// shutdownTimeout keeps the whole graceful stop inside Docker's default
+// 10 s grace period before it escalates to SIGKILL.
+const shutdownTimeout = 8 * time.Second
+
+// shutdown stops accepting requests, then cancels running syncs and waits
+// for them to record their final status (idle) to conduit-sources.json.
+func shutdown(srv *http.Server, syncSvc *syncsvc.Service) {
+	log.Printf("shutting down…")
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	// Shutdown waits for in-flight requests, but MCP streaming connections
+	// can stay open indefinitely, so give it only part of the budget and
+	// then force-close whatever is left.
+	httpCtx, httpCancel := context.WithTimeout(ctx, shutdownTimeout/2)
+	defer httpCancel()
+	if err := srv.Shutdown(httpCtx); err != nil {
+		log.Printf("warning: HTTP shutdown: %v — closing remaining connections", err)
+		_ = srv.Close()
+	}
+	if err := syncSvc.Shutdown(ctx); err != nil {
+		log.Printf("warning: running syncs did not stop in time: %v", err)
+	}
+	log.Printf("stopped")
+}
+
+// listenAddr resolves the bind address from CONDUIT_HOST and PORT. Outside a
+// container it defaults to loopback so a local `go run` doesn't trigger the
+// Windows "allow this app on public/private networks" firewall prompt, which
+// only fires for listeners reachable from other interfaces. Inside one it
+// defaults to 0.0.0.0, since Docker's port mapping can't reach loopback.
+func listenAddr() string {
 	host := os.Getenv("CONDUIT_HOST")
 	if host == "" {
 		host = "127.0.0.1"
+		if config.InContainer() {
+			host = "0.0.0.0"
+		}
 	}
 	port := "8000"
 	if p := os.Getenv("PORT"); p != "" {
 		port = p
 	}
-	addr := host + ":" + port
-	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s",
-		addr, cfg.Qdrant.URL, cfg.Embedding.Model)
-	if err := http.ListenAndServe(addr, mux); err != nil {
-		log.Fatal(err)
-	}
+	return net.JoinHostPort(host, port)
 }
 
-const version = "0.1.0"
+// runHealthcheck reports whether this process's own web server answers
+// /health. It checks liveness only: Qdrant/Ollama being down shows up in the
+// response body but is not a failure, since restarting Conduit can't fix them.
+func runHealthcheck() error {
+	host, port, err := net.SplitHostPort(listenAddr())
+	if err != nil {
+		return err
+	}
+	// A wildcard bind address isn't dialable; the server is reachable on loopback.
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		host = "127.0.0.1"
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/health")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("/health returned %s", resp.Status)
+	}
+	return nil
+}
 
 func runSearchCLI(searchSvc *rag.SearchService, args []string) {
 	if len(args) < 2 {

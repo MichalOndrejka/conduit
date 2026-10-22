@@ -158,3 +158,53 @@ func captureStdout(t *testing.T, fn func()) string {
 	_, _ = io.Copy(&buf, r)
 	return buf.String()
 }
+
+func TestListenAddr(t *testing.T) {
+	cases := []struct {
+		name, host, port, inContainer, want string
+	}{
+		{"local default", "", "", "0", "127.0.0.1:8000"},
+		{"container default", "", "", "1", "0.0.0.0:8000"},
+		{"explicit host wins in container", "127.0.0.1", "", "1", "127.0.0.1:8000"},
+		{"custom port", "", "9000", "0", "127.0.0.1:9000"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CONDUIT_HOST", tc.host)
+			t.Setenv("PORT", tc.port)
+			t.Setenv("CONDUIT_IN_CONTAINER", tc.inContainer)
+			if got := listenAddr(); got != tc.want {
+				t.Errorf("listenAddr() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunHealthcheck(t *testing.T) {
+	status := http.StatusOK
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/health" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+	}))
+	defer srv.Close()
+
+	_, port, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
+	// Wildcard bind must be probed via loopback, as in a container.
+	t.Setenv("CONDUIT_HOST", "0.0.0.0")
+	t.Setenv("PORT", port)
+
+	if err := runHealthcheck(); err != nil {
+		t.Errorf("healthy server: %v", err)
+	}
+	status = http.StatusServiceUnavailable
+	if err := runHealthcheck(); err == nil {
+		t.Error("expected error for non-200 /health")
+	}
+	srv.Close()
+	if err := runHealthcheck(); err == nil {
+		t.Error("expected error when nothing is listening")
+	}
+}

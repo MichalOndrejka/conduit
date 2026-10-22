@@ -118,7 +118,6 @@ docker build -t conduit .
 
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
-  -e CONDUIT_HOST=0.0.0.0 \
   -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   conduit
@@ -129,7 +128,6 @@ Or pull the prebuilt image from Docker Hub instead of building:
 ```bash
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
-  -e CONDUIT_HOST=0.0.0.0 \
   -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   michalondrejka/conduit:latest
@@ -143,6 +141,31 @@ add `--add-host=host.docker.internal:host-gateway` for that name to resolve.
 Point `QDRANT_URL`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL` at wherever those services actually run instead (another container, a remote
 host, etc.) — or leave them out and configure the connections
 from the **Settings** page after the container starts.
+
+Inside a container the web server binds `0.0.0.0` (outside, `127.0.0.1`), so
+`-p` works without setting `CONDUIT_HOST`. The image has a `HEALTHCHECK` that
+runs `conduit healthcheck` against `/health`; it reports Conduit itself, not
+whether Qdrant/Ollama are reachable (see `/health`'s body for that). On
+`docker stop`, Conduit stops accepting requests, cancels running syncs, and
+marks them idle before exiting, so re-run any sync that was interrupted.
+
+#### Private / corporate CAs
+
+The image trusts the standard public CA bundle only. If Azure DevOps, Qdrant,
+or your embedding endpoint uses a certificate from an internal CA (or traffic
+passes through a TLS-intercepting proxy), mount a PEM bundle and point Go at
+it. On Windows, `scripts/export-ca-certs.ps1` exports the machine's trusted
+roots to `certs/windows-root-ca.pem`:
+
+```bash
+docker run ... \
+  -v ./certs:/certs:ro \
+  -e SSL_CERT_FILE=/certs/windows-root-ca.pem \
+  conduit
+```
+
+Per-source `VerifySSL=false` also works for API sources, but it disables
+certificate checks entirely, so prefer the CA bundle.
 
 ### Sync performance: concurrency
 
@@ -166,7 +189,7 @@ configured on that service directly — see the
 
 | Variable | Purpose |
 |----------|---------|
-| `CONDUIT_HOST` | Bind address (default `127.0.0.1`; use `0.0.0.0` in Docker) |
+| `CONDUIT_HOST` | Bind address (default `127.0.0.1`, or `0.0.0.0` in a container) |
 | `PORT` | Listen port (default `8000`) |
 | `QDRANT_URL` / `QDRANT_API_KEY` | Qdrant connection |
 | `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_MAX_INPUT_TOKENS` | Embedding settings (Ollama or any OpenAI-compatible endpoint) |

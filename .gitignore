@@ -18,7 +18,7 @@ node_modules/
 # Qdrant local storage
 qdrant_storage/
 
-# Corporate/proxy root CA certs for Ollama (device-specific, never commit)
+# Corporate/internal root CA bundle from scripts/export-ca-certs.ps1 (device-specific, never commit)
 certs/*
 !certs/.gitkeep
 

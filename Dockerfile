@@ -1,6 +1,5 @@
 # Conduit (Go) — multi-stage build producing a ~25 MB distroless image
 # (vs the ~1–2 GB Python image), idling at ~20–50 MB RSS.
-# Named Dockerfile.golang (not .go) so the Go toolchain doesn't try to compile it.
 FROM golang:1.26 AS build
 WORKDIR /src
 
@@ -27,6 +26,10 @@ COPY --from=build --chown=65532:65532 /app-empty /app
 VOLUME /data
 ENV CONDUIT_DATA_DIR=/data
 # First-run Settings defaults point at host.docker.internal instead of localhost
+# (and the web server binds 0.0.0.0 instead of loopback, so -p works)
 ENV CONDUIT_IN_CONTAINER=1
 EXPOSE 8000
+# No shell/curl in distroless — the binary probes its own /health endpoint
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/conduit", "healthcheck"]
 ENTRYPOINT ["/conduit"]

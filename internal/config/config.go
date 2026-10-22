@@ -44,10 +44,10 @@ type AppConfig struct {
 	SourcesFilePath string              `json:"sources_file_path"`
 }
 
-// inContainer reports whether Conduit is running inside a container. The
+// InContainer reports whether Conduit is running inside a container. The
 // Dockerfile sets CONDUIT_IN_CONTAINER=1; the marker files cover images built
 // elsewhere (/.dockerenv for Docker, /run/.containerenv for Podman).
-func inContainer() bool {
+func InContainer() bool {
 	if v := os.Getenv("CONDUIT_IN_CONTAINER"); v != "" {
 		b, err := strconv.ParseBool(v)
 		return err == nil && b
@@ -64,7 +64,7 @@ func inContainer() bool {
 // the host machine. Inside a container localhost is the container itself,
 // so point at the host via Docker's host.docker.internal alias instead.
 func defaultHost() string {
-	if inContainer() {
+	if InContainer() {
 		return "host.docker.internal"
 	}
 	return "localhost"
