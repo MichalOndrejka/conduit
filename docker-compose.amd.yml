@@ -1,0 +1,14 @@
+# AMD GPU overlay for the ollama service (ROCm). Linux hosts only: Docker on
+# Windows/WSL2 doesn't expose AMD GPUs to containers, so there Ollama stays
+# on CPU — use docker-compose.nvidia.yml or run without an overlay.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+#
+# Check it took effect: `docker compose logs ollama` should list the GPU
+# (look for the "inference compute" line naming ROCm) rather than CPU.
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    devices:
+      - /dev/kfd
+      - /dev/dri

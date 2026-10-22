@@ -3,11 +3,13 @@ package main
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -181,17 +183,19 @@ func TestListenAddr(t *testing.T) {
 }
 
 func TestRunHealthcheck(t *testing.T) {
-	status := http.StatusOK
+	// Read by the server goroutine, written by the test: atomic avoids a data race.
+	var status atomic.Int32
+	status.Store(http.StatusOK)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/health" {
 			http.NotFound(w, r)
 			return
 		}
-		w.WriteHeader(status)
+		w.WriteHeader(int(status.Load()))
 	}))
 	defer srv.Close()
 
-	_, port, _ := strings.Cut(strings.TrimPrefix(srv.URL, "http://"), ":")
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(srv.URL, "http://"))
 	// Wildcard bind must be probed via loopback, as in a container.
 	t.Setenv("CONDUIT_HOST", "0.0.0.0")
 	t.Setenv("PORT", port)
@@ -199,7 +203,7 @@ func TestRunHealthcheck(t *testing.T) {
 	if err := runHealthcheck(); err != nil {
 		t.Errorf("healthy server: %v", err)
 	}
-	status = http.StatusServiceUnavailable
+	status.Store(http.StatusServiceUnavailable)
 	if err := runHealthcheck(); err == nil {
 		t.Error("expected error for non-200 /health")
 	}

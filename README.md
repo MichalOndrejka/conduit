@@ -108,10 +108,64 @@ Then: add credentials at `/credentials`, create a source at `/sources/create`, h
 
 ## Running in Docker
 
-Conduit runs as a single standalone container that connects out to
-prerequisites you run yourself — Qdrant, an embedding endpoint (e.g. Ollama),
-and optionally an LLM for preprocessing. It does not bundle or manage those
-services.
+### Docker Compose (full stack)
+
+`docker-compose.yml` runs Conduit together with Qdrant and Ollama, plus a
+one-shot `ollama-pull` container that downloads the configured models before
+Conduit starts. Services talk to each other by name on the compose network,
+so nothing depends on Docker reaching the host's `localhost`.
+
+```bash
+cp .env.example .env               # optional: models, proxy, GPU overlay
+docker compose up -d --build       # build Conduit from source
+# or: docker compose pull && docker compose up -d   (Docker Hub image)
+```
+
+Open http://localhost:8000. The first start takes a while: `ollama-pull`
+downloads both models (follow it with `docker compose logs -f ollama-pull`).
+Models live in the `ollama_data` volume, so later starts skip the download.
+
+Qdrant and Ollama ports aren't published, so they don't clash with copies
+already running on the host; uncomment `ports:` in `docker-compose.yml` to
+reach them directly.
+
+**GPU.** Ollama runs on CPU by default. Layer an overlay on top for a GPU:
+
+| Overlay | Hosts |
+| --- | --- |
+| `docker-compose.nvidia.yml` | Windows (Docker Desktop or Docker Engine in WSL2) and Linux with `nvidia-container-toolkit` |
+| `docker-compose.amd.yml` | Linux only (ROCm). Docker on Windows can't pass AMD GPUs to containers. |
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+```
+
+or set it once in `.env` so plain `docker compose up` uses it:
+
+```bash
+COMPOSE_PATH_SEPARATOR=:
+COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml
+```
+
+Intel GPUs, and AMD GPUs on Windows, have no container passthrough; they run
+on CPU. `docker compose logs ollama` shows which one Ollama picked up.
+
+**Models.** `EMBEDDING_MODEL` / `PREPROCESSING_MODEL` in `.env` drive both
+what `ollama-pull` downloads and what Conduit uses. Because env vars override
+the Settings page on every start, change models in `.env`, then
+`docker compose up -d` again.
+
+**Corporate proxy / TLS interception.** On Windows, run
+`scripts/export-ca-certs.ps1` to write the machine's trusted root CAs to
+`certs/windows-root-ca.pem`, and set `HTTP_PROXY` / `HTTPS_PROXY` (and
+`NO_PROXY` for internal hosts such as an on-prem Azure DevOps) in `.env`.
+Ollama and Conduit both mount `./certs` and add it to their own CA list, so
+model pulls and source syncs trust the proxy. An empty `certs/` is fine
+anywhere else.
+
+### Standalone container
+
+To run only Conduit against a Qdrant and Ollama you already run elsewhere:
 
 ```bash
 docker build -t conduit .
@@ -138,34 +192,31 @@ credentials across restarts. `host.docker.internal` reaches services running
 on the host, and is also what the Settings page pre-fills on first start when
 Conduit detects it's in a container (instead of `localhost`). On Linux hosts,
 add `--add-host=host.docker.internal:host-gateway` for that name to resolve.
-Point `QDRANT_URL`/`EMBEDDING_BASE_URL`/`PREPROCESSING_BASE_URL` at wherever those services actually run instead (another container, a remote
-host, etc.) — or leave them out and configure the connections
-from the **Settings** page after the container starts.
+A host service that listens only on `127.0.0.1` (Ollama's default) may still
+be unreachable from a container; if so, set `OLLAMA_HOST=0.0.0.0` on the host
+or use Docker Compose above. Point `QDRANT_URL`/`EMBEDDING_BASE_URL`/
+`PREPROCESSING_BASE_URL` at wherever those services actually run — or leave
+them out and configure the connections from the **Settings** page after the
+container starts.
+
+For an internal CA, mount the bundle and add it to Go's CA list:
+
+```bash
+docker run ... -v ./certs:/certs:ro -e SSL_CERT_DIR=/certs conduit
+```
+
+Per-source `VerifySSL=false` also works for API sources, but it disables
+certificate checks entirely, so prefer the CA bundle.
+
+### Container behavior
 
 Inside a container the web server binds `0.0.0.0` (outside, `127.0.0.1`), so
 `-p` works without setting `CONDUIT_HOST`. The image has a `HEALTHCHECK` that
 runs `conduit healthcheck` against `/health`; it reports Conduit itself, not
 whether Qdrant/Ollama are reachable (see `/health`'s body for that). On
-`docker stop`, Conduit stops accepting requests, cancels running syncs, and
-marks them idle before exiting, so re-run any sync that was interrupted.
-
-#### Private / corporate CAs
-
-The image trusts the standard public CA bundle only. If Azure DevOps, Qdrant,
-or your embedding endpoint uses a certificate from an internal CA (or traffic
-passes through a TLS-intercepting proxy), mount a PEM bundle and point Go at
-it. On Windows, `scripts/export-ca-certs.ps1` exports the machine's trusted
-roots to `certs/windows-root-ca.pem`:
-
-```bash
-docker run ... \
-  -v ./certs:/certs:ro \
-  -e SSL_CERT_FILE=/certs/windows-root-ca.pem \
-  conduit
-```
-
-Per-source `VerifySSL=false` also works for API sources, but it disables
-certificate checks entirely, so prefer the CA bundle.
+`docker stop` / `docker compose down`, Conduit stops accepting requests,
+cancels running syncs, and marks them idle before exiting, so re-run any sync
+that was interrupted.
 
 ### Sync performance: concurrency
 
@@ -177,10 +228,9 @@ one request at a time), controlled by env vars with sane defaults:
 | `EMBEDDING_CONCURRENCY` | `4` | Max in-flight embed calls per sync |
 | `PREPROCESSING_CONCURRENCY` | `4` | Max in-flight preprocessing/chat calls per sync |
 
-If you're running Ollama yourself as the embedding/LLM backend, its own
-`OLLAMA_NUM_PARALLEL` / `OLLAMA_MAX_LOADED_MODELS` / `OLLAMA_KEEP_ALIVE`
-settings (and GPU passthrough via the `nvidia-container-toolkit`) are
-configured on that service directly — see the
+Ollama's own `OLLAMA_NUM_PARALLEL` / `OLLAMA_MAX_LOADED_MODELS` /
+`OLLAMA_KEEP_ALIVE` settings are set in `.env` when using Docker Compose,
+or on your own Ollama service directly — see the
 [Ollama docs](https://github.com/ollama/ollama/blob/main/docs/faq.md).
 
 ## Configuration

@@ -1,9 +1,9 @@
 # Exports every trusted root CA from the Windows certificate store into
-# ./certs as a single PEM bundle, so a container (Conduit, or a containerized
-# Ollama) can trust an internal CA or a corporate TLS-interception proxy
-# without manually hunting for the right cert in certmgr.msc. Mount it and
-# point Go's TLS at it, e.g. for Conduit:
-#   docker run -v ./certs:/certs:ro -e SSL_CERT_FILE=/certs/windows-root-ca.pem ...
+# ./certs as a single PEM bundle, so the containers can trust an internal CA
+# or a corporate TLS-interception proxy without manually hunting for the
+# right cert in certmgr.msc. docker-compose.yml mounts ./certs into ollama
+# (model pulls) and conduit (source syncs); for a standalone container:
+#   docker run -v ./certs:/certs:ro -e SSL_CERT_DIR=/certs ...
 # Re-run this whenever HTTPS calls start failing with an x509 verification
 # error (e.g. the corporate cert rotated).
 $ErrorActionPreference = "Stop"

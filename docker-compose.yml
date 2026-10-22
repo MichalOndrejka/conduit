@@ -1,0 +1,128 @@
+# Full Conduit stack: Conduit + Qdrant + Ollama, plus a one-shot container
+# that pulls the configured models into Ollama before Conduit starts.
+#
+#   docker compose up -d --build     # build Conduit from source
+#   docker compose pull && docker compose up -d   # or use the Docker Hub image
+#
+# Services reach each other by name on the compose network, so nothing here
+# depends on Docker being able to reach the host's localhost.
+#
+# Ollama runs on CPU by default. For a GPU, layer an overlay on top
+# (or set COMPOSE_FILE in .env — see .env.example):
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.amd.yml up -d
+#
+# Behind a corporate TLS-interception proxy, run scripts/export-ca-certs.ps1
+# first (writes certs/windows-root-ca.pem) and set HTTP_PROXY/HTTPS_PROXY in
+# .env. ./certs is added to — not substituted for — each image's own CA
+# list, so leaving it empty is fine everywhere else.
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.13.6
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # Not published by default, to avoid clashing with a Qdrant already on
+    # the host. Uncomment for the dashboard at http://localhost:6333/dashboard.
+    # ports:
+    #   - "127.0.0.1:6333:6333"
+    healthcheck:
+      # The qdrant image has no curl/wget; probe the port with bash's /dev/tcp.
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./certs:/certs:ro
+    # Not published by default, to avoid clashing with an Ollama already on
+    # the host. Uncomment to run `ollama` commands against it from the host.
+    # ports:
+    #   - "127.0.0.1:11434:11434"
+    environment:
+      # Model downloads are made by this server, not by ollama-pull, so the
+      # proxy and CA settings belong here. Pulls are HTTPS-only; HTTP_PROXY
+      # is deliberately not passed, because the image's OLLAMA_HOST is
+      # 0.0.0.0, which Go doesn't treat as loopback, so the healthcheck's
+      # `ollama list` would be sent to the proxy and fail.
+      SSL_CERT_DIR: /certs
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,qdrant,ollama,conduit,${NO_PROXY:-}
+      # Process concurrent requests instead of queuing them — keep in step
+      # with EMBEDDING_CONCURRENCY / PREPROCESSING_CONCURRENCY below.
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-4}
+      # Keep the embedding and preprocessing models resident together, so a
+      # sync doesn't evict and reload one to run the other.
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-2}
+      # Keep models warm between syncs.
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: asks the ollama service to pull any configured model that isn't
+  # in ollama_data yet, then exits. Models already present are skipped rather
+  # than re-checked against the registry, so restarts work offline or with
+  # the proxy down. Conduit waits for this so it never syncs against a model
+  # that hasn't been downloaded yet.
+  ollama-pull:
+    image: ollama/ollama:latest
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    # A single list item, so the whole script stays one argv element for -c.
+    # $$ escapes Compose interpolation for the shell's own variable.
+    command:
+      - >
+        for m in ${EMBEDDING_MODEL:-nomic-embed-text-v2-moe} ${PREPROCESSING_MODEL:-llama3.2:3b}; do
+        ollama show "$$m" > /dev/null 2>&1 || ollama pull "$$m" || exit 1;
+        done
+    depends_on:
+      ollama:
+        condition: service_healthy
+
+  conduit:
+    build: .
+    image: michalondrejka/conduit:latest
+    restart: unless-stopped
+    ports:
+      - "${CONDUIT_PORT:-8000}:8000"
+    volumes:
+      - conduit_data:/data
+      - ./certs:/certs:ro
+    environment:
+      # CA bundle and proxy for Azure DevOps and other source APIs. Service
+      # names are always in NO_PROXY so intra-compose traffic skips the proxy.
+      SSL_CERT_DIR: /certs
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: localhost,127.0.0.1,qdrant,ollama,conduit,${NO_PROXY:-}
+      QDRANT_URL: http://qdrant:6333
+      # These env vars override the Settings page on every start, so models
+      # are changed here (and in .env) — ollama-pull fetches the same ones.
+      EMBEDDING_BASE_URL: http://ollama:11434/v1
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-nomic-embed-text-v2-moe}
+      EMBEDDING_CONCURRENCY: ${EMBEDDING_CONCURRENCY:-4}
+      PREPROCESSING_BASE_URL: http://ollama:11434/v1
+      PREPROCESSING_MODEL: ${PREPROCESSING_MODEL:-llama3.2:3b}
+      PREPROCESSING_CONCURRENCY: ${PREPROCESSING_CONCURRENCY:-4}
+      # Optional stable Fernet key for stored credentials; auto-generated in
+      # /data when unset.
+      CONDUIT_SECRET_KEY: ${CONDUIT_SECRET_KEY:-}
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+
+volumes:
+  qdrant_data:
+  ollama_data:
+  conduit_data:

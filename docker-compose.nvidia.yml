@@ -1,0 +1,17 @@
+# NVIDIA GPU overlay for the ollama service. Works on Windows (Docker Desktop
+# or Docker Engine in WSL2, with a current NVIDIA driver on Windows) and on
+# Linux (with nvidia-container-toolkit installed).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+#
+# Check it took effect: `docker compose logs ollama` should list the GPU
+# (look for the "inference compute" line naming CUDA) rather than CPU.
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

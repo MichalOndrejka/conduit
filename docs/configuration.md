@@ -154,7 +154,7 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `PREPROCESSING_MODEL` | Overrides `preprocessing.model`. |
 | `PREPROCESSING_BASE_URL` | Overrides `preprocessing.base_url`. |
 | `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
-| `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`. Set to `0.0.0.0` in Docker so the port mapping works. |
+| `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`, or `0.0.0.0` in a container so the port mapping works. |
 | `PORT` | HTTP listen port. Default: `8000`. |
 
 Every variable above always overrides the matching `config.json` value on process
@@ -188,15 +188,15 @@ Re-sync all sources after changing the embedding model.
 
 ## Docker deployment
 
-Conduit runs as a standalone container and connects out to Qdrant and your
-embedding/LLM endpoint(s), which you run separately — it doesn't bundle or
-manage those services:
+`docker-compose.yml` runs the full stack (Conduit, Qdrant, Ollama, and a
+model-pull step); see the README's "Docker Compose" section for GPU overlays
+and proxy/CA setup. To run Conduit alone against Qdrant and an
+embedding/LLM endpoint you run separately:
 
 ```bash
 docker build -t conduit .
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
-  -e CONDUIT_HOST=0.0.0.0 \
   -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   conduit
@@ -207,7 +207,6 @@ Or pull the prebuilt image instead of building:
 ```bash
 docker run -d --name conduit -p 8000:8000 \
   -v conduit_data:/data \
-  -e CONDUIT_HOST=0.0.0.0 \
   -e QDRANT_URL=http://host.docker.internal:6333 \
   -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   michalondrejka/conduit:latest
