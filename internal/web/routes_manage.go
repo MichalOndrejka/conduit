@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -21,22 +20,9 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
+	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
-
-// sourceTypes drives the type-picker tiles: generic domain categories that
-// route to Qdrant collections (not provider-specific). The description is shown
-// on the tile.
-var sourceTypes = []struct{ Value, Label, Description string }{
-	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks from a work-tracking system."},
-	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
-	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
-	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
-	{models.SourcePipelineRun, "Pipeline Runs", "Build pipeline runs with failed-step logs and failed test results."},
-	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
-	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
-	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
-}
 
 // workItemTypePresets seeds the work-item-type tile picker for each
 // dual-purpose source with types relevant to that domain — the only types
@@ -48,35 +34,6 @@ var workItemTypePresets = map[string][]string{
 	models.SourceWorkItemQuery: {"Epic", "Feature", "User Story", "Bug", "Task", "Issue"},
 	models.SourceRequirements:  {"Product Requirement", "Software Requirements", "Risk", "Architecture Item"},
 	models.SourceTestCase:      {"Test Case"},
-}
-
-func labelForType(t string) string {
-	for _, st := range sourceTypes {
-		if st.Value == t {
-			return st.Label
-		}
-	}
-	return t
-}
-
-// apiConfigKeys are the generic API source's config fields, read 1:1 from the
-// form. Credential fields (Token, Password, ApiKeyValue) store credential
-// *names*, never secret values.
-var apiConfigKeys = []string{
-	"Url", "HttpMethod", "Body", "Headers", "AuthType",
-	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
-	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
-	"NextUrlPath", "Top", "VerifySSL",
-	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"FetchMode", "DefinitionId", "Days",
-}
-
-// presetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
-// DevOps) store so an existing source re-opens in the right tab, pre-filled.
-// The backend ignores them — execution is driven entirely by apiConfigKeys, so
-// any platform is "just a generic HTTP source" (see internal/sources/source.go).
-var presetConfigKeys = []string{
-	"Platform", "AdoOrg", "AdoProject", "AdoApiVersion", "AdoResource", "AdoRepo", "AdoQuery",
 }
 
 // adoRepoNamePattern extracts the repo name from a legacy AdoResource preset
@@ -144,7 +101,7 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 		"Source":              src,
 		"IsNew":               src.ID == "",
 		"Error":               errMsg,
-		"TypeLabel":           labelForType(src.Type),
+		"TypeLabel":           sourcemgmt.Label(src.Type),
 		"Tab":                 tab,
 		"Credentials":         creds,
 		"WorkItemTypePresets": workItemTypePresets[src.Type],
@@ -158,7 +115,7 @@ func (s *Server) handleSourceCreateGet(w http.ResponseWriter, r *http.Request) {
 	if t == "" {
 		s.render(w, s.sourceNewTmpl, "base", map[string]any{
 			"Active":      "sources",
-			"SourceTypes": sourceTypes,
+			"SourceTypes": sourcemgmt.Types,
 		})
 		return
 	}
@@ -186,15 +143,15 @@ func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.
 		cfg["Content"] = content
 	} else {
 		cfg["Provider"] = "api"
-		for _, key := range apiConfigKeys {
+		for _, key := range sourcemgmt.APIConfigKeys {
 			if v := strings.TrimSpace(r.FormValue(key)); v != "" {
 				cfg[key] = v
 			}
 		}
 		// Persist the platform-preset metadata (e.g. Azure DevOps friendly
 		// fields) so the source re-opens in the right tab; the backend ignores
-		// these and runs only the generic apiConfigKeys above.
-		for _, key := range presetConfigKeys {
+		// these and runs only the generic sourcemgmt.APIConfigKeys above.
+		for _, key := range sourcemgmt.PresetConfigKeys {
 			if v := strings.TrimSpace(r.FormValue(key)); v != "" {
 				cfg[key] = v
 			}
@@ -204,72 +161,17 @@ func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.
 	return src
 }
 
-// validateSourceConfig checks provider-specific fields after sourceFromForm,
-// returning a user-facing error message, or "" if the config is valid.
-func validateSourceConfig(srcType string, cfg map[string]string) string {
-	switch cfg["Provider"] {
-	case "manual":
-		if strings.TrimSpace(cfg["Content"]) == "" {
-			return "Content is required."
-		}
-	case "api":
-		if cfg["Platform"] == "ado" && cfg["AdoProject"] == "" {
-			return "Project is required for Azure DevOps sources."
-		}
-		if srcType == models.SourcePipelineRun {
-			if cfg["Platform"] != "ado" {
-				return "Pipeline Runs sources require the Azure DevOps provider."
-			}
-			if n, err := strconv.Atoi(strings.TrimSpace(cfg["DefinitionId"])); err != nil || n <= 0 {
-				return "Pipeline definition ID must be a positive number."
-			}
-			if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
-				return "Days must be a positive number."
-			}
-		}
-		u, err := url.Parse(cfg["Url"])
-		if cfg["Url"] == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return "URL must be a valid http(s) URL."
-		}
-		if top := cfg["Top"]; top != "" {
-			if n, err := strconv.Atoi(top); err != nil || n <= 0 {
-				return "Max items must be a positive number."
-			}
-		}
-		if srcType == models.SourceGitCommits {
-			if _, ok := sources.AdoRepoAPIBase(cfg["Url"]); !ok {
-				return "Commit History sources require an Azure DevOps commits API URL (…/_apis/git/repositories/{repo}/commits) — diffs are always fetched for this source type."
-			}
-		}
-		if srcType == models.SourceCodeRepo || srcType == models.SourceTestCodeRepo {
-			if _, ok := sources.AdoItemsAPIBase(cfg["Url"]); !ok {
-				return fmt.Sprintf("%s sources require an Azure DevOps items API URL (…/_apis/git/repositories/{repo}/items) — file content is always fetched for this source type.", labelForType(srcType))
-			}
-		}
-		if body := cfg["Body"]; body != "" && !json.Valid([]byte(body)) {
-			return "POST body must be valid JSON."
-		}
-		for _, line := range strings.Split(cfg["Headers"], "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.Contains(line, ":") {
-				return `Headers must be one "Name: value" pair per line.`
-			}
-		}
-	}
-	return ""
-}
-
 func (s *Server) handleSourceCreatePost(w http.ResponseWriter, r *http.Request) {
 	src := sourceFromForm(r, nil)
 	if src.Name == "" {
 		s.renderSourceForm(w, src, "Name is required.")
 		return
 	}
-	if msg := validateSourceConfig(src.Type, src.Config); msg != "" {
+	if msg := sourcemgmt.Validate(src.Type, src.Config); msg != "" {
 		s.renderSourceForm(w, src, msg)
 		return
 	}
-	if err := s.sources.Save(*src); err != nil {
+	if err := s.mgr.Save(r.Context(), "", src); err != nil {
 		httpError(w, err)
 		return
 	}
@@ -309,24 +211,11 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 		s.renderSourceForm(w, src, "Name is required.")
 		return
 	}
-	if msg := validateSourceConfig(src.Type, src.Config); msg != "" {
+	if msg := sourcemgmt.Validate(src.Type, src.Config); msg != "" {
 		s.renderSourceForm(w, src, msg)
 		return
 	}
-	// A type/provider change moves the source to a different collection —
-	// clean up the old one, or its vectors would keep surfacing in the old
-	// search tool forever (re-sync only replaces within the new collection).
-	if newCollection := sources.CollectionFor(src); newCollection != oldCollection {
-		filter := &rag.Filter{Must: []rag.FieldCondition{{
-			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-		}}}
-		if err := s.vectors.DeleteByFilter(r.Context(), oldCollection, filter); err != nil {
-			log.Printf("warning: could not clean up vectors in %s after collection change: %v", oldCollection, err)
-		}
-		src.SyncStatus = "idle" // old data gone; needs a fresh sync
-		src.LastSyncedAt = nil
-	}
-	if err := s.sources.Save(*src); err != nil {
+	if err := s.mgr.Save(r.Context(), oldCollection, src); err != nil {
 		httpError(w, err)
 		return
 	}
@@ -362,7 +251,7 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		existing, _ = s.sources.Get(id) // best-effort: falls back to a from-scratch source on any error
 	}
 	src := sourceFromForm(r, existing)
-	if msg := validateSourceConfig(src.Type, src.Config); msg != "" {
+	if msg := sourcemgmt.Validate(src.Type, src.Config); msg != "" {
 		writeJSON(w, map[string]any{"ok": false, "error": msg})
 		return
 	}
@@ -437,7 +326,7 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 // handleSourceDelete removes the source and its vectors, mirroring
 // sources_delete_post in app/web/routes.py.
 func (s *Server) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
-	if err := s.deleteSourceAndVectors(r.Context(), r.PathValue("id")); err != nil {
+	if err := s.mgr.Delete(r.Context(), r.PathValue("id")); err != nil {
 		httpError(w, err)
 		return
 	}
@@ -491,31 +380,12 @@ func (s *Server) handleDisableSelected(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteSelected(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	for _, id := range r.Form["ids"] {
-		if err := s.deleteSourceAndVectors(r.Context(), id); err != nil {
+		if err := s.mgr.Delete(r.Context(), id); err != nil {
 			httpError(w, err)
 			return
 		}
 	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
-}
-
-// deleteSourceAndVectors removes a source's indexed vectors (best-effort) and
-// its record. A no-op if the source no longer exists.
-func (s *Server) deleteSourceAndVectors(ctx context.Context, id string) error {
-	src, err := s.sources.Get(id)
-	if err != nil {
-		return err
-	}
-	if src == nil {
-		return nil
-	}
-	collection := sources.CollectionFor(src)
-	filter := &rag.Filter{Must: []rag.FieldCondition{{
-		Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-	}}}
-	// Best-effort vector cleanup — the source record is removed either way.
-	_ = s.vectors.DeleteByFilter(ctx, collection, filter)
-	return s.sources.Delete(src.ID)
 }
 
 // ── Sync control ────────────────────────────────────────────────────────────

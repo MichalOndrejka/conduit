@@ -26,6 +26,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/setup"
+	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncctl"
 	"github.com/MichalOndrejka/conduit/internal/syncsvc"
@@ -129,6 +130,7 @@ func main() {
 	mcpServer := server.NewMCPServer("Conduit", version)
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
 	mcptools.RegisterSyncTool(mcpServer, sourceStore, syncSvc)
+	mcptools.RegisterSourcesTool(mcpServer, sourcemgmt.New(sourceStore, vectors, secretsStore), syncSvc)
 	mcpHTTP := server.NewStreamableHTTPServer(mcpServer, server.WithEndpointPath("/mcp"))
 
 	// ── HTTP wiring ─────────────────────────────────────────────────────────

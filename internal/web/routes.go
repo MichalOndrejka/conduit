@@ -17,6 +17,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/sources"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncsvc"
@@ -46,6 +47,7 @@ const faviconSVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
 type Server struct {
 	cfg     *config.AppConfig
 	sources *store.SourceConfigStore
+	mgr     *sourcemgmt.Manager
 	vectors *rag.VectorStore
 	memory  *memory.Service
 	secrets *secrets.Store
@@ -79,6 +81,7 @@ func NewServer(
 	return &Server{
 		cfg:               cfg,
 		sources:           sourceStore,
+		mgr:               sourcemgmt.New(sourceStore, vectors, secretsStore),
 		vectors:           vectors,
 		memory:            mem,
 		secrets:           secretsStore,

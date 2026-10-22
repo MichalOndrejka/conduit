@@ -132,7 +132,7 @@ remember(situation="Deploying to staging", guidance="Always run the DB migration
 
 ---
 
-## Sync tool
+## Source tools
 
 ### `sync_sources`
 
@@ -152,6 +152,34 @@ sync_sources(request={"mode":"trigger","source_ids":["a1b2"]})
 ```
 
 The tool can't yet tell whether a source is out of date with its upstream system; `last_synced_at` is the only freshness signal.
+
+### `manage_sources`
+
+Lists, reads, creates, updates and deletes API source configs, so an agent can set up a source for the user.
+
+```
+manage_sources(request: { mode: "list" })
+manage_sources(request: { mode: "get", source_id: str })
+manage_sources(request: { mode: "create", name: str, type: str, config: {...}, disabled?: bool })
+manage_sources(request: { mode: "update", source_id: str, name?: str, type?: str, config?: {...}, disabled?: bool })
+manage_sources(request: { mode: "delete", source_id: str, confirm?: bool })
+```
+
+- **`list`** returns every source (`id`, `name`, `type`, `provider`, `disabled`, `sync_status`), the stored **credential names** and the source types.
+- **`get`** returns one source with its `config` (manual document content is replaced with a placeholder).
+- **`create`** / **`update`** take the same config keys as the UI and the export file (see [Sources](sources.md)). `update` merges `config` into the existing one; `""` removes a key. Changing `type` moves the source to another collection and removes its old vectors. Saving never syncs — call `sync_sources` `trigger` afterwards.
+- **`delete`** without `confirm: true` only reports what would go (`indexed_chunks`); with it, the source and its vectors are deleted.
+
+Credentials are referenced by name only. `Token`, `Password` and `ApiKeyValue` must name a credential from `list`; anything else is rejected (and not echoed back), so a pasted secret is never stored. New credentials are added in the UI at `/credentials`.
+
+Manual (pasted) document sources, and sources that are currently syncing, can't be changed by the tool.
+
+```
+manage_sources(request={"mode":"create","name":"Bugs","type":"work-item",
+  "config":{"Url":"https://ado.example/org/proj/_apis/wit/wiql?api-version=7.1","HttpMethod":"POST",
+            "Body":"{\"query\":\"SELECT [System.Id] FROM WorkItems\"}","AuthType":"basic","Password":"ado-pat"}})
+→ { "source": { "id": "c0ffee…", "name": "Bugs", "sync_status": "idle", "config": {...} }, "next": "Call sync_sources trigger with this id to index it." }
+```
 
 ---
 
