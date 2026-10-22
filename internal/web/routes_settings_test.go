@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/embedstate"
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
@@ -89,6 +90,10 @@ func TestHandleSettingsEmbeddingModelChangeDropsCollectionsAndFlagsReindex(t *te
 	}
 	if got.SyncStatus != "needs-reindex" {
 		t.Errorf("SyncStatus = %q, want needs-reindex after a model change", got.SyncStatus)
+	}
+	// Recorded, so the startup check doesn't drop the re-synced index again.
+	if st, ok, err := embedstate.Load(config.DataDir(h.cfg)); err != nil || !ok || st.Model != "a-different-model" {
+		t.Errorf("embedding state = %+v (ok=%v, err=%v), want the new model recorded", st, ok, err)
 	}
 
 	h.qd.mu.Lock()

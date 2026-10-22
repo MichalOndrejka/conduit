@@ -1,299 +1,58 @@
 # Conduit
 
-![Go 1.24+](https://img.shields.io/badge/go-1.24%2B-00ADD8?logo=go)
 ![Docker](https://img.shields.io/badge/docker-michalondrejka%2Fconduit-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-A **RAG + MCP server** that gives any MCP client semantic search over your data — work items, code, docs from **any JSON-over-HTTP API** — plus a persistent **Experience** store for remembering facts, preferences, and past decisions across sessions.
+RAG + MCP server: semantic search over work items, code and docs from any
+JSON-over-HTTP API, plus a persistent memory store for MCP clients.
 
-Conduit is a single ~13 MB Go binary (≈25 MB distroless image) backed by Qdrant and any OpenAI-compatible embedding endpoint.
+## Install
 
-## Features
-
-- **7 MCP search tools** covering work items, requirements, source code, test code, test cases, commits, and documentation
-- **Provider-agnostic sources** — connect any JSON API through configuration (URL, auth, field mappings, pagination); no provider-specific code. Azure DevOps, Jira, GitHub, internal tools — all just configuration
-- **Persistent memory** across sessions via the Experience store (`remember` / `retrieve_experience`)
-- **Web UI** for managing sources, credentials, triggering syncs, and a PCA vector map
-- **Encrypted credential library** — secrets stored Fernet-encrypted, referenced by name; never in config files or exports
-- **Sync controls** — pause, resume, or cancel a running sync with live progress
-- **Transactional indexing** — failed syncs leave existing data intact
-
-## How it works
-
-```
-MCP Client ──► MCP Tools (/mcp) ──► Qdrant Vector Store
-                                       ▲
-Web UI ──► Sync engine ──► generic API / manual sources
-```
-
-**Indexing pipeline**
-1. Fetch documents from configured sources (any JSON endpoint, or pasted content)
-2. Chunk text with sentence-boundary and newline-priority splitting
-3. Generate embeddings via Ollama or any OpenAI-compatible embeddings API
-4. Store in Qdrant, one collection per content type — with rollback on partial failure
-
-## MCP Tools
-
-| Tool | What it searches |
-|------|-----------------|
-| `search_workitem` | Work items — bugs, user stories, tasks, features |
-| `search_requirement` | Requirements — features, user stories, epics |
-| `search_source_code` | Production source code |
-| `search_test_code` | Test code — unit tests, integration tests, specs |
-| `search_testcase` | Test cases including test steps |
-| `search_documentation` | Wiki pages, repo docs, and uploaded documents |
-| `search_commit` | Git commit history — messages, authors, change summaries |
-| `retrieve_experience` | Recall relevant past experience. **Call at the start of every task.** |
-| `remember` | Store information worth retaining across sessions. **Call proactively.** |
-
-All search tools accept a single `request` object, one of two shapes: `{mode: "semantic_search", query, page, source_name?}` for a ranked match (each call returns only the single most relevant one — page to see the next), or `{mode: "retrieve_chunk", source_doc_id, chunk_index}` to deterministically fetch one exact chunk of a document by ID — useful when a match got cut off, using the `source_doc_id`/`chunk_index ± 1`/`has_previous`/`has_next` fields on any result. See `docs/mcp-tools.md` for the full request/response shape.
-
-## Source configuration (generic by design)
-
-Each source has a **type** (routes documents to a Qdrant collection) and a **provider** (how documents are fetched):
-
-| Provider | Description |
-|----------|-------------|
-| **HTTP API** | Any JSON endpoint: GET/POST, Bearer / Basic / API-key auth (credentials by name), items dot-path, ID/title/content field mappings, next-page-URL pagination |
-| **Manual** | Paste text directly |
-
-Examples expressible as pure configuration:
-- **Azure DevOps**: `https://dev.azure.com/{org}/{project}/_apis/wit/workitems?...` with Basic auth, empty username, PAT as the password credential, `ItemsPath=value`
-- **Jira**: `https://you.atlassian.net/rest/api/3/search` with Basic auth, `ItemsPath=issues`
-- **GitHub**: `https://api.github.com/repos/{o}/{r}/issues` with Bearer auth
-
-| Source Type | Collection |
-|-------------|------------|
-| Work Items | `conduit_workitems` |
-| Requirements | `conduit_requirements` |
-| Test Cases | `conduit_testcases` |
-| Commit History | `conduit_commits` |
-| Source Code | `conduit_code` |
-| Test Code | `conduit_testcode` |
-| Documentation | `conduit_documentation` |
-
-## Quick start (from source)
-
-Prerequisites: [Go 1.24+](https://go.dev/dl/), [Docker](https://docs.docker.com/get-docker/) (for Qdrant), [Ollama](https://ollama.ai) (for local embeddings).
+Requires [Docker](https://docs.docker.com/get-docker/). No clone needed:
 
 ```bash
-git clone https://github.com/MichalOndrejka/conduit.git
-cd conduit
-
-docker run -d --name conduit-qdrant -p 6333:6333 \
-  -v conduit_qdrant:/qdrant/storage qdrant/qdrant:v1.13.6   # or any local Qdrant
-ollama pull nomic-embed-text-v2-moe
-
-go run ./cmd/conduit
+docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
 ```
 
-- Web UI: `http://localhost:8000`
-- MCP endpoint: `http://localhost:8000/mcp`
+Wait for `Setup done` (first run downloads the models), then open
+http://localhost:8000. Press Ctrl+C and re-run with `up -d` to keep it
+running in the background.
 
-Conduit has no built-in authentication — it's meant to run as a local
-container reachable only from `localhost` or a trusted network.
+**NVIDIA GPU** — add a second file:
 
-Then: add credentials at `/credentials`, create a source at `/sources/create`, hit **Sync**, and point your MCP client at `/mcp`:
+```bash
+docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml \
+               -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.nvidia.yml up
+```
+
+**Corporate proxy** (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/MichalOndrejka/conduit/main/scripts/export-ca-certs.ps1 | iex
+$env:CONDUIT_CERTS_DIR = "$PWD\certs"
+$env:HTTPS_PROXY = "http://proxy.example.com:8080"
+docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
+```
+
+## Use
+
+1. Add credentials at `/credentials` and a source at `/sources/create`, then **Sync**.
+2. Point your MCP client at `http://localhost:8000/mcp`:
 
 ```json
-{
-  "mcpServers": {
-    "conduit": {
-      "type": "http",
-      "url": "http://localhost:8000/mcp"
-    }
-  }
-}
+{ "mcpServers": { "conduit": { "type": "http", "url": "http://localhost:8000/mcp" } } }
 ```
 
-## Running in Docker
+Conduit has no authentication — keep it on localhost or a trusted network.
 
-### Docker Compose (full stack)
+## Docs
 
-`docker-compose.yml` runs Conduit together with Qdrant and Ollama, plus a
-one-shot `ollama-pull` container that downloads the configured models before
-Conduit starts. Services talk to each other by name on the compose network,
-so nothing depends on Docker reaching the host's `localhost`.
-
-```bash
-cp .env.example .env               # optional: models, proxy, GPU overlay
-docker compose up -d --build       # build Conduit from source
-# or: docker compose pull && docker compose up -d   (Docker Hub image)
-```
-
-Open http://localhost:8000. The first start takes a while: `ollama-pull`
-downloads both models (follow it with `docker compose logs -f ollama-pull`).
-Models live in the `ollama_data` volume, so later starts skip the download.
-
-Qdrant and Ollama ports aren't published, so they don't clash with copies
-already running on the host; uncomment `ports:` in `docker-compose.yml` to
-reach them directly.
-
-**GPU.** Ollama runs on CPU by default. Layer an overlay on top for a GPU:
-
-| Overlay | Hosts |
-| --- | --- |
-| `docker-compose.nvidia.yml` | Windows (Docker Desktop or Docker Engine in WSL2) and Linux with `nvidia-container-toolkit` |
-| `docker-compose.amd.yml` | Linux only (ROCm). Docker on Windows can't pass AMD GPUs to containers. |
-
-```bash
-docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
-```
-
-or set it once in `.env` so plain `docker compose up` uses it:
-
-```bash
-COMPOSE_PATH_SEPARATOR=:
-COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml
-```
-
-Intel GPUs, and AMD GPUs on Windows, have no container passthrough; they run
-on CPU. `docker compose logs ollama` shows which one Ollama picked up.
-
-**Models.** `EMBEDDING_MODEL` / `PREPROCESSING_MODEL` in `.env` drive both
-what `ollama-pull` downloads and what Conduit uses. Because env vars override
-the Settings page on every start, change models in `.env`, then
-`docker compose up -d` again.
-
-**Corporate proxy / TLS interception.** On Windows, run
-`scripts/export-ca-certs.ps1` to write the machine's trusted root CAs to
-`certs/windows-root-ca.pem`, and set `HTTP_PROXY` / `HTTPS_PROXY` (and
-`NO_PROXY` for internal hosts such as an on-prem Azure DevOps) in `.env`.
-Ollama and Conduit both mount `./certs` and add it to their own CA list, so
-model pulls and source syncs trust the proxy. An empty `certs/` is fine
-anywhere else.
-
-### Standalone container
-
-To run only Conduit against a Qdrant and Ollama you already run elsewhere:
-
-```bash
-docker build -t conduit .
-
-docker run -d --name conduit -p 8000:8000 \
-  -v conduit_data:/data \
-  -e QDRANT_URL=http://host.docker.internal:6333 \
-  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
-  conduit
-```
-
-Or pull the prebuilt image from Docker Hub instead of building:
-
-```bash
-docker run -d --name conduit -p 8000:8000 \
-  -v conduit_data:/data \
-  -e QDRANT_URL=http://host.docker.internal:6333 \
-  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
-  michalondrejka/conduit:latest
-```
-
-The volume at `/data` (`CONDUIT_DATA_DIR=/data`) persists sources, config, and
-credentials across restarts. `host.docker.internal` reaches services running
-on the host, and is also what the Settings page pre-fills on first start when
-Conduit detects it's in a container (instead of `localhost`). On Linux hosts,
-add `--add-host=host.docker.internal:host-gateway` for that name to resolve.
-A host service that listens only on `127.0.0.1` (Ollama's default) may still
-be unreachable from a container; if so, set `OLLAMA_HOST=0.0.0.0` on the host
-or use Docker Compose above. Point `QDRANT_URL`/`EMBEDDING_BASE_URL`/
-`PREPROCESSING_BASE_URL` at wherever those services actually run — or leave
-them out and configure the connections from the **Settings** page after the
-container starts.
-
-For an internal CA, mount the bundle and add it to Go's CA list:
-
-```bash
-docker run ... -v ./certs:/certs:ro -e SSL_CERT_DIR=/certs conduit
-```
-
-Per-source `VerifySSL=false` also works for API sources, but it disables
-certificate checks entirely, so prefer the CA bundle.
-
-### Container behavior
-
-Inside a container the web server binds `0.0.0.0` (outside, `127.0.0.1`), so
-`-p` works without setting `CONDUIT_HOST`. The image has a `HEALTHCHECK` that
-runs `conduit healthcheck` against `/health`; it reports Conduit itself, not
-whether Qdrant/Ollama are reachable (see `/health`'s body for that). On
-`docker stop` / `docker compose down`, Conduit stops accepting requests,
-cancels running syncs, and marks them idle before exiting, so re-run any sync
-that was interrupted.
-
-### Sync performance: concurrency
-
-Embedding and preprocessing calls run concurrently (bounded worker pools, not
-one request at a time), controlled by env vars with sane defaults:
-
-| Variable | Default | What it does |
-| --- | --- | --- |
-| `EMBEDDING_CONCURRENCY` | `4` | Max in-flight embed calls per sync |
-| `PREPROCESSING_CONCURRENCY` | `4` | Max in-flight preprocessing/chat calls per sync |
-
-Ollama's own `OLLAMA_NUM_PARALLEL` / `OLLAMA_MAX_LOADED_MODELS` /
-`OLLAMA_KEEP_ALIVE` settings are set in `.env` when using Docker Compose,
-or on your own Ollama service directly — see the
-[Ollama docs](https://github.com/ollama/ollama/blob/main/docs/faq.md).
-
-## Configuration
-
-`config.json` (auto-created with Ollama defaults) plus environment overrides:
-
-| Variable | Purpose |
-|----------|---------|
-| `CONDUIT_HOST` | Bind address (default `127.0.0.1`, or `0.0.0.0` in a container) |
-| `PORT` | Listen port (default `8000`) |
-| `QDRANT_URL` / `QDRANT_API_KEY` | Qdrant connection |
-| `EMBEDDING_MODEL` / `EMBEDDING_BASE_URL` / `EMBEDDING_DIMENSIONS` / `EMBEDDING_MAX_INPUT_TOKENS` | Embedding settings (Ollama or any OpenAI-compatible endpoint) |
-| `CONDUIT_CONFIG` | Path to `config.json` |
-| `CONDUIT_DATA_DIR` | Directory for `config.json`, sources, credentials, and keys. **Required in Docker.** |
-| `CONDUIT_SECRET_KEY` | Base64url Fernet key for `credentials.enc.json`. Pin so credentials survive container recreation. |
-
-Env vars always override the matching `config.json` value on every process start
-(including container restarts) — if a variable above is set, a value saved for
-the same field from the **Settings** page has no effect until that env var is
-unset.
-
-## Project structure
-
-```
-cmd/conduit/        entrypoint + `conduit search` verification CLI
-internal/
-  config/           config.json + env overrides
-  models/           domain models & constants
-  secrets/          Fernet credential store
-  rag/              qdrant REST client, embeddings, chunker, indexer, search, PCA
-  memory/           experience store
-  mcptools/         MCP tool registrations (mark3labs/mcp-go)
-  sources/          generic source abstraction (API + manual)
-  syncsvc/          sync orchestration (pause/cancel, status persistence)
-  syncctl/          pause/cancel control + progress stores
-  health/           background connectivity probes
-  store/            conduit-sources.json store
-  web/              routes, templates
-Dockerfile          multi-stage distroless build
-```
-
-## Running tests
-
-```bash
-go test ./...
-```
-
-Includes a cross-language fixture test proving the Go Fernet store decrypts
-credentials written by the original Python implementation (see
-[docs/go-port.md](docs/go-port.md)), and integration tests running the full
-sync pipeline against an in-memory fake Qdrant.
-
-## Contributing
-
-Contributions are welcome. Please open an issue to discuss a feature or bug before submitting a pull request.
+- [Installation](docs/installation.md) — GPU, proxy, models, data, other setups
+- [Configuration](docs/configuration.md) — `config.json` and env vars
+- [Sources](docs/sources.md) — connecting APIs
+- [MCP tools](docs/mcp-tools.md)
+- [Architecture & development](docs/go-port.md)
 
 ## License
 
 MIT
-
-## Further reading
-
-- [Go port architecture & migration](docs/go-port.md)
-- [MCP tools reference](docs/mcp-tools.md) — tool signatures, search parameters, experience store
-- [Source configuration reference](docs/sources.md) — HTTP API / Manual providers, field mappings, platform presets
-- [Configuration reference](docs/configuration.md) — full `config.json` schema, env vars, preprocessing

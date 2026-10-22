@@ -21,6 +21,8 @@ internal/sources/       generic source abstraction (API + manual — no provider
 internal/syncsvc/       sync orchestration (fetch → index, pause/cancel)
 internal/syncctl/       pause/cancel control + progress stores
 internal/health/        background probes with exponential backoff
+internal/setup/         `conduit setup`: compose model pull + GPU check
+internal/embedstate/    detects embedding model changes at startup
 internal/store/         conduit-sources.json store
 internal/web/           routes, templates
 ```

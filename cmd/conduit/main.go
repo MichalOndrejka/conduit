@@ -18,11 +18,13 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/embedstate"
 	"github.com/MichalOndrejka/conduit/internal/health"
 	"github.com/MichalOndrejka/conduit/internal/mcptools"
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/setup"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncctl"
 	"github.com/MichalOndrejka/conduit/internal/syncsvc"
@@ -47,6 +49,16 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+
+	// docker-compose's one-shot step before Conduit starts: pull models and
+	// check GPU placement (see internal/setup). Needs only the config.
+	//   conduit setup
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		if err := runSetup(cfg); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
 	dataDir := config.DataDir(cfg)
 
 	secretsStore, err := secrets.New(dataDir)
@@ -63,6 +75,25 @@ func main() {
 	// Reset any source left in "syncing" by a previous crash or container restart.
 	if err := sourceStore.ReconcileStaleSync(); err != nil {
 		log.Printf("warning: could not reconcile stale sync state: %v", err)
+	}
+
+	// An embedding model change made outside Settings (env var, edited
+	// config.json) makes existing vectors incompatible; drop them now rather
+	// than letting new syncs mix two models in one collection.
+	reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), 30*time.Second)
+	changed, prev, err := embedstate.Reconcile(reconcileCtx, dataDir, cfg.Embedding, vectors, sourceStore)
+	cancelReconcile()
+	switch {
+	case changed && err != nil:
+		log.Printf("WARNING: embedding model changed (%s/%d → %s/%d) but dropping old vectors failed: %v — "+
+			"all sources are flagged for reindex; will retry on next start",
+			prev.Model, prev.Dimensions, cfg.Embedding.Model, cfg.Embedding.Dimensions, err)
+	case changed:
+		log.Printf("WARNING: embedding model changed (%s/%d → %s/%d): dropped all collections, "+
+			"including experience memories — re-sync every source",
+			prev.Model, prev.Dimensions, cfg.Embedding.Model, cfg.Embedding.Dimensions)
+	case err != nil:
+		log.Printf("warning: could not check embedding model state: %v", err)
 	}
 
 	// ── Sync engine (generic sources: API + manual) ────────────────────────
@@ -161,6 +192,28 @@ func listenAddr() string {
 		port = p
 	}
 	return net.JoinHostPort(host, port)
+}
+
+// runSetup prepares the configured embedding and preprocessing models.
+// OLLAMA_GPU_EXPECTED is set by the GPU compose overlays.
+func runSetup(cfg *config.AppConfig) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ms := []setup.Model{{
+		Name: cfg.Embedding.Model, OllamaURL: setup.OllamaURL(cfg.Embedding.BaseURL), Embedding: true,
+	}}
+	if cfg.Preprocessing.Model != "" {
+		ms = append(ms, setup.Model{
+			Name: cfg.Preprocessing.Model, OllamaURL: setup.OllamaURL(cfg.Preprocessing.BaseURL),
+		})
+	}
+	return setup.Run(ctx, setup.Options{
+		QdrantURL:    strings.TrimRight(cfg.Qdrant.URL, "/"),
+		QdrantAPIKey: cfg.Qdrant.APIKey,
+		Models:       ms,
+		GPUExpected:  os.Getenv("OLLAMA_GPU_EXPECTED"),
+		Out:          os.Stdout,
+	})
 }
 
 // runHealthcheck reports whether this process's own web server answers

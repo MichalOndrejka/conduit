@@ -2,10 +2,12 @@
 # or Docker Engine in WSL2, with a current NVIDIA driver on Windows) and on
 # Linux (with nvidia-container-toolkit installed).
 #
-#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up -d
+#   docker compose -f docker-compose.yml -f docker-compose.nvidia.yml up
+#   (or a second -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.nvidia.yml)
 #
-# Check it took effect: `docker compose logs ollama` should list the GPU
-# (look for the "inference compute" line naming CUDA) rather than CPU.
+# With this overlay, setup fails (and Conduit doesn't start) unless both
+# models load fully onto the GPU. `docker compose logs ollama` shows what
+# Ollama detected (the "inference compute" line should name CUDA).
 services:
   ollama:
     deploy:
@@ -15,3 +17,6 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+  setup:
+    environment:
+      OLLAMA_GPU_EXPECTED: nvidia

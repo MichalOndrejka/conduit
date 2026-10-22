@@ -14,6 +14,7 @@ package web
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,6 +22,7 @@ import (
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
+	"github.com/MichalOndrejka/conduit/internal/embedstate"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/sources"
@@ -95,14 +97,11 @@ func (s *Server) handleSettingsEmbedding(w http.ResponseWriter, r *http.Request)
 
 	notice := "embedding_saved"
 	if changed {
-		for _, col := range models.AllCollections {
-			if s.vectors.CollectionExists(r.Context(), col) {
-				_ = s.vectors.DeleteCollection(r.Context(), col)
-			}
+		_ = embedstate.DropAll(r.Context(), s.vectors, s.sources, ec.Dimensions)
+		// Record the new model so the startup check doesn't drop again.
+		if err := embedstate.Save(config.DataDir(s.cfg), ec); err != nil {
+			log.Printf("warning: recording embedding state: %v", err)
 		}
-		// Keep the experience collection usable (memory upserts don't create it).
-		s.recreateExperience(r.Context())
-		_ = s.sources.ResetAllSyncStatus("needs-reindex")
 		notice = "embedding_saved_dropped"
 	}
 	http.Redirect(w, r, "/settings?notice="+notice, http.StatusSeeOther)

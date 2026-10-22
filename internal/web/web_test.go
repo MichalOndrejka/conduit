@@ -176,8 +176,10 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 	cfg.Chunking.MaxChunkSize = 2000
 	cfg.Chunking.Overlap = 200
 	cfg.Preprocessing.SourceTypes = map[string]bool{}
+	// Also where config.DataDir points, as in production.
+	cfg.SourcesFilePath = filepath.Join(dataDir, "conduit-sources.json")
 
-	sourceStore := store.NewSourceConfigStore(filepath.Join(dataDir, "conduit-sources.json"))
+	sourceStore := store.NewSourceConfigStore(cfg.SourcesFilePath)
 	secretsStore, err := secrets.New(dataDir)
 	if err != nil {
 		t.Fatal(err)

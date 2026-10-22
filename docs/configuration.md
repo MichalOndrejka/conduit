@@ -184,54 +184,23 @@ When you change `model` or `dimensions` in Settings:
 
 Re-sync all sources after changing the embedding model.
 
+A change made outside Settings (`EMBEDDING_MODEL` / `EMBEDDING_DIMENSIONS`
+env vars, an edited `config.json`) is detected at the next start and handled
+the same way, with a `WARNING` in the log.
+
 ---
 
-## Docker deployment
+## Credential key
 
-`docker-compose.yml` runs the full stack (Conduit, Qdrant, Ollama, and a
-model-pull step); see the README's "Docker Compose" section for GPU overlays
-and proxy/CA setup. To run Conduit alone against Qdrant and an
-embedding/LLM endpoint you run separately:
-
-```bash
-docker build -t conduit .
-docker run -d --name conduit -p 8000:8000 \
-  -v conduit_data:/data \
-  -e QDRANT_URL=http://host.docker.internal:6333 \
-  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
-  conduit
-```
-
-Or pull the prebuilt image instead of building:
+Credentials are encrypted with a key auto-generated as `.secret_key` in the
+data directory. If that directory (or Docker volume) is lost, stored
+credentials can't be decrypted. To pin the key, set `CONDUIT_SECRET_KEY`:
 
 ```bash
-docker run -d --name conduit -p 8000:8000 \
-  -v conduit_data:/data \
-  -e QDRANT_URL=http://host.docker.internal:6333 \
-  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
-  michalondrejka/conduit:latest
-```
-
-`host.docker.internal` reaches services running on the host; point the env
-vars at wherever Qdrant/Ollama actually run instead, or skip them
-and set the connection details from the **Settings** page after the container
-starts. The volume at `/data` and `CONDUIT_DATA_DIR=/data` persist source
-definitions, config, and credentials across container restarts.
-
-To keep the credential encryption key stable across container recreation, add `CONDUIT_SECRET_KEY` to your environment. It must be a base64url-encoded 32-byte key (Fernet format) — generate one with OpenSSL:
-
-```bash
-# generate once and store safely
 openssl rand -base64 32 | tr '+/' '-_'
 ```
 
-Then pass it to `docker run`:
-
-```bash
--e CONDUIT_SECRET_KEY=<generated key>
-```
-
-Without this, Conduit auto-generates a key saved as `.secret_key` inside `/data`. As long as the volume is preserved, credentials remain readable — but if the volume is deleted and recreated, existing `credentials.enc.json` data will be unreadable.
+Installing and running in Docker: see [Installation](installation.md).
 
 ---
 
