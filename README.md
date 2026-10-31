@@ -3,8 +3,9 @@
 ![Docker](https://img.shields.io/badge/docker-michalondrejka%2Fconduit-blue?logo=docker)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-RAG + MCP server: semantic search over work items, code and docs from any
-JSON-over-HTTP API, plus a persistent memory store for MCP clients.
+RAG + MCP server: semantic search over work items, code, commits, pipeline
+runs and docs from Azure DevOps and GitHub (including GitHub Enterprise
+Server), plus a persistent memory store for MCP clients.
 
 ## Install
 

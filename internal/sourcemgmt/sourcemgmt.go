@@ -76,6 +76,26 @@ var PresetConfigKeys = []string{
 	"Platform", "AdoOrg", "AdoProject", "AdoApiVersion", "AdoResource", "AdoRepo", "AdoQuery",
 }
 
+// GitHubConfigKeys are the GitHub source's config fields (see
+// internal/sources/github.go). Token names a stored credential.
+var GitHubConfigKeys = []string{
+	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "PathFilter",
+	"Top", "FetchMode", "Labels", "Workflow", "Days", "VerifySSL",
+}
+
+// Providers are the values of the Provider config key: "api" runs the
+// generic API source behind the Azure DevOps form, "github" the GitHub
+// source.
+var Providers = []string{"api", "github"}
+
+// ConfigKeys returns the config fields of provider.
+func ConfigKeys(provider string) []string {
+	if provider == "github" {
+		return GitHubConfigKeys
+	}
+	return append(append([]string{}, APIConfigKeys...), PresetConfigKeys...)
+}
+
 // CredentialKeys are the config fields that name a stored credential.
 var CredentialKeys = []string{"Token", "Password", "ApiKeyValue"}
 
@@ -85,10 +105,8 @@ var authTypes = []string{"none", "bearer", "basic", "apikey"}
 // message, or "" if the config is valid.
 func Validate(srcType string, cfg map[string]string) string {
 	switch cfg["Provider"] {
-	case "manual":
-		if strings.TrimSpace(cfg["Content"]) == "" {
-			return "Content is required."
-		}
+	case "github":
+		return validateGitHub(srcType, cfg)
 	case "api":
 		if cfg["Platform"] == "ado" && cfg["AdoProject"] == "" {
 			return "Project is required for Azure DevOps sources."
@@ -134,6 +152,36 @@ func Validate(srcType string, cfg map[string]string) string {
 			if line != "" && !strings.Contains(line, ":") {
 				return `Headers must be one "Name: value" pair per line.`
 			}
+		}
+	case "", "custom":
+		// Legacy configs (imported, Python era) run as API sources unchecked.
+	default:
+		return fmt.Sprintf("Provider must be one of %s.", strings.Join(Providers, ", "))
+	}
+	return ""
+}
+
+func validateGitHub(srcType string, cfg map[string]string) string {
+	if _, _, err := sources.GitHubBases(cfg["GitHubUrl"]); err != nil {
+		return "GitHub server URL must be a valid http(s) URL."
+	}
+	if strings.TrimSpace(cfg["GitHubOwner"]) == "" {
+		return "Owner is required for GitHub sources."
+	}
+	if strings.TrimSpace(cfg["GitHubRepo"]) == "" {
+		return "Repository is required for GitHub sources."
+	}
+	if top := cfg["Top"]; top != "" {
+		if n, err := strconv.Atoi(top); err != nil || n <= 0 {
+			return "Max items must be a positive number."
+		}
+	}
+	if srcType == models.SourcePipelineRun {
+		if strings.TrimSpace(cfg["Workflow"]) == "" {
+			return "Workflow is required: its file name (e.g. ci.yml) or numeric ID."
+		}
+		if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
+			return "Days must be a positive number."
 		}
 	}
 	return ""

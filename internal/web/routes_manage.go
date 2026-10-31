@@ -55,11 +55,11 @@ func adoRepoNameFromResource(resource string) string {
 // ── Source CRUD ─────────────────────────────────────────────────────────────
 
 func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefinition, errMsg string) {
-	// Which provider tab opens first: manual → Manual; everything else →
-	// Azure DevOps (the only API preset the form offers).
+	// Which provider tab opens first: GitHub sources on GitHub; everything
+	// else on Azure DevOps (the only API preset the form offers).
 	tab := "ado"
-	if src.GetConfig("Provider") == "manual" {
-		tab = "manual"
+	if src.GetConfig("Provider") == "github" {
+		tab = "github"
 	}
 	// Credential dropdowns list stored credentials, plus (for an existing
 	// source) any name its config references that isn't stored — otherwise
@@ -132,29 +132,17 @@ func sourceFromForm(r *http.Request, existing *models.SourceDefinition) *models.
 	}
 	src.Name = strings.TrimSpace(r.FormValue("name"))
 	src.Type = r.FormValue("type")
-	cfg := map[string]string{"Provider": r.FormValue("provider")}
-	if cfg["Provider"] == "manual" {
-		cfg["Title"] = strings.TrimSpace(r.FormValue("Title"))
-		content := r.FormValue("Content")
-		// Keep existing uploaded content if the edit form leaves it blank.
-		if content == "" && existing != nil {
-			content = existing.GetConfig("Content")
-		}
-		cfg["Content"] = content
-	} else {
-		cfg["Provider"] = "api"
-		for _, key := range sourcemgmt.APIConfigKeys {
-			if v := strings.TrimSpace(r.FormValue(key)); v != "" {
-				cfg[key] = v
-			}
-		}
-		// Persist the platform-preset metadata (e.g. Azure DevOps friendly
-		// fields) so the source re-opens in the right tab; the backend ignores
-		// these and runs only the generic sourcemgmt.APIConfigKeys above.
-		for _, key := range sourcemgmt.PresetConfigKeys {
-			if v := strings.TrimSpace(r.FormValue(key)); v != "" {
-				cfg[key] = v
-			}
+	provider := "api"
+	if r.FormValue("provider") == "github" {
+		provider = "github"
+	}
+	// ConfigKeys covers, for Azure DevOps, the platform-preset metadata (the
+	// friendly ADO fields) too, so the source re-opens in the right tab; the
+	// API source ignores those and runs only sourcemgmt.APIConfigKeys.
+	cfg := map[string]string{"Provider": provider}
+	for _, key := range sourcemgmt.ConfigKeys(provider) {
+		if v := strings.TrimSpace(r.FormValue(key)); v != "" {
+			cfg[key] = v
 		}
 	}
 	src.Config = cfg

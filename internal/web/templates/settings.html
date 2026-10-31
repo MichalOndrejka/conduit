@@ -6,8 +6,7 @@
 
 <!-- MCP server -->
 <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5 mb-5">
-  <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">MCP server</h2>
-  <p class="text-xs text-slate-500 mb-3">Add this to your MCP client config:</p>
+  <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-3">MCP server {{template "tip" "Add this to your MCP client config."}}</h2>
   <div class="relative">
     <pre id="mcp-config" class="text-xs font-mono rounded-lg border border-slate-700 bg-slate-950 p-4 pr-20 leading-relaxed text-slate-200 overflow-x-auto"></pre>
     <button type="button" onclick="copyMcp()" id="copy-btn"
@@ -19,7 +18,7 @@
 
   <!-- Embedding -->
   <form method="post" action="/settings/embedding" id="form-embedding" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-    <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Embedding (Ollama)</h2>
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Embedding (Ollama) {{template "tip" "Changing the model, dimensions, or endpoint drops all collections and marks sources for re-index."}}</h2>
     <div class="space-y-4">
       <div>
         <label class="block text-xs font-medium text-slate-400 mb-1">Base URL</label>
@@ -41,7 +40,6 @@
         </div>
       </div>
       <div id="embedding-dims-warning" class="hidden rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-2 text-xs text-amber-300"></div>
-      <p class="text-xs text-slate-500">Changing the model, dimensions, or endpoint drops all collections and marks sources for re-index.</p>
     </div>
     <div id="verify-embedding" class="hidden mt-3 text-xs px-3 py-2 rounded-lg"></div>
     <div class="flex gap-2 mt-5">
@@ -73,8 +71,8 @@
 
 <!-- Preprocessing -->
 <form method="post" action="/settings/preprocessing" id="form-preprocessing" class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
-  <div class="flex items-center justify-between mb-1">
-    <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing (Ollama)</h2>
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Document preprocessing (Ollama) {{template "tip" "Summarize each document with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text."}}</h2>
     <label class="relative inline-flex items-center cursor-pointer" title="Enable preprocessing">
       <input type="checkbox" name="enabled" id="preprocEnabled" value="on" {{if .Cfg.Preprocessing.Enabled}}checked{{end}}
              onchange="togglePreproc()" class="sr-only peer">
@@ -84,7 +82,6 @@
                    peer-checked:after:translate-x-5"></span>
     </label>
   </div>
-  <p class="text-xs text-slate-500 mb-4">Summarize each document with a local chat model (Ollama, etc.) before chunking — cuts token usage and noise. Documents under 200 characters are passed through untouched, and any model failure keeps the original text.</p>
 
   <div id="preproc-fields" class="{{if not .Cfg.Preprocessing.Enabled}}hidden{{end}}">
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -131,8 +128,7 @@
   <div class="rounded-2xl border border-red-900/50 bg-slate-900/60 p-5 space-y-4">
     <div class="flex items-center justify-between gap-4">
       <div>
-        <p class="text-sm font-medium text-slate-200">Delete all sources</p>
-        <p class="text-xs text-slate-500 mt-0.5">Removes every source definition and all their indexed data from Qdrant.</p>
+        <p class="text-sm font-medium text-slate-200">Delete all sources {{template "tip" "Removes every source definition and all their indexed data from Qdrant."}}</p>
       </div>
       <form method="post" action="/settings/delete-all-sources" onsubmit="return confirm('Permanently delete every source and all indexed documents?')">
         <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete all sources</button>
@@ -141,8 +137,7 @@
     <div class="border-t border-slate-800"></div>
     <div class="flex items-center justify-between gap-4">
       <div>
-        <p class="text-sm font-medium text-slate-200">Clean source embeddings</p>
-        <p class="text-xs text-slate-500 mt-0.5">Drops all indexed source data but keeps source definitions. Sources are marked for re-sync.</p>
+        <p class="text-sm font-medium text-slate-200">Clean source embeddings {{template "tip" "Drops all indexed source data but keeps source definitions. Sources are marked for re-sync."}}</p>
       </div>
       <form method="post" action="/settings/clean-source-embeddings" onsubmit="return confirm('Drop all indexed source data from Qdrant?')">
         <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Clean embeddings</button>
@@ -151,8 +146,7 @@
     <div class="border-t border-slate-800"></div>
     <div class="flex items-center justify-between gap-4">
       <div>
-        <p class="text-sm font-medium text-slate-200">Delete all experiences</p>
-        <p class="text-xs text-slate-500 mt-0.5">Clears the entire experience memory used by the LLM's remember tool.</p>
+        <p class="text-sm font-medium text-slate-200">Delete all experiences {{template "tip" "Clears the entire experience memory used by the LLM's remember tool."}}</p>
       </div>
       <form method="post" action="/settings/delete-all-experiences" onsubmit="return confirm('Permanently erase all stored experience?')">
         <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete all experiences</button>
@@ -161,8 +155,7 @@
     <div class="border-t border-slate-800"></div>
     <div class="flex items-center justify-between gap-4">
       <div>
-        <p class="text-sm font-medium text-slate-200">Clean experience embeddings</p>
-        <p class="text-xs text-slate-500 mt-0.5">Clears experience vectors from Qdrant. Useful after changing the embedding model.</p>
+        <p class="text-sm font-medium text-slate-200">Clean experience embeddings {{template "tip" "Clears experience vectors from Qdrant. Useful after changing the embedding model."}}</p>
       </div>
       <form method="post" action="/settings/clean-experience-embeddings" onsubmit="return confirm('Erase all experience vectors from Qdrant?')">
         <button type="submit" class="shrink-0 rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Clean embeddings</button>

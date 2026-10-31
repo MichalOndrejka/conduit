@@ -220,33 +220,16 @@ func TestHTTPErrorSurfaced(t *testing.T) {
 	}
 }
 
-func TestManualSource(t *testing.T) {
-	m := &ManualSource{src: src(map[string]string{
-		"Provider": "manual", "Title": "Spec", "Content": "The content.",
-	})}
-	docs, err := m.FetchDocuments(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(docs) != 1 || docs[0].Text != "The content." {
-		t.Errorf("docs = %+v", docs)
-	}
-
-	// Export placeholder must yield no documents.
-	m = &ManualSource{src: src(map[string]string{
-		"Provider": "manual", "Content": models.DocumentPlaceholder,
-	})}
-	docs, _ = m.FetchDocuments(context.Background(), nil)
-	if len(docs) != 0 {
-		t.Error("placeholder content produced documents")
-	}
-}
-
 func TestFactorySelectsProvider(t *testing.T) {
-	if s, _ := New(src(map[string]string{"Provider": "manual"}), nil); s == nil {
-		t.Error("manual provider not created")
-	} else if _, ok := s.(*ManualSource); !ok {
-		t.Error("wrong type for manual provider")
+	gh := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app"}
+	if s, err := New(src(gh), nil); err != nil {
+		t.Errorf("github provider not created: %v", err)
+	} else if _, ok := s.(*GitHubSource); !ok {
+		t.Error("wrong type for github provider")
+	}
+	// The manual provider was removed.
+	if _, err := New(src(map[string]string{"Provider": "manual"}), nil); err == nil {
+		t.Error("manual provider should error")
 	}
 	if s, _ := New(src(map[string]string{}), nil); s == nil {
 		t.Error("default provider not created")

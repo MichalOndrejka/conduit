@@ -1,9 +1,7 @@
-// Package sources provides the generic source abstraction. Unlike the Python
-// app (which had nine Azure-DevOps-specific providers), the Go backend keeps
-// the backend provider-agnostic by design: any JSON-over-HTTP system is
-// configured through the generic API source (URL, auth, field mappings,
-// pagination) rather than coded against. ADO, Jira, GitHub, etc. become
-// source *configurations*, not source *code*.
+// Package sources provides the source abstraction. Azure DevOps sources run
+// on the generic API source (URL, auth, field mappings, pagination) with
+// ADO-specific enrichment; GitHub sources (github.com or GitHub Enterprise
+// Server) have their own fetcher, GitHubSource.
 package sources
 
 import (
@@ -26,14 +24,14 @@ type Source interface {
 // the fetch mechanism; the source *type* only selects the target collection.
 func New(src *models.SourceDefinition, store secrets.Reader) (Source, error) {
 	switch src.GetConfig("Provider") {
-	case "manual":
-		return &ManualSource{src: src}, nil
 	case "", "api", "custom":
 		return &APISource{src: src, secrets: store}, nil
+	case "github":
+		return newGitHubSource(src, store)
 	default:
 		return nil, fmt.Errorf(
-			"unknown provider %q — the Go backend supports the generic %q provider and %q",
-			src.GetConfig("Provider"), "api", "manual",
+			"unknown provider %q — the Go backend supports %q (Azure DevOps) and %q",
+			src.GetConfig("Provider"), "api", "github",
 		)
 	}
 }
@@ -42,9 +40,6 @@ func New(src *models.SourceDefinition, store secrets.Reader) (Source, error) {
 // type is a domain category (work items, code, docs…) that routes documents
 // to a Qdrant collection. Types are generic labels, not tied to any provider.
 func CollectionFor(src *models.SourceDefinition) string {
-	if src.GetConfig("Provider") == "manual" {
-		return models.CollectionDocumentation
-	}
 	switch src.Type {
 	case models.SourceWorkItemQuery:
 		return models.CollectionWorkItems

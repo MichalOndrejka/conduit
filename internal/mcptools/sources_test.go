@@ -2,6 +2,7 @@ package mcptools
 
 import (
 	"context"
+	"maps"
 	"strings"
 	"testing"
 
@@ -22,8 +23,8 @@ func newFakeManager(creds ...string) *fakeManager {
 	m := &fakeManager{byID: map[string]models.SourceDefinition{}, creds: creds}
 	m.put(models.SourceDefinition{ID: "wi", Name: "Work items", Type: models.SourceWorkItemQuery, SyncStatus: "completed",
 		Config: map[string]string{"Provider": "api", "Url": "https://ado.example/_apis/wit/wiql", "AuthType": "basic", "Password": "ado-pat"}})
-	m.put(models.SourceDefinition{ID: "notes", Name: "Notes", Type: models.SourceDocumentation,
-		Config: map[string]string{"Provider": "manual", "Title": "Notes", "Content": "long pasted text"}})
+	m.put(models.SourceDefinition{ID: "docs", Name: "Docs", Type: models.SourceDocumentation,
+		Config: map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "handbook", "PathFilter": "*.md"}})
 	return m
 }
 
@@ -87,7 +88,7 @@ func TestManageListIncludesCredentialNamesAndTypes(t *testing.T) {
 		t.Fatal(err)
 	}
 	srcs := out["sources"].([]sourceSummary)
-	if len(srcs) != 2 || srcs[0].ID != "wi" || srcs[1].Provider != "manual" || srcs[1].SyncStatus != "idle" {
+	if len(srcs) != 2 || srcs[0].ID != "wi" || srcs[1].Provider != "github" || srcs[1].SyncStatus != "idle" {
 		t.Errorf("sources = %+v", srcs)
 	}
 	if creds := out["credentials"].([]string); strings.Join(creds, ",") != "ado-pat,jira" {
@@ -105,14 +106,14 @@ func TestManageListCredentialsNeverNil(t *testing.T) {
 	}
 }
 
-func TestManageGetStripsManualContent(t *testing.T) {
+func TestManageGetReturnsConfig(t *testing.T) {
 	m := newFakeManager()
-	out, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "get", "source_id": "notes"})
+	out, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "get", "source_id": "docs"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := out["source"].(sourceView).Config["Content"]; got != models.DocumentPlaceholder {
-		t.Errorf("Content = %q, want placeholder", got)
+	if got := out["source"].(sourceView).Config["GitHubRepo"]; got != "handbook" {
+		t.Errorf("GitHubRepo = %q, want handbook", got)
 	}
 	if _, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "get", "source_id": "nope"}); err == nil {
 		t.Error("expected an error for an unknown id")
@@ -132,6 +133,50 @@ func TestManageCreateSavesAPISource(t *testing.T) {
 	}
 	if saved.Config["Provider"] != "api" || saved.Config["Top"] != "200" || saved.Config["Password"] != "ado-pat" {
 		t.Errorf("config = %v", saved.Config)
+	}
+}
+
+func TestManageCreateSavesGitHubSource(t *testing.T) {
+	m := newFakeManager("gh-pat")
+	out, err := manage(t, m, newFakeRunner(), map[string]any{
+		"mode": "create", "name": "CI runs", "type": models.SourcePipelineRun,
+		"config": map[string]any{
+			"Provider": "github", "GitHubUrl": "https://ghe.example.com", "GitHubOwner": "acme",
+			"GitHubRepo": "app", "Token": "gh-pat", "Workflow": "ci.yml", "Days": float64(14),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := m.byID[out["source"].(sourceView).ID]
+	if saved.Config["Provider"] != "github" || saved.Config["Workflow"] != "ci.yml" || saved.Config["Days"] != "14" {
+		t.Errorf("config = %v", saved.Config)
+	}
+}
+
+func TestManageCreateRejectsAPIKeysOnGitHub(t *testing.T) {
+	m := newFakeManager()
+	_, err := manage(t, m, newFakeRunner(), map[string]any{
+		"mode": "create", "name": "x", "type": models.SourceCodeRepo,
+		"config": map[string]any{"Provider": "github", "GitHubOwner": "a", "GitHubRepo": "b", "Url": "https://x"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "Url") {
+		t.Errorf("err = %v, want Url rejected for a GitHub source", err)
+	}
+}
+
+func TestManageUpdateSwitchingProviderDropsOldKeys(t *testing.T) {
+	m := newFakeManager("gh-pat")
+	_, err := manage(t, m, newFakeRunner(), map[string]any{
+		"mode": "update", "source_id": "wi",
+		"config": map[string]any{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Token": "gh-pat"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Token": "gh-pat"}
+	if got := m.byID["wi"].Config; !maps.Equal(got, want) {
+		t.Errorf("config = %v, want %v (Azure DevOps keys dropped)", got, want)
 	}
 }
 
@@ -156,7 +201,8 @@ func TestManageCreateRejectsSecretValueInCredentialField(t *testing.T) {
 
 func TestManageCreateRejectsBadInput(t *testing.T) {
 	cases := map[string]func(map[string]any){
-		"unknown key":  func(r map[string]any) { r["config"].(map[string]any)["Provider"] = "manual" },
+		"bad provider": func(r map[string]any) { r["config"].(map[string]any)["Provider"] = "manual" },
+		"unknown key":  func(r map[string]any) { r["config"].(map[string]any)["Workflow"] = "ci.yml" },
 		"bad url":      func(r map[string]any) { r["config"].(map[string]any)["Url"] = "ftp://x" },
 		"bad type":     func(r map[string]any) { r["type"] = "jira" },
 		"missing name": func(r map[string]any) { delete(r, "name") },
@@ -208,11 +254,8 @@ func TestManageUpdateKeepsUnchangedMissingCredential(t *testing.T) {
 	}
 }
 
-func TestManageUpdateRefusesManualAndSyncing(t *testing.T) {
+func TestManageUpdateRefusesSyncing(t *testing.T) {
 	m := newFakeManager("ado-pat")
-	if _, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "update", "source_id": "notes", "name": "x"}); err == nil {
-		t.Error("expected manual sources to be refused")
-	}
 	runner := newFakeRunner()
 	runner.syncing["wi"] = true
 	if _, err := manage(t, m, runner, map[string]any{"mode": "update", "source_id": "wi", "name": "x"}); err == nil {

@@ -6,12 +6,12 @@
 {{define "worktype-picker"}}
 {{$s := .Source}}
 <div>
-  <label class="block text-sm font-medium text-slate-300 mb-1">Area paths <span class="text-slate-500">(comma-sep)</span></label>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Area paths {{template "tip" "Comma-separated, e.g. MyProject\\Team A. Sub-areas are included. Empty = every area of the project."}}</label>
   <input name="AreaPaths" value="{{$s.GetConfig `AreaPaths`}}" placeholder="MyProject\Team A, MyProject\Team B"
          class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
 </div>
 <div>
-  <label class="block text-sm font-medium text-slate-300 mb-1">Work item types</label>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Work item types {{template "tip" "Conduit queries work items directly; tick the types to embed."}}</label>
   <div id="worktype-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
     {{range .WorkItemTypePresets}}
     <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
@@ -21,6 +21,32 @@
     {{end}}
   </div>
   <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
+</div>
+{{end}}
+
+<!-- GitHub tab: repository file fields and the issue label filter. -->
+{{define "gh-files"}}
+{{$s := .Source}}
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div>
+    <label class="block text-sm font-medium text-slate-300 mb-1">Branch {{template "tip" "Empty = the repository's default branch."}}</label>
+    <input name="Branch" value="{{$s.GetConfig `Branch`}}" placeholder="main"
+           class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md or docs/**. Empty = all files. Each matching file's full content is embedded; binary files and files over 200 KB are skipped."}}</label>
+    <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
+           class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+  </div>
+</div>
+{{end}}
+
+{{define "gh-labels"}}
+{{$s := .Source}}
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Labels {{template "tip" "Comma-separated; an issue with any of them is embedded. Empty = every issue. Open and closed issues are embedded with all their comments; pull requests are not."}}</label>
+  <input name="Labels" value="{{$s.GetConfig `Labels`}}" placeholder="bug, enhancement"
+         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
 </div>
 {{end}}
 
@@ -55,48 +81,29 @@
            class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">
   </div>
 
-  <!-- Provider choice — a card picker, same style as the source-type picker
-       (source_new.html) and the work-item-type tiles below, since choosing
-       here swaps out the whole set of visible inputs underneath. -->
+  <!-- Provider choice — browser-style tabs (.tab / .tab-panel, input.css),
+       like every choice that swaps out the inputs underneath it. -->
   <div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-      <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-        <input type="radio" name="ProviderTab" value="ado" class="peer sr-only" {{if ne .Tab "manual"}}checked{{end}} onchange="setTab('ado')">
-        <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Azure DevOps</div>
-        <div class="text-xs text-slate-500 mt-1 leading-relaxed">Connect to an org with a Personal Access Token.</div>
+    <div class="tabs" role="tablist">
+      <label class="tab">
+        <input type="radio" name="ProviderTab" value="ado" class="sr-only" {{if ne .Tab "github"}}checked{{end}} onchange="setTab('ado')">
+        Azure DevOps
       </label>
-      <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-        <input type="radio" name="ProviderTab" value="manual" class="peer sr-only" {{if eq .Tab "manual"}}checked{{end}} onchange="setTab('manual')">
-        <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Manual</div>
-        <div class="text-xs text-slate-500 mt-1 leading-relaxed">Paste content directly instead of connecting a live source.</div>
+      <label class="tab">
+        <input type="radio" name="ProviderTab" value="github" class="sr-only" {{if eq .Tab "github"}}checked{{end}} onchange="setTab('github')">
+        GitHub
       </label>
     </div>
 
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
-    <div id="ado-block" class="mt-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
+    <div id="ado-block" class="tab-panel p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
       {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
       {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
-      {{$dualWorkItems := and $isDualMode (eq $fetchMode "workitems")}}
-      <p class="text-xs text-slate-500">
-        {{if or $isWorkItemType $dualWorkItems}}
-        Fill in your organization, project and a Personal Access Token. Conduit queries work items directly —
-        pick which types to embed below.
-        {{else}}
-        Fill in your organization, project and a Personal Access Token. Conduit builds the
-        <span class="font-mono">/_apis/…</span> URL and uses the PAT for basic auth. Point it at any ADO REST list
-        endpoint that returns a <span class="font-mono">value</span> array.
-        {{end}}
-      </p>
-
-      <!-- hidden generic fields composed on submit -->
-      <input type="hidden" name="Url" id="ado-url">
-      <input type="hidden" name="AuthType" value="basic">
-      <input type="hidden" name="Username" value="">
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Organization URL <span class="text-red-400">*</span></label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Organization URL <span class="text-red-400">*</span> {{template "tip" "https://dev.azure.com/your-org, or your Azure DevOps Server collection URL. Conduit builds the REST URLs from it and the project."}}</label>
           <input name="AdoOrg" required value="{{or ($s.GetConfig `AdoOrg`) `https://dev.azure.com/`}}"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
@@ -109,16 +116,15 @@
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Personal Access Token</label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Personal Access Token {{template "tip" "Used for basic auth. Add tokens on the Credentials page."}}</label>
           {{$pw := $s.GetConfig `Password`}}
           <select name="Password" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
             <option value="">— select credential —</option>
             {{range $creds}}<option value="{{.Name}}" {{if eq .Name $pw}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
           </select>
-          <p class="text-xs text-slate-500 mt-1">Add tokens on the <a href="/credentials" class="text-violet-400 hover:underline">Credentials</a> page.</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">API version</label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">API version {{template "tip" "7.1 works with Azure DevOps Services and Server 2022+. Older servers need e.g. 6.0 (Server 2020)."}}</label>
           <input name="AdoApiVersion" value="{{or ($s.GetConfig `AdoApiVersion`) `7.1`}}"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
@@ -129,36 +135,35 @@
 
       {{else if $isDualMode}}
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as</label>
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="radio" name="FetchMode" value="files" class="peer sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Files in a repo</div>
-            <div class="text-xs text-slate-500 mt-1 leading-relaxed">Fetch and embed matching files from a repository.</div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as {{template "tip" "Files: embed matching files from a repository. Work items: query work items directly and pick which types to embed."}}</label>
+        <input type="hidden" name="FetchMode" class="fetch-mode-value" value="{{$fetchMode}}">
+        <div class="tabs" role="tablist">
+          <label class="tab">
+            <input type="radio" name="AdoFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Files in a repo
           </label>
-          <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-            <input type="radio" name="FetchMode" value="workitems" class="peer sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">Azure DevOps work items</div>
-            <div class="text-xs text-slate-500 mt-1 leading-relaxed">Query work items directly and pick which types to embed.</div>
+          <label class="tab">
+            <input type="radio" name="AdoFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Azure DevOps work items
           </label>
         </div>
-      </div>
 
-      <div id="fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} space-y-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
-          <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        <div id="fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
+            <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
+            <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+          </div>
         </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">File filter <span class="text-slate-500">(comma-sep wildcards, e.g. "*.md" — empty = all files)</span></label>
-          <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
-      </div>
 
-      <div id="fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} space-y-4">
-        {{template "worktype-picker" .}}
+        <div id="fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          {{template "worktype-picker" .}}
+        </div>
       </div>
 
       {{else if eq $s.Type "commit-history"}}
@@ -174,7 +179,7 @@
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits <span class="text-slate-500">(most recent first; fetched in pages of 100)</span></label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Most recent first, fetched in pages of 100. Every commit embeds its full message and the complete diff of every changed file."}}</label>
           <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
@@ -182,20 +187,16 @@
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Pipeline definition ID <span class="text-red-400">*</span></label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Pipeline definition ID <span class="text-red-400">*</span> {{template "tip" "The definitionId in the pipeline's URL."}}</label>
           <input type="number" name="DefinitionId" min="1" required value="{{$s.GetConfig `DefinitionId`}}" placeholder="42"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-          <p class="text-xs text-slate-500 mt-1">The <span class="font-mono">definitionId</span> in the pipeline's URL.</p>
         </div>
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> <span class="text-slate-500">(completed runs of the last N days)</span></label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> {{template "tip" "Completed runs of the last N days. Every run gets a summary; failed and partially succeeded runs also embed the complete log of each failed step and every failed test's error and stack trace."}}</label>
           <input type="number" name="Days" min="1" required value="{{or ($s.GetConfig `Days`) `30`}}" placeholder="30"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
       </div>
-      <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
-        Every run gets a summary <span class="text-slate-500">(failed and partially succeeded runs also embed the complete log of each failed step and every failed test's error and stack trace)</span>
-      </p>
       {{else}}
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
@@ -203,30 +204,110 @@
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">File filter <span class="text-slate-500">(comma-sep wildcards, e.g. "*.cs, *.ts" — empty = all files)</span></label>
+        <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.cs, *.ts. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
         <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.cs, *.ts"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       {{end}}
 
-      {{if or (eq $s.Type "code") (eq $s.Type "test-code") (eq $s.Type "documentation") (and $isDualMode (ne $fetchMode "workitems"))}}
-      <p class="text-sm text-slate-300 pt-2 border-t border-slate-800">
-        File contents are always embedded <span class="text-slate-500">(automatic for repository file sources — each matching file's actual content is fetched, not just its metadata)</span>
-      </p>
-      {{end}}
+      <!-- hidden generic fields composed on submit (last, so space-y
+           doesn't count them as a sibling of the first field) -->
+      <input type="hidden" name="Url" id="ado-url">
+      <input type="hidden" name="AuthType" value="basic">
+      <input type="hidden" name="Username" value="">
     </div>
 
-    <!-- ── Manual ───────────────────────────────────────────────────── -->
-    <div id="manual-block" class="hidden mt-3 rounded-2xl border border-slate-800 bg-slate-900/60 p-5 space-y-4">
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Title</label>
-        <input name="Title" value="{{$s.GetConfig `Title`}}"
-               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+    <!-- ── GitHub ───────────────────────────────────────────────────── -->
+    <div id="github-block" class="hidden tab-panel p-5 space-y-4">
+      {{$isWorkItemType := eq $s.Type "work-item"}}
+      {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
+      {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Server URL <span class="text-red-400">*</span> {{template "tip" "https://github.com, or your GitHub Enterprise Server's URL."}}</label>
+          <input name="GitHubUrl" required value="{{or ($s.GetConfig `GitHubUrl`) `https://github.com`}}"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Personal Access Token {{template "tip" "Needs read access to the repository's contents, issues and actions as this source requires. Public repositories also work without one, at a low rate limit. Add tokens on the Credentials page."}}</label>
+          {{$tok := $s.GetConfig `Token`}}
+          <select name="Token" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+            <option value="">— select credential —</option>
+            {{range $creds}}<option value="{{.Name}}" {{if eq .Name $tok}}selected{{end}}>{{.Name}}{{if eq .ID ""}} (not stored){{end}}</option>{{end}}
+          </select>
+        </div>
       </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Content {{if .IsNew}}<span class="text-red-400">*</span>{{else}}<span class="text-slate-500">(leave empty to keep current)</span>{{end}}</label>
-        <textarea name="Content" rows="10" {{if .IsNew}}required{{end}} class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"></textarea>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Owner <span class="text-red-400">*</span> {{template "tip" "The user or organization that owns the repository."}}</label>
+          <input name="GitHubOwner" required value="{{$s.GetConfig `GitHubOwner`}}" placeholder="my-org"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Repository <span class="text-red-400">*</span></label>
+          <input name="GitHubRepo" required value="{{$s.GetConfig `GitHubRepo`}}" placeholder="my-repo"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
       </div>
+
+      {{if $isWorkItemType}}
+      {{template "gh-labels" .}}
+
+      {{else if $isDualMode}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as {{template "tip" "Files: embed matching files from the repository. Issues: embed the repository's issues with their comments."}}</label>
+        <input type="hidden" name="FetchMode" class="fetch-mode-value" value="{{$fetchMode}}">
+        <div class="tabs" role="tablist">
+          <label class="tab">
+            <input type="radio" name="GitHubFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Files in a repo
+          </label>
+          <label class="tab">
+            <input type="radio" name="GitHubFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            GitHub issues
+          </label>
+        </div>
+
+        <div id="github-fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          {{template "gh-files" .}}
+        </div>
+
+        <div id="github-fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          {{template "gh-labels" .}}
+        </div>
+      </div>
+
+      {{else if eq $s.Type "commit-history"}}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Branch {{template "tip" "Empty = the repository's default branch."}}</label>
+          <input name="Branch" value="{{$s.GetConfig `Branch`}}" placeholder="main"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Most recent first. Every commit embeds its full message and the patch of each changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case."}}</label>
+          <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+      {{else if eq $s.Type "pipeline-run"}}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Workflow <span class="text-red-400">*</span> {{template "tip" "The workflow's file name in .github/workflows (e.g. ci.yml), or its numeric ID."}}</label>
+          <input name="Workflow" required value="{{$s.GetConfig `Workflow`}}" placeholder="ci.yml"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> {{template "tip" "Completed runs of the last N days. Every run gets a summary; failed runs also embed the complete log of each failed job and its error annotations."}}</label>
+          <input type="number" name="Days" min="1" required value="{{or ($s.GetConfig `Days`) `30`}}" placeholder="30"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+      {{else}}
+      {{template "gh-files" .}}
+      {{end}}
     </div>
   </div>
 
@@ -281,16 +362,19 @@ function toggleBlock(id, on) {
 
 function setTab(name) {
   currentTab = name;
-  var isAdo = name === 'ado', isManual = name === 'manual';
+  var isAdo = name === 'ado', isGitHub = name === 'github';
   toggleBlock('ado-block', isAdo);
-  toggleBlock('manual-block', isManual);
-  document.getElementById('f-provider').value = isManual ? 'manual' : 'api';
+  toggleBlock('github-block', isGitHub);
+  document.getElementById('f-provider').value = isGitHub ? 'github' : 'api';
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
-  if (isAdo) updateFetchMode();
+  updateFetchMode();
 }
 
+// Each provider tab has its own "Fetch as" radio group (one shared name
+// would let a tick on one tab clear the other); the active tab's choice is
+// submitted through its hidden FetchMode input.
 function currentFetchMode() {
-  var el = document.querySelector('input[name="FetchMode"]:checked');
+  var el = document.querySelector('#' + currentTab + '-block input.fetch-mode:checked');
   return el ? el.value : 'files';
 }
 
@@ -299,10 +383,12 @@ function currentFetchMode() {
 // fetch-workitems-fields) and toggle between them client-side, instead of
 // reloading the page like the tab switch above.
 function updateFetchMode() {
-  if (!document.getElementById('fetch-files-fields')) return;
+  var prefix = currentTab === 'github' ? 'github-' : '';
+  if (!document.getElementById(prefix + 'fetch-files-fields')) return;
   var mode = currentFetchMode();
-  toggleBlock('fetch-files-fields', mode !== 'workitems');
-  toggleBlock('fetch-workitems-fields', mode === 'workitems');
+  document.querySelector('#' + currentTab + '-block .fetch-mode-value').value = mode;
+  toggleBlock(prefix + 'fetch-files-fields', mode !== 'workitems');
+  toggleBlock(prefix + 'fetch-workitems-fields', mode === 'workitems');
 }
 
 function adoVal(name) {

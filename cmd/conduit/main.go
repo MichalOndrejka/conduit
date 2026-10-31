@@ -107,7 +107,7 @@ func main() {
 	}
 	cancelEnsure()
 
-	// ── Sync engine (generic sources: API + manual) ────────────────────────
+	// ── Sync engine (sources: Azure DevOps, GitHub) ─────────────────────────
 	chunker := rag.NewTextChunker(cfg)
 	indexer := rag.NewDocumentIndexer(vectors, embedding, chunker)
 	syncSvc := syncsvc.New(

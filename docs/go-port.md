@@ -17,7 +17,7 @@ internal/secrets/       Fernet credential store       (port of app/store/secrets
 internal/rag/           qdrant REST client, embeddings, chunker, indexer, search, PCA
 internal/memory/        experience store              (port of app/memory/service.py)
 internal/mcptools/      MCP tools via mark3labs/mcp-go (port of app/mcp_tools/tools.py)
-internal/sources/       generic source abstraction (API + manual — no provider code)
+internal/sources/       source abstraction (generic API source for Azure DevOps + GitHub source)
 internal/syncsvc/       sync orchestration (fetch → index, pause/cancel)
 internal/syncctl/       pause/cancel control + progress stores
 internal/health/        background probes with exponential backoff
@@ -28,23 +28,21 @@ internal/store/         conduit-sources.json store
 internal/web/           routes, templates
 ```
 
-## Generic sources (deliberate redesign)
+## Sources
 
-The Python app shipped nine Azure-DevOps-specific source providers. The Go
-backend intentionally has **zero provider-specific code**: any JSON-over-HTTP
-system is configured through the generic API source —
+Two providers, picked per source by the `Provider` config key:
 
-- endpoint (URL, GET/POST, raw body, extra headers)
-- auth: none / Bearer / Basic / API-key header, secrets referenced by
-  credential name (ADO PATs = Basic with empty username)
-- response mapping: items dot-path, ID/title/content fields
-- pagination via a next-page-URL dot-path, `Top` item cap
-- plus the manual document provider for pasted content
+- **`api` — Azure DevOps.** The generic API source (endpoint, auth, response
+  mapping, pagination) behind the Azure DevOps form, with ADO-specific
+  enrichment where one endpoint isn't enough: WIQL query + batch fetch for
+  work items, full diffs for commits, file content for repository files,
+  timeline logs and test results for pipeline runs.
+- **`github` — GitHub.** `GitHubSource`, against the REST API of github.com,
+  GitHub Enterprise Server (`…/api/v3`) or a `*.ghe.com` tenant: repository
+  files, commits with patches, issues with comments, Actions runs with failed
+  job logs.
 
-ADO, Jira, GitHub, etc. become source *configurations*, not source *code*.
-Constraint accepted: multi-step fetch flows (e.g. ADO WIQL → batch fetch, git
-zip downloads with code parsing) are not expressible — single-endpoint JSON
-APIs only.
+The manual (pasted content) provider was removed. See [Sources](sources.md).
 
 ## Compatibility with the Python app (historical)
 

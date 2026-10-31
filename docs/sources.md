@@ -1,6 +1,6 @@
 # Source Configuration Reference
 
-Every source in Conduit has a **type** (which Qdrant collection it targets, see the table below) and a **provider** (which backend fetches the data). The backend is intentionally provider-agnostic — there is no ADO/Jira/GitHub-specific code. Any JSON-over-HTTP API is expressed as configuration through the single generic **HTTP API** provider; the **Manual** provider embeds pasted or uploaded content directly.
+Every source in Conduit has a **type** (which Qdrant collection it targets, see the table below) and a **provider** (which backend fetches the data). Azure DevOps sources run on the generic **HTTP API** provider (`Provider` = `api`) with ADO-specific enrichment; **GitHub** sources (`Provider` = `github`) have their own fetcher.
 
 ## Providers
 
@@ -42,11 +42,33 @@ Credential fields (`Token`, `Password`, `ApiKeyValue`) hold a **name**, not the 
 
 Constraint accepted by this generic design: multi-step fetch flows (e.g. an ADO WIQL query followed by a batch fetch, or downloading a git repo as a zip and parsing source files into code units) aren't expressible — only single-endpoint JSON APIs are.
 
-### Manual
+### GitHub
 
-Embeds content without any external connection. Set `Title` and `Content` directly (or upload a `.pdf`/`.txt`/`.md` file in the web UI, which extracts `Content` for you). The extracted text is stored in `conduit-sources.json` so preview and re-sync work without re-uploading.
+Fetches from github.com or a GitHub Enterprise Server through the GitHub REST API (`internal/sources/github*.go`). Stored with `Provider` = `github`; picked on the **GitHub** tab of the source form.
 
-On **export**, document content is replaced with a `__DOCUMENT_REQUIRED__` placeholder — anyone importing the config must open the source and provide the content again before syncing.
+| Field | Config key | Description |
+|-------|-----------|-------------|
+| Server URL | `GitHubUrl` | `https://github.com` (default), your GitHub Enterprise Server, e.g. `https://github.example.com` (the API is then `…/api/v3`), or a GitHub Enterprise Cloud tenant with data residency, e.g. `https://octo.ghe.com` (the API is then `https://api.octo.ghe.com`). |
+| Owner | `GitHubOwner` | User or organization. Required. |
+| Repository | `GitHubRepo` | Repository name. Required. |
+| Token | `Token` | Credential name of a personal access token (classic or fine-grained) with read access to contents, issues and actions as needed. Empty = public repositories only, at GitHub's low anonymous rate limit. |
+| Branch | `Branch` | Files and commits. Empty = the repository's default branch. |
+| File filter | `PathFilter` | Files. Comma-separated wildcards, same as Azure DevOps. |
+| Max items | `Top` | Commits and issues: newest first. |
+| Fetch as | `FetchMode` | Requirements / Test Cases: `files` (default) or `workitems` (issues). |
+| Labels | `Labels` | Issues. Comma-separated; an issue with any of them is fetched. Empty = every issue. |
+| Workflow | `Workflow` | Pipeline Runs. Workflow file name (`ci.yml`) or numeric ID. |
+| Days | `Days` | Pipeline Runs. Completed runs created in the last N days. |
+| Verify SSL | `VerifySSL` | `false` skips TLS verification (self-hosted servers with private CAs). |
+
+What each source type fetches:
+
+- **Source Code / Test Code / Documentation** (and Requirements / Test Cases in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped.
+- **Commit History**: one document per commit with its full message and the patch of every changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case.
+- **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = `Issue`.
+- **Pipeline Runs**: one document per completed workflow run; a failed run (failure, timed_out, startup_failure) also lists its failed jobs' annotations and yields one document per failed job with the complete job log (`parent_doc_id` links it to the run). Logs GitHub has already deleted are noted. GitHub returns at most 1000 runs per query; a window holding more fails the sync and asks for fewer Days.
+
+The owner fills the `project` filter and the repository the `repository` filter, so search narrows GitHub and Azure DevOps sources the same way.
 
 ## Source types and collections
 
@@ -62,8 +84,6 @@ The source **type** only decides which Qdrant collection a source's documents la
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
-
-Manual-provider sources always land in `conduit_documentation` regardless of type.
 
 ## Platform presets (UI convenience, not backend code)
 

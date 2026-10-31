@@ -23,6 +23,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/pmezard/go-difflib/difflib"
+
+	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
 const (
@@ -249,9 +251,19 @@ func (a *APISource) getRaw(ctx context.Context, client *http.Client, url string)
 // headers, for APIs that page via a response header (e.g. ADO's
 // x-ms-continuationtoken).
 func (a *APISource) getRawWithHeader(ctx context.Context, client *http.Client, url string) ([]byte, http.Header, error) {
+	return getWithRetry(ctx, client, url, func(req *http.Request) {
+		a.applyAuth(req)
+		a.applyExtraHeaders(req)
+	})
+}
+
+// getWithRetry performs a GET, letting prepare set auth and headers, and
+// returns the raw body and headers. Transient failures (network errors, 429,
+// 5xx, rate-limit 403s) are retried with backoff, honouring Retry-After.
+func getWithRetry(ctx context.Context, client *http.Client, url string, prepare func(*http.Request)) ([]byte, http.Header, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxFetchAttempts; attempt++ {
-		data, header, retryAfter, err := a.getRawOnce(ctx, client, url)
+		data, header, retryAfter, err := getOnce(ctx, client, url, prepare)
 		if err == nil {
 			return data, header, nil
 		}
@@ -275,13 +287,22 @@ func (a *APISource) getRawWithHeader(ctx context.Context, client *http.Client, u
 	return nil, nil, fmt.Errorf("giving up after %d attempts: %w", maxFetchAttempts, lastErr)
 }
 
-func (a *APISource) getRawOnce(ctx context.Context, client *http.Client, url string) (data []byte, header http.Header, retryAfter time.Duration, err error) {
+// httpStatusError is a non-retryable HTTP error response.
+type httpStatusError struct {
+	status int
+	msg    string
+}
+
+func (e *httpStatusError) Error() string { return e.msg }
+
+func getOnce(ctx context.Context, client *http.Client, url string, prepare func(*http.Request)) (data []byte, header http.Header, retryAfter time.Duration, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, nil, 0, err
 	}
-	a.applyAuth(req)
-	a.applyExtraHeaders(req)
+	if prepare != nil {
+		prepare(req)
+	}
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -295,14 +316,19 @@ func (a *APISource) getRawOnce(ctx context.Context, client *http.Client, url str
 	if err != nil {
 		return nil, nil, 0, fmt.Errorf("%w: reading %s: %v", errRetryable, url, err)
 	}
-	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-		if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
-			retryAfter = min(time.Duration(s)*time.Second, maxRetryAfter)
-		}
+	if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
+		retryAfter = min(time.Duration(s)*time.Second, maxRetryAfter)
+	}
+	// GitHub refuses requests over its rate limit with 403 (primary limit:
+	// X-RateLimit-Remaining is 0; secondary limit: Retry-After is set).
+	rateLimited := resp.StatusCode == http.StatusForbidden &&
+		(resp.Header.Get("X-RateLimit-Remaining") == "0" || retryAfter > 0)
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 || rateLimited {
 		return nil, nil, retryAfter, fmt.Errorf("%w: HTTP %d from %s", errRetryable, resp.StatusCode, url)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, nil, 0, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+		return nil, nil, 0, &httpStatusError{status: resp.StatusCode,
+			msg: fmt.Sprintf("HTTP %d from %s: %s", resp.StatusCode, url, rag.Truncate(string(data), 300))}
 	}
 	if len(data) > maxRawResponseBytes {
 		return nil, nil, 0, fmt.Errorf("response from %s exceeds %d MB", url, maxRawResponseBytes>>20)

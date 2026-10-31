@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 )
 
 // ── Health / status ──────────────────────────────────────────────────────────
@@ -146,7 +148,7 @@ func TestSourceCreateGetShowsFormForType(t *testing.T) {
 func TestSourceCreatePostRequiresName(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/create", url.Values{
-		"type": {"work-item"}, "provider": {"manual"}, "Content": {"hello"},
+		"type": {"work-item"}, "provider": {"github"}, "GitHubOwner": {"acme"}, "GitHubRepo": {"app"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (re-rendered form with error)", resp.StatusCode)
@@ -160,24 +162,27 @@ func TestSourceCreatePostRequiresName(t *testing.T) {
 	}
 }
 
-func TestSourceCreatePostValidatesManualContent(t *testing.T) {
+func TestSourceCreatePostValidatesGitHubRepo(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/create", url.Values{
-		"name": {"My Doc"}, "type": {"documentation"}, "provider": {"manual"},
+		"name": {"Docs"}, "type": {"documentation"}, "provider": {"github"}, "GitHubOwner": {"acme"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if body := bodyString(t, resp); !strings.Contains(body, "Content is required") {
-		t.Error("expected the content-required validation error")
+	if body := bodyString(t, resp); !strings.Contains(body, "Repository is required") {
+		t.Error("expected the repository-required validation error")
 	}
 }
 
-func TestSourceCreatePostSavesValidManualSource(t *testing.T) {
+func TestSourceCreatePostSavesValidGitHubSource(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/create", url.Values{
-		"name": {"My Doc"}, "type": {"documentation"}, "provider": {"manual"},
-		"Content": {"the document body"},
+		"name": {"Docs"}, "type": {"documentation"}, "provider": {"github"},
+		"GitHubUrl": {"https://github.com"}, "GitHubOwner": {"acme"}, "GitHubRepo": {"handbook"},
+		"PathFilter": {"*.md"},
+		// Fields of the hidden Azure DevOps tab are not GitHub config.
+		"AdoProject": {"ignored"}, "Url": {"https://ignored.example"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303 redirect", resp.StatusCode)
@@ -186,8 +191,33 @@ func TestSourceCreatePostSavesValidManualSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 1 || all[0].Name != "My Doc" || all[0].GetConfig("Content") != "the document body" {
-		t.Errorf("ListAll() = %+v, want the saved manual source", all)
+	want := map[string]string{
+		"Provider": "github", "GitHubUrl": "https://github.com", "GitHubOwner": "acme",
+		"GitHubRepo": "handbook", "PathFilter": "*.md",
+	}
+	if len(all) != 1 || !maps.Equal(all[0].Config, want) {
+		t.Errorf("ListAll() = %+v, want config %v", all, want)
+	}
+}
+
+func TestSourceFormOpensGitHubTab(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "g1", Name: "Docs", Type: "documentation", Config: map[string]string{
+		"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "handbook",
+	}})
+	body := bodyString(t, h.get("/sources/g1/edit"))
+	if !strings.Contains(body, `var INITIAL_TAB = "github"`) || !strings.Contains(body, `value="handbook"`) {
+		t.Error("expected the edit form to open on the GitHub tab, pre-filled")
+	}
+	if strings.Contains(body, "Manual") {
+		t.Error("the Manual tab should be gone")
+	}
+	// Both tabs render for every source type.
+	for _, st := range sourcemgmt.Types {
+		resp := h.get("/sources/create?type=" + st.Value)
+		if body := bodyString(t, resp); resp.StatusCode != http.StatusOK || !strings.Contains(body, `id="github-block"`) {
+			t.Errorf("%s form: status %d, GitHub tab missing", st.Value, resp.StatusCode)
+		}
 	}
 }
 
@@ -363,30 +393,6 @@ func TestSourcePreviewReturnsValidationError(t *testing.T) {
 	}
 	if out.Ok || !strings.Contains(out.Error, "valid http") {
 		t.Errorf("preview = %+v, want a URL validation error", out)
-	}
-}
-
-func TestSourcePreviewManualUsesExistingContentWhenBlank(t *testing.T) {
-	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Doc", Type: "documentation", Config: map[string]string{
-		"Provider": "manual", "Title": "Doc", "Content": "stored content",
-	}})
-
-	resp := h.postForm("/sources/preview", url.Values{
-		"id": {"s1"}, "type": {"documentation"}, "provider": {"manual"},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var out struct {
-		Ok        bool                           `json:"ok"`
-		Documents []struct{ Title, Text string } `json:"documents"`
-	}
-	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-		t.Fatal(err)
-	}
-	if !out.Ok || len(out.Documents) != 1 || out.Documents[0].Text != "stored content" {
-		t.Errorf("preview = %+v, want the stored manual content", out)
 	}
 }
 

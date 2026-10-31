@@ -57,8 +57,11 @@ func manageRequestSchema() map[string]any {
 		return map[string]any{
 			"type":                 "object",
 			"additionalProperties": map[string]any{"type": "string"},
-			"description": desc + " Allowed keys: " + strings.Join(sourcemgmt.APIConfigKeys, ", ") +
+			"description": desc + ` Provider is "api" (Azure DevOps, the default) or "github". ` +
+				"Azure DevOps keys: " + strings.Join(sourcemgmt.APIConfigKeys, ", ") +
 				" (plus UI preset keys " + strings.Join(sourcemgmt.PresetConfigKeys, ", ") + "). " +
+				"GitHub keys: " + strings.Join(sourcemgmt.GitHubConfigKeys, ", ") +
+				" (GitHubUrl https://github.com or a GitHub Enterprise Server URL; Workflow is a pipeline-run's workflow file name or ID). " +
 				"Token, Password and ApiKeyValue take the NAME of a stored credential from list mode, never a secret value.",
 		}
 	}
@@ -86,7 +89,7 @@ func manageRequestSchema() map[string]any {
 					"mode":     mode("create"),
 					"name":     str("Display name, also the source_name filter of the search tools"),
 					"type":     sourceType,
-					"config":   config("The API source's config, same keys as the UI and the sources export file."),
+					"config":   config("The source's config, same keys as the UI and the sources export file."),
 					"disabled": map[string]any{"type": "boolean"},
 				},
 				"required": []string{"mode", "name", "type", "config"},
@@ -120,16 +123,16 @@ func manageRequestSchema() map[string]any {
 // startup, alongside RegisterSyncTool.
 func RegisterSourcesTool(s *server.MCPServer, mgr SourceManager, runner SyncRunner) {
 	tool := mcp.NewTool("manage_sources",
-		mcp.WithDescription(`Configure Conduit's API sources — the systems its search tools index. `+
+		mcp.WithDescription(`Configure Conduit's Azure DevOps and GitHub sources — the systems its search tools index. `+
 			`Pass request={"mode":"list"} for every source (id, name, type, provider, disabled, sync_status), `+
 			`the stored credential names and the source types. `+
 			`{"mode":"get","source_id":...} returns one source with its config. `+
-			`{"mode":"create","name":...,"type":...,"config":{...}} adds an API source; `+
+			`{"mode":"create","name":...,"type":...,"config":{...}} adds a source (config.Provider "github" for GitHub); `+
 			`{"mode":"update","source_id":...,...} changes name, type, disabled or merges config keys. `+
 			`Credentials are referenced by name only: ask the user which stored credential to use and never ask for `+
 			`or pass a token or password. Saving doesn't index anything — call sync_sources trigger afterwards. `+
 			`{"mode":"delete","source_id":...} reports what would be removed; repeat with "confirm":true to delete `+
-			`the source and its indexed data. Manual (pasted) document sources can only be edited in the UI.`),
+			`the source and its indexed data.`),
 		func(t *mcp.Tool) {
 			t.InputSchema.Properties["request"] = manageRequestSchema()
 			t.InputSchema.Required = append(t.InputSchema.Required, "request")
@@ -248,12 +251,9 @@ func lookup(mgr SourceManager, req map[string]any) (*models.SourceDefinition, er
 	return src, nil
 }
 
-// editable refuses edits the tool must not make: manual sources (UI-only)
-// and sources mid-sync (the sync would index the old config).
+// editable refuses edits to sources mid-sync (the sync would index the old
+// config).
 func editable(src models.SourceDefinition, runner SyncRunner) error {
-	if src.GetConfig("Provider") == "manual" {
-		return fmt.Errorf("source %q is a manual document; edit it in the UI", src.Name)
-	}
 	if runner.IsSyncing(src.ID) {
 		return fmt.Errorf("source %q is syncing; cancel the sync in the UI or wait for it to finish", src.Name)
 	}
@@ -295,9 +295,31 @@ func applyEdits(src *models.SourceDefinition, req map[string]any, mgr SourceMana
 		if !isMap {
 			return fmt.Errorf("config must be an object of string values")
 		}
+		// Provider decides which keys are allowed, so it applies first.
+		// Switching provider drops the old provider's keys, which the new
+		// one doesn't read.
+		if raw, ok := patch["Provider"]; ok {
+			p, _ := raw.(string)
+			if !slices.Contains(sourcemgmt.Providers, p) {
+				return fmt.Errorf("config.Provider must be one of %s", strings.Join(sourcemgmt.Providers, ", "))
+			}
+			if p != src.Config["Provider"] {
+				for key := range src.Config {
+					if !slices.Contains(sourcemgmt.ConfigKeys(p), key) {
+						delete(src.Config, key)
+					}
+				}
+			}
+			src.Config["Provider"] = p
+		}
+		allowed := sourcemgmt.ConfigKeys(src.Config["Provider"])
 		for key, raw := range patch {
-			if !slices.Contains(sourcemgmt.APIConfigKeys, key) && !slices.Contains(sourcemgmt.PresetConfigKeys, key) {
-				return fmt.Errorf("config key %q is not allowed; allowed keys: %s", key, strings.Join(sourcemgmt.APIConfigKeys, ", "))
+			if key == "Provider" {
+				continue
+			}
+			if !slices.Contains(allowed, key) {
+				return fmt.Errorf("config key %q is not allowed for provider %q; allowed keys: %s",
+					key, src.Config["Provider"], strings.Join(allowed, ", "))
 			}
 			val, err := configValue(raw)
 			if err != nil {
@@ -372,13 +394,9 @@ func syncStatusOf(src models.SourceDefinition) string {
 	return src.SyncStatus
 }
 
-// viewOf copies src for output. Manual document content is replaced with the
-// placeholder, as in the sources export, to keep responses small.
+// viewOf copies src for output.
 func viewOf(src models.SourceDefinition) sourceView {
 	cfg := copyConfig(src.Config)
-	if cfg["Provider"] == "manual" || cfg["DocType"] == "upload" {
-		cfg["Content"] = models.DocumentPlaceholder
-	}
 	return sourceView{
 		ID: src.ID, Name: src.Name, Type: src.Type, Disabled: src.Disabled,
 		SyncStatus: syncStatusOf(src), LastSyncedAt: src.LastSyncedAt, Config: cfg,

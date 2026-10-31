@@ -117,3 +117,8 @@
   </script>
 </body>
 </html>{{end}}
+
+{{/* tip renders a small info icon whose text shows on hover or keyboard
+     focus (.tip, input.css): every page's additional info goes here, so
+     forms show only what has to be filled in. Usage: {{template "tip" "text"}} */}}
+{{define "tip"}}<span class="tip" tabindex="0" role="img" aria-label="{{.}}" data-tip="{{.}}"></span>{{end}}

@@ -16,6 +16,101 @@ textarea.font-mono {
 }
 
 /*
+ * Browser-style tabs, for every choice that swaps out the inputs below it
+ * (source provider, "Fetch as"). A .tab label wraps a hidden radio; the
+ * checked tab merges into the .tab-panel under it by covering the panel's
+ * top border. Both use an opaque colour (slate-900/60 over the slate-950
+ * page) so that seam stays invisible.
+ */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+.tab {
+  position: relative;
+  z-index: 1;
+  margin-bottom: -1px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 0.5rem 0.5rem 0 0;
+  padding: 0.5rem 1rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 500;
+  color: #94a3b8;
+  transition: color 0.15s, background-color 0.15s;
+}
+.tab:hover { color: #ffffff; background-color: rgb(15 23 42 / 0.6); }
+.tab:has(:checked) {
+  color: #c4b5fd;
+  background-color: #0a1022;
+  border-color: #1e293b;
+  box-shadow: inset 0 2px 0 #7c3aed;
+}
+.tab:has(:focus-visible) { outline: 2px solid #7c3aed; outline-offset: 2px; }
+.tab-panel {
+  border: 1px solid #1e293b;
+  border-radius: 0 1rem 1rem 1rem;
+  background-color: #0a1022;
+}
+
+/*
+ * Info tooltips ({{template "tip" "…"}} in base.html): additional info sits
+ * behind a small "i" icon instead of as text on the page. The bubble opens
+ * on hover or keyboard focus, above the icon and growing to the right.
+ */
+.tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  margin-left: 0.25rem;
+  vertical-align: -0.15em;
+  border: 1px solid #475569;
+  border-radius: 9999px;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 600;
+  font-style: normal;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: help;
+  outline: none;
+}
+.tip::before { content: "i"; font-family: Georgia, serif; }
+.tip::after {
+  content: attr(data-tip);
+  position: absolute;
+  z-index: 50;
+  bottom: calc(100% + 6px);
+  left: -0.5rem;
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 2rem));
+  padding: 0.5rem 0.625rem;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  background-color: #1e293b;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.35);
+  color: #e2e8f0;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+.tip:hover, .tip:focus-visible { color: #c4b5fd; border-color: #7c3aed; }
+.tip:hover::after, .tip:focus-visible::after { opacity: 1; }
+
+/*
  * Light theme. Dark is the hardcoded default palette across the templates
  * (no `dark:` variants are used) — these rules remap the same utility
  * classes to light equivalents when the `dark` class is absent from <html>.
@@ -80,3 +175,14 @@ html:not(.dark) .hover\:text-violet-300:hover,
 html:not(.dark) .hover\:text-violet-400:hover,
 html:not(.dark) .group:hover .group-hover\:text-violet-300,
 html:not(.dark) .peer:checked ~ .peer-checked\:text-violet-300 { color: #6d28d9; }
+
+/* Tabs */
+html:not(.dark) .tab { color: #475569; }
+html:not(.dark) .tab:hover { color: #0f172a; background-color: #f1f5f9; }
+html:not(.dark) .tab:has(:checked) { color: #6d28d9; background-color: #ffffff; border-color: #e2e8f0; }
+html:not(.dark) .tab-panel { background-color: #ffffff; border-color: #e2e8f0; }
+
+/* Tooltips */
+html:not(.dark) .tip { color: #64748b; border-color: #cbd5e1; }
+html:not(.dark) .tip:hover, html:not(.dark) .tip:focus-visible { color: #6d28d9; border-color: #7c3aed; }
+html:not(.dark) .tip::after { background-color: #ffffff; border-color: #e2e8f0; color: #1e293b; box-shadow: 0 8px 24px rgb(15 23 42 / 0.12); }

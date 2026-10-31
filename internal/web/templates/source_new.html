@@ -9,8 +9,7 @@
   {{range .SourceTypes}}
   <a href="/sources/create?type={{.Value}}"
      class="group rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900">
-    <div class="text-sm font-medium text-white group-hover:text-violet-300">{{.Label}}</div>
-    <div class="text-xs text-slate-500 mt-1 leading-relaxed">{{.Description}}</div>
+    <div class="text-sm font-medium text-white group-hover:text-violet-300">{{.Label}} {{template "tip" .Description}}</div>
   </a>
   {{end}}
 </div>
