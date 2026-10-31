@@ -196,15 +196,22 @@ func (a *APISource) fileDiff(ctx context.Context, client *http.Client, repoBase 
 	if err != nil {
 		return "", err
 	}
+	return blobDiff(path, path, oldText, newText, c.ChangeType)
+}
+
+// blobDiff renders the unified diff between two versions of a file, with 3
+// lines of context. Binary content can't be shown as text, so it is recorded
+// by path and change type instead. Identical content renders as "".
+func blobDiff(fromPath, toPath, oldText, newText, changeType string) (string, error) {
 	if isBinary(oldText) || isBinary(newText) {
-		return fmt.Sprintf("--- %s\n(binary file, %s)\n\n", path, c.ChangeType), nil
+		return fmt.Sprintf("--- %s\n(binary file, %s)\n\n", toPath, changeType), nil
 	}
 
 	diff := difflib.UnifiedDiff{
 		A:        difflib.SplitLines(oldText),
 		B:        difflib.SplitLines(newText),
-		FromFile: path,
-		ToFile:   path,
+		FromFile: fromPath,
+		ToFile:   toPath,
 		Context:  3,
 	}
 	text, err := difflib.GetUnifiedDiffString(diff)

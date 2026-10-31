@@ -188,21 +188,30 @@ func (g *GitHubSource) fetchCommitDiff(ctx context.Context, sha string) (githubC
 			d.paths = append(d.paths, f.PreviousFilename)
 			oldPath = f.PreviousFilename
 		}
-		fmt.Fprintf(&b, "--- %s\n+++ %s\n", oldPath, f.Filename)
-		switch {
-		case f.Patch != "":
-			b.WriteString(strings.TrimRight(f.Patch, "\n") + "\n\n")
-		case f.Additions+f.Deletions == 0:
-			fmt.Fprintf(&b, "(%s, no content changes)\n\n", f.Status)
-		default:
-			fmt.Fprintf(&b, "(%s, +%d -%d; GitHub returns no patch for binary or very large files)\n\n", f.Status, f.Additions, f.Deletions)
-		}
+		patch, _ := githubFilePatch(f, oldPath)
+		b.WriteString(patch)
 	}
 	if len(files) >= githubMaxCommitFiles {
 		fmt.Fprintf(&b, "(GitHub lists at most %d changed files per commit; any further files are not included)\n", githubMaxCommitFiles)
 	}
 	d.diff = b.String()
 	return d, nil
+}
+
+// githubFilePatch renders one changed file of a GitHub commit, pull request
+// or comparison as a unified diff. missing reports that GitHub returned no
+// patch although the file's content changed (binary or very large files).
+func githubFilePatch(f githubCommitFile, oldPath string) (diff string, missing bool) {
+	head := fmt.Sprintf("--- %s\n+++ %s\n", oldPath, f.Filename)
+	switch {
+	case f.Patch != "":
+		return head + strings.TrimRight(f.Patch, "\n") + "\n\n", false
+	case f.Additions+f.Deletions == 0:
+		return head + fmt.Sprintf("(%s, no content changes)\n\n", f.Status), false
+	default:
+		return head + fmt.Sprintf("(%s, +%d -%d; GitHub returns no patch for binary or very large files)\n\n",
+			f.Status, f.Additions, f.Deletions), true
+	}
 }
 
 func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, branch string) models.SourceDocument {

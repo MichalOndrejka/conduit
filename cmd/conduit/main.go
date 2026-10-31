@@ -130,6 +130,7 @@ func main() {
 	mcpServer := server.NewMCPServer("Conduit", version)
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
 	mcptools.RegisterSyncTool(mcpServer, sourceStore, syncSvc)
+	mcptools.RegisterPullRequestTool(mcpServer, sourceStore, secretsStore)
 	mcptools.RegisterSourcesTool(mcpServer, sourcemgmt.New(sourceStore, vectors, secretsStore), syncSvc)
 	mcpHTTP := server.NewStreamableHTTPServer(mcpServer, server.WithEndpointPath("/mcp"))
 

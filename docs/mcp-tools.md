@@ -183,6 +183,43 @@ manage_sources(request={"mode":"create","name":"Bugs","type":"work-item",
 
 ---
 
+## Pull request tool
+
+### `pull_request`
+
+Reads Azure DevOps and GitHub pull requests **live**, for code review. It is read-only and nothing is synced or indexed, so results always reflect the pull request as it is now.
+
+```
+pull_request(request: { mode: "list", source_id: str, status?: "active"|"completed"|"abandoned"|"all", author?: str, reviewer?: str, target_branch?: str, page?: int })
+pull_request(request: { mode: "get", url: str })
+pull_request(request: { mode: "files", url: str, page?: int, from_iteration?: int, to_iteration?: int })
+pull_request(request: { mode: "diff", url: str, path?: str, page?: int, include_content?: bool, from_iteration?: int, to_iteration?: int })
+pull_request(request: { mode: "threads", url: str, page?: int })
+pull_request(request: { mode: "iterations", url: str })
+pull_request(request: { mode: "commits", url: str, page?: int })
+```
+
+**Credentials.** `url` is the pull request's web link: `…/{project}/_git/{repo}/pullrequest/{id}` (Azure DevOps Services or Server) or `…/{owner}/{repo}/pull/{number}` (github.com or GitHub Enterprise Server). Conduit uses the credentials of a configured source on the same organization or server. It prefers a source of the same repository, then of the same project or owner, then any source there. Between equally close sources, an enabled one wins. Every response says which source was used in `credentials_from`. A URL that no source matches is an error, so add a source for that organization first. `list` has no URL, so it takes the `source_id` of a source of the repository instead. For Azure DevOps that must be a code, test code, documentation or commit-history source.
+
+- **`list`**: pull requests, newest first, 20 per page with `has_more`. `status` defaults to `active`. `author` and `reviewer` take `me` (the token's owner), an email (Azure DevOps) or a login (GitHub). On GitHub, `reviewer` matches pull requests whose review is still requested from that user.
+- **`get`**: title, description, branches, merge status, head and base commits, reviewers with their votes, linked work items (on GitHub, the issues the description closes with `fixes #12`-style keywords), and checks (Azure DevOps statuses and branch policies; GitHub check runs and commit statuses). If work items or checks can't be read, `notes` says so and the rest is still returned.
+- **`files`**: the changed files with change type and `additions`/`deletions`, 20 per page, plus `total_files`.
+- **`diff`**: unified diffs from the merge base to head, for one `path` or a `page` of 20 files. `include_content: true` adds each file's full text at head, for the code around a change.
+- **`threads`**: existing comment threads, 20 per page. Each has `kind` (`file` with `path`/`line`, `general`, or `review` for a GitHub review summary), `status` (Azure DevOps: `active`, `fixed`, …), and its comments with `reply_to`. Azure DevOps system comments (votes, pushes) are left out. GitHub's REST API doesn't report whether a thread is resolved; `outdated` marks comments on lines the latest changes replaced.
+- **`iterations`**: the pull request's updates, which are pushes on Azure DevOps and commits on GitHub. `files` and `diff` accept `from_iteration` (0 = the merge base, the default) and `to_iteration` (default the latest), so `from_iteration: N` shows only what changed since iteration N.
+- **`commits`**: the commits with full messages, 20 per page.
+
+**Large pull requests** are paged, never truncated. Where GitHub itself leaves data out, the response says so in `incomplete`, either on the file or at the top level. GitHub omits patches for binary or very large files, lists at most 3000 files and 250 commits of a pull request, and compares at most 300 files between iterations. Azure DevOps diffs are built from the file contents, so every text file's diff is complete. On both providers, binary files show only their path and change type.
+
+```
+1. pull_request(request={"mode":"get","url":"https://dev.azure.com/acme/Shop/_git/web/pullrequest/12"})
+2. pull_request(request={"mode":"files","url":"…/pullrequest/12"})            → total_files: 7
+3. pull_request(request={"mode":"diff","url":"…/pullrequest/12","path":"/src/cart.ts","include_content":true})
+4. pull_request(request={"mode":"threads","url":"…/pullrequest/12"})          → skip points already raised
+```
+
+---
+
 ## Usage patterns
 
 **Start of every task:** `retrieve_experience` → search tools for context → do the work → `remember` anything learned.
@@ -209,3 +246,5 @@ search_source_code(request={"mode": "semantic_search", "query": "authentication 
 Use `search_test_code` the same way to find where a method is tested.
 
 **Combining tools for a code change:** `retrieve_experience` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_workitem` (related requirements or bugs).
+
+**Reviewing a pull request:** `retrieve_experience` (review conventions) → `pull_request` `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.
