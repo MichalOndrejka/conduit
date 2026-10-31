@@ -359,7 +359,7 @@ func (s *Server) handleExperienceCreateGet(w http.ResponseWriter, r *http.Reques
 }
 
 // handleExperienceAdd stores a manually-entered experience entry — the same
-// situation→guidance memory the MCP `remember` tool writes. Port of
+// situation→guidance memory the MCP `experience_remember` tool writes. Port of
 // experience_add in app/web/routes.py.
 func (s *Server) handleExperienceAdd(w http.ResponseWriter, r *http.Request) {
 	situation := strings.TrimSpace(r.FormValue("situation"))

@@ -54,10 +54,10 @@ func pullRequestRequestSchema() map[string]any {
 	}
 }
 
-// RegisterPullRequestTool registers the pull_request tool. Called once at
+// RegisterPullRequestTool registers the search_pull_request tool. Called once at
 // startup, alongside RegisterTools.
 func RegisterPullRequestTool(s *server.MCPServer, srcs SourceLister, store secrets.Reader) {
-	tool := mcp.NewTool("pull_request",
+	tool := mcp.NewTool("search_pull_request",
 		mcp.WithDescription(`Read Azure DevOps and GitHub pull requests live, for code review. Read-only; nothing is indexed, `+
 			`so results are always current. Every mode but list takes the pull request's web URL, which is matched to a `+
 			`configured source of the same organization or server for credentials. `+

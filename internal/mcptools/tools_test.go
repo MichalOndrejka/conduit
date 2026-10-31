@@ -216,7 +216,7 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 	want := []string{
 		"search_workitem", "search_requirement", "search_source_code",
 		"search_test_code", "search_testcase", "search_documentation",
-		"search_commit", "search_pipeline_run", "retrieve_experience", "remember",
+		"search_commit", "search_pipeline_run", "experience_retrieve", "experience_remember",
 	}
 	for _, name := range want {
 		if !got[name] {
@@ -1021,7 +1021,7 @@ func TestRetrieveExperienceReturnsResults(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "retrieve_experience", map[string]any{"query": "should I do X?"})
+	result := callTool(t, s, ctx, "experience_retrieve", map[string]any{"query": "should I do X?"})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -1045,7 +1045,7 @@ func TestRetrieveExperienceReturnsResults(t *testing.T) {
 func TestRetrieveExperienceNoResultsReturnsNote(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "retrieve_experience", map[string]any{"query": "brand new situation"})
+	result := callTool(t, s, ctx, "experience_retrieve", map[string]any{"query": "brand new situation"})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", resultText(t, result))
 	}
@@ -1065,7 +1065,7 @@ func TestRememberToolStoresAndReturnsEntryID(t *testing.T) {
 	qd := &fakeQdrant{}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "remember", map[string]any{
+	result := callTool(t, s, ctx, "experience_remember", map[string]any{
 		"situation": "user is debugging a flaky test",
 		"guidance":  "re-run with -count=1 before assuming it's flaky",
 	})
@@ -1115,7 +1115,7 @@ func TestRememberToolMissingArgsErrors(t *testing.T) {
 		{},
 	}
 	for _, args := range cases {
-		result := callTool(t, s, ctx, "remember", args)
+		result := callTool(t, s, ctx, "experience_remember", args)
 		if !result.IsError {
 			t.Errorf("args %+v: expected IsError=true", args)
 		}
@@ -1126,7 +1126,7 @@ func TestRememberToolRollsBackOnUpsertFailure(t *testing.T) {
 	qd := &fakeQdrant{upsertErr: true}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "remember", map[string]any{
+	result := callTool(t, s, ctx, "experience_remember", map[string]any{
 		"situation": "this upsert will fail",
 		"guidance":  "should be rolled back",
 	})

@@ -315,7 +315,7 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 
 	// ── Experience tools ───────────────────────────────────────────────────
 
-	retrieveTool := mcp.NewTool("retrieve_experience",
+	retrieveTool := mcp.NewTool("experience_retrieve",
 		mcp.WithDescription(
 			"ALWAYS call this tool at the START of every new task, conversation, or user request. "+
 				"It recalls relevant past experience: guidance on how to handle similar situations, "+
@@ -350,7 +350,7 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		return mcp.NewToolResultText(string(data)), nil
 	})
 
-	rememberTool := mcp.NewTool("remember",
+	rememberTool := mcp.NewTool("experience_remember",
 		mcp.WithDescription(
 			"ALWAYS use this tool to store any information worth retaining across sessions. "+
 				"situation: describe the trigger — what kind of task, prompt, or context should surface this rule. "+
