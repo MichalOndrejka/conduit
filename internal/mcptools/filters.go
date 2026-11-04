@@ -10,72 +10,70 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
-// filterField is one optional filter a search tool accepts. Filters are real
-// categories from the source system (see models/filters.go), not Conduit
-// configuration.
-type filterField struct {
-	name string
-	desc string
-	date bool // since/until bound on the document's primary date
+// FilterField is one optional filter a search tool accepts. Filters are
+// real categories from the source system (see models/filters.go), not
+// Conduit configuration. Exported so the accuracy eval offers its agent
+// exactly the real tool surface.
+type FilterField struct {
+	Name string
+	Desc string
+	Date bool // since/until bound on the document's primary date
 }
 
 var (
-	fProject    = filterField{name: models.FilterProject, desc: "Azure DevOps project name"}
-	fRepository = filterField{name: models.FilterRepository, desc: "Git repository name"}
-	fPath       = filterField{name: models.FilterPath, desc: "File or folder path within the repository, e.g. src/auth — " +
+	fProject    = FilterField{Name: models.FilterProject, Desc: "Azure DevOps project name, or GitHub owner"}
+	fRepository = FilterField{Name: models.FilterRepository, Desc: "Git repository name"}
+	fPath       = FilterField{Name: models.FilterPath, Desc: "File or folder path within the repository, e.g. src/auth — " +
 		"a folder matches everything beneath it"}
-	fExtension = filterField{name: models.FilterExtension, desc: "File extension without the dot, e.g. cs, ts, md"}
-	fAuthor    = filterField{name: models.FilterAuthor, desc: "Commit author's name or email"}
-	fWIType    = filterField{name: models.FilterWorkItemType, desc: "Work item type, e.g. Bug, Task, User Story"}
-	fState     = filterField{name: models.FilterState, desc: "Work item state, e.g. Active, Resolved, Closed"}
-	fIteration = filterField{name: models.FilterIterationPath, desc: `Iteration path, e.g. Project\Sprint 12 — matches that iteration and every child`}
-	fAssigned  = filterField{name: models.FilterAssignedTo, desc: "Assignee's display name or unique name (email)"}
-	fTag       = filterField{name: models.FilterTag, desc: "Work item tag"}
-	fResult    = filterField{name: models.FilterResult, desc: "Pipeline run result: succeeded, partiallySucceeded, failed or canceled"}
-	fBranch    = filterField{name: models.FilterBranch, desc: "Pipeline run source branch, as a full ref (refs/heads/main, " +
+	fExtension = FilterField{Name: models.FilterExtension, Desc: "File extension without the dot, e.g. cs, ts, md"}
+	fAuthor    = FilterField{Name: models.FilterAuthor, Desc: "Commit author's name or email"}
+	fWIType    = FilterField{Name: models.FilterWorkItemType, Desc: "The team's own work item or issue type, e.g. Bug, Task, " +
+		"User Story, Product Requirement, Test Case — types differ per process; use facets to list them"}
+	fState     = FilterField{Name: models.FilterState, Desc: "Work item state, e.g. Active, Resolved, Closed"}
+	fIteration = FilterField{Name: models.FilterIterationPath, Desc: `Iteration path, e.g. Project\Sprint 12 — matches that iteration and every child`}
+	fArea      = FilterField{Name: models.FilterAreaPath, Desc: `Area path, e.g. Project\Team A — matches that area and every child`}
+	fAssigned  = FilterField{Name: models.FilterAssignedTo, Desc: "Assignee's display name or unique name (email)"}
+	fTag       = FilterField{Name: models.FilterTag, Desc: "Work item tag or issue label"}
+	fResult    = FilterField{Name: models.FilterResult, Desc: "Pipeline run result: succeeded, partiallySucceeded, failed or canceled"}
+	fBranch    = FilterField{Name: models.FilterBranch, Desc: "Pipeline run source branch, as a full ref (refs/heads/main, " +
 		"refs/pull/42/merge) or short name (main, pull/42/merge)"}
+	fCodeKind = FilterField{Name: models.FilterCodeKind, Desc: `"test" or "production": whether the file is a test, from ` +
+		`test folders and names (tests/, *_test.go, *.spec.ts, *Tests.cs, …) or the source's own test file patterns`}
+	fSource   = FilterField{Name: models.FilterSource, Desc: "Conduit source name, as configured in Conduit"}
+	fProvider = FilterField{Name: models.FilterProvider, Desc: "Where the data comes from: azure-devops or github"}
 )
 
-func dateFields(what string) []filterField {
-	return []filterField{
-		{name: "since", date: true, desc: "Only items whose " + what + " is on or after this date (YYYY-MM-DD or RFC 3339)"},
-		{name: "until", date: true, desc: "Only items whose " + what + " is on or before this date (YYYY-MM-DD or RFC 3339)"},
+func dateFields(what string) []FilterField {
+	return []FilterField{
+		{Name: "since", Date: true, Desc: "Only items whose " + what + " is on or after this date (YYYY-MM-DD or RFC 3339)"},
+		{Name: "until", Date: true, Desc: "Only items whose " + what + " is on or before this date (YYYY-MM-DD or RFC 3339)"},
 	}
 }
 
-var (
-	repoFileFilters = []filterField{fProject, fRepository, fPath, fExtension}
-	// Area path and date aren't offered: a work item source is already scoped
-	// to its area paths, and work items are searched by content, not age.
-	workItemFilters = []filterField{fProject, fWIType, fState, fIteration, fAssigned, fTag}
-)
+func fields(f ...FilterField) []FilterField { return append(f, fSource, fProvider) }
 
 // collectionFilters lists the filters each search tool's collection
-// supports. Requirements and test cases can come from repo files or work
-// items, so they accept both sets.
-var collectionFilters = map[string][]filterField{
-	models.CollectionWorkItems:     workItemFilters,
-	models.CollectionRequirements:  append(append([]filterField{}, repoFileFilters...), workItemFilters[1:]...),
-	models.CollectionTestCases:     append(append([]filterField{}, repoFileFilters...), workItemFilters[1:]...),
-	models.CollectionSourceCode:    repoFileFilters,
-	models.CollectionTestCode:      repoFileFilters,
-	models.CollectionDocumentation: repoFileFilters,
-	models.CollectionCommits: append([]filterField{fProject, fRepository, fAuthor,
-		{name: models.FilterPath, desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}},
+// supports; every collection also accepts source and provider.
+var collectionFilters = map[string][]FilterField{
+	models.CollectionWorkItems:     fields(fProject, fWIType, fState, fArea, fIteration, fAssigned, fTag),
+	models.CollectionCode:          fields(fProject, fRepository, fPath, fExtension, fCodeKind),
+	models.CollectionDocumentation: fields(fProject, fRepository, fPath, fExtension),
+	models.CollectionCommits: append(fields(fProject, fRepository, fAuthor,
+		FilterField{Name: models.FilterPath, Desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}),
 		dateFields("author date")...),
-	models.CollectionPipelineRuns: {fResult, fBranch},
+	models.CollectionPipelineRuns: fields(fProject, fRepository, fResult, fBranch),
 }
 
 // filtersSchema is the JSON Schema of the "filters" object for fields.
-func filtersSchema(fields []filterField) map[string]any {
+func filtersSchema(fields []FilterField) map[string]any {
 	props := map[string]any{}
 	for _, f := range fields {
-		if f.date {
-			props[f.name] = map[string]any{"type": "string", "description": f.desc}
+		if f.Date {
+			props[f.Name] = map[string]any{"type": "string", "description": f.Desc}
 			continue
 		}
-		props[f.name] = map[string]any{
-			"description": f.desc + ". Case-insensitive; pass an array to match any of several values.",
+		props[f.Name] = map[string]any{
+			"description": f.Desc + ". Case-insensitive; pass an array to match any of several values.",
 			"anyOf": []any{
 				map[string]any{"type": "string"},
 				map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
@@ -92,7 +90,7 @@ func filtersSchema(fields []filterField) map[string]any {
 }
 
 // parseFilters converts a request's "filters" object into Qdrant conditions.
-func parseFilters(raw any, fields []filterField) ([]rag.FieldCondition, error) {
+func parseFilters(raw any, fields []FilterField) ([]rag.FieldCondition, error) {
 	if raw == nil {
 		return nil, nil
 	}
@@ -100,9 +98,9 @@ func parseFilters(raw any, fields []filterField) ([]rag.FieldCondition, error) {
 	if !ok {
 		return nil, fmt.Errorf("request.filters must be an object")
 	}
-	byName := make(map[string]filterField, len(fields))
+	byName := make(map[string]FilterField, len(fields))
 	for _, f := range fields {
-		byName[f.name] = f
+		byName[f.Name] = f
 	}
 
 	keys := make([]string, 0, len(obj))
@@ -118,7 +116,7 @@ func parseFilters(raw any, fields []filterField) ([]rag.FieldCondition, error) {
 		if !ok {
 			return nil, fmt.Errorf("unknown filter %q — this tool supports: %s", k, filterNames(fields))
 		}
-		if f.date {
+		if f.Date {
 			s, ok := obj[k].(string)
 			if !ok {
 				return nil, fmt.Errorf("request.filters.%s must be a date string", k)
@@ -193,10 +191,10 @@ func parseFilterDate(s string, endOfDay bool) (float64, error) {
 	return float64(t.Unix()), nil
 }
 
-func filterNames(fields []filterField) string {
+func filterNames(fields []FilterField) string {
 	names := make([]string, len(fields))
 	for i, f := range fields {
-		names[i] = f.name
+		names[i] = f.Name
 	}
 	return strings.Join(names, ", ")
 }

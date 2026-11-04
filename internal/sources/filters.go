@@ -61,8 +61,13 @@ func (a *APISource) scopeFilters(apiURL string, props map[string]string) models.
 	return f
 }
 
-// addFileFilters adds a repo file's path and extension.
-func addFileFilters(f *models.DocumentFilters, p string) {
+// addFileFilters adds a repo file's path and extension, and mirrors the
+// path (as the repository spells it) into props: results show it, and
+// code_kind is derived from it (AddSourceFilters).
+func addFileFilters(f *models.DocumentFilters, props map[string]string, p string) {
+	if p != "" && props != nil {
+		props["path"] = p
+	}
 	f.Add(models.FilterPath, p)
 	if ext := strings.TrimPrefix(path.Ext(p), "."); ext != "" {
 		f.Add(models.FilterExtension, ext)

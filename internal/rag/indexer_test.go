@@ -63,7 +63,7 @@ func testIndexer(t *testing.T, embedHandler http.HandlerFunc, concurrency int) (
 	t.Cleanup(embedSrv.Close)
 
 	qd := &minimalQdrant{}
-	qdSrv := httptest.NewServer(qd.handler())
+	qdSrv := httptest.NewServer(skipIndexRequests(qd.handler()))
 	t.Cleanup(qdSrv.Close)
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.URL = qdSrv.URL
@@ -264,7 +264,7 @@ func TestIndexBatchRecreatesCollectionOnDimensionMismatch(t *testing.T) {
 	defer embedSrv.Close()
 
 	qd := &recreatingQdrant{collectionExists: true, existingSize: 1536}
-	qdSrv := httptest.NewServer(qd.handler())
+	qdSrv := httptest.NewServer(skipIndexRequests(qd.handler()))
 	defer qdSrv.Close()
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.URL = qdSrv.URL
@@ -334,7 +334,7 @@ func TestIndexBatchReplaceSourceIDDeletesOldVectorsBeforeUpsert(t *testing.T) {
 
 	embedSrv := httptest.NewServer(http.HandlerFunc(embedHandler))
 	defer embedSrv.Close()
-	qdSrv := httptest.NewServer(http.HandlerFunc(wrapped))
+	qdSrv := httptest.NewServer(skipIndexRequests(wrapped))
 	defer qdSrv.Close()
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.URL = qdSrv.URL
@@ -421,7 +421,7 @@ func TestIndexBatchRollsBackOnUpsertFailure(t *testing.T) {
 
 	embedSrv := httptest.NewServer(http.HandlerFunc(embedHandler))
 	defer embedSrv.Close()
-	qdSrv := httptest.NewServer(http.HandlerFunc(handler))
+	qdSrv := httptest.NewServer(skipIndexRequests(handler))
 	defer qdSrv.Close()
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.URL = qdSrv.URL
@@ -531,5 +531,66 @@ func TestIndexBatchPrefixesChunkHeaders(t *testing.T) {
 	}
 	if stepChunks < 2 {
 		t.Errorf("embedded %d step chunks, want several", stepChunks)
+	}
+}
+
+// Hierarchical filters are written once per level too, and every filter key
+// written gets a payload index before the points are.
+func TestIndexBatchWritesPathLevelsAndIndexesThem(t *testing.T) {
+	embedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{0.1, 0.2, 0.3}}}})
+	}))
+	defer embedSrv.Close()
+	var mu sync.Mutex
+	var payload map[string]any
+	indexedBeforeUpsert := false
+	ir := &indexRequests{}
+	qdSrv := httptest.NewServer(ir.wrap(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/collections":
+			_, _ = w.Write([]byte(`{"result":{"collections":[]}}`))
+		case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/points"):
+			var body struct {
+				Points []Point `json:"points"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			mu.Lock()
+			payload = body.Points[0].Payload
+			_, indexedBeforeUpsert = ir.has("conduit_documentation", "f_path__2")
+			mu.Unlock()
+			_, _ = w.Write([]byte(`{"result":true}`))
+		default:
+			_, _ = w.Write([]byte(`{"result":true}`))
+		}
+	}))
+	defer qdSrv.Close()
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = qdSrv.URL
+	cfg.Embedding.BaseURL = embedSrv.URL
+	cfg.Embedding.MaxInputTokens = 8192
+	cfg.Chunking.MaxChunkSize = 2000
+	indexer := NewDocumentIndexer(NewVectorStore(cfg), NewEmbeddingService(cfg), NewTextChunker(cfg))
+
+	doc := models.SourceDocument{ID: "d1", Text: "requirement"}
+	doc.Filters.Add(models.FilterPath, "docs/requirements/r1.md")
+	if err := indexer.IndexBatch(context.Background(), "conduit_documentation", []models.SourceDocument{doc}, IndexBatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if fmt.Sprint(payload["f_path__1"]) != "[docs]" || fmt.Sprint(payload["f_path__2"]) != "[docs/requirements]" ||
+		fmt.Sprint(payload["f_path__3"]) != "[docs/requirements/r1.md]" {
+		t.Errorf("payload = %v", payload)
+	}
+	if !indexedBeforeUpsert {
+		t.Error("f_path__2 must be indexed before the points are written")
+	}
+	for _, key := range []string{"f_path", "f_source", "f_code_kind", "chunk_index", "tag_source_id"} {
+		if _, ok := ir.has("conduit_documentation", key); !ok {
+			t.Errorf("no payload index for %s", key)
+		}
+	}
+	if s, _ := ir.has("conduit_documentation", "f_date"); s != "integer" {
+		t.Errorf("f_date index = %q, want integer", s)
 	}
 }

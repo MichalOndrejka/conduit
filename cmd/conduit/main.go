@@ -120,6 +120,15 @@ func main() {
 	if err := vectors.EnsureCollections(ensureCtx, models.AllCollections, cfg.Embedding.Dimensions); err != nil {
 		log.Printf("warning: could not create collections yet (retried by the Qdrant health probe): %v", err)
 	}
+	// Collections created before payload indexes existed get them now
+	// (Qdrant indexes the stored points in the background); the indexer adds
+	// any per-level path keys as it writes them.
+	if err := vectors.EnsureBaseIndexes(ensureCtx, models.AllCollections); err != nil {
+		log.Printf("warning: could not create payload indexes yet (retried on the next sync): %v", err)
+	}
+	// Collections of the merged legacy source types go once every source in
+	// them has re-synced into its new collection.
+	vectors.DropEmptyLegacyCollections(ensureCtx)
 	cancelEnsure()
 
 	// ── Sync engine (sources: Azure DevOps, GitHub) ─────────────────────────

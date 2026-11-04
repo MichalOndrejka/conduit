@@ -482,3 +482,54 @@ func TestCacheServesFromMemoryAfterFirstRead(t *testing.T) {
 		t.Errorf("Name = %q, want the cached value %q (store shouldn't re-read on its own)", got.Name, "Cached")
 	}
 }
+
+// A file saved before the source types were merged is re-typed on read and
+// saved, so every reader sees the new types.
+func TestReadMigratesLegacySourceTypesAndSavesThem(t *testing.T) {
+	s, path := newStore(t)
+	legacy := `[
+	  {"id":"req","type":"requirements","name":"Reqs","sync_status":"completed","config":{"FetchMode":"workitems","WorkItemTypes":"Product Requirement"}},
+	  {"id":"tc","type":"test-case","name":"Test cases","config":{"FetchMode":"files","PathFilter":"*.md"}},
+	  {"id":"tests","type":"test-code","name":"Tests","config":{}},
+	  {"id":"code","type":"code","name":"Code","sync_status":"completed","config":{}}
+	]`
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]string{}
+	for _, src := range got {
+		types[src.ID] = src.Type
+	}
+	want := map[string]string{"req": models.SourceWorkItemQuery, "tc": models.SourceDocumentation, "tests": models.SourceCodeRepo, "code": models.SourceCodeRepo}
+	for id, w := range want {
+		if types[id] != w {
+			t.Errorf("%s type = %s, want %s", id, types[id], w)
+		}
+	}
+	if got[2].Config[models.ConfigTestFilePatterns] != "**" || got[0].SyncStatus != "idle" || got[3].SyncStatus != "completed" {
+		t.Errorf("migrated = %+v", got)
+	}
+	// Persisted: a fresh store over the same file reads the new types.
+	data, _ := os.ReadFile(path)
+	var onDisk []models.SourceDefinition
+	_ = json.Unmarshal(data, &onDisk)
+	if len(onDisk) != 4 || onDisk[0].Type != models.SourceWorkItemQuery || onDisk[0].Config["FetchMode"] != "" {
+		t.Errorf("on disk = %s", data)
+	}
+}
+
+func TestImportMigratesLegacySourceTypes(t *testing.T) {
+	s, _ := newStore(t)
+	n, err := s.Import([]byte(`[{"id":"a","type":"test-code","name":"Tests","config":{"PathFilter":"*.cs"}}]`))
+	if err != nil || n != 1 {
+		t.Fatalf("Import = %d, %v", n, err)
+	}
+	got, _ := s.Get("a")
+	if got.Type != models.SourceCodeRepo || got.Config[models.ConfigTestFilePatterns] != "**" || got.Config["PathFilter"] != "*.cs" {
+		t.Errorf("imported = %+v", got)
+	}
+}

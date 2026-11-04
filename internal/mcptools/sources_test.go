@@ -224,14 +224,14 @@ func TestManageCreateRejectsBadInput(t *testing.T) {
 func TestManageUpdateMergesConfigAndPassesOldCollection(t *testing.T) {
 	m := newFakeManager("ado-pat")
 	_, err := manage(t, m, newFakeRunner(), map[string]any{
-		"mode": "update", "source_id": "wi", "type": models.SourceRequirements,
+		"mode": "update", "source_id": "wi", "type": models.SourceDocumentation,
 		"config": map[string]any{"Top": "50", "AuthType": ""},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := m.byID["wi"]
-	if got.Type != models.SourceRequirements || got.Config["Top"] != "50" || got.Config["Url"] == "" {
+	if got.Type != models.SourceDocumentation || got.Config["Top"] != "50" || got.Config["Url"] == "" {
 		t.Errorf("updated = %+v", got)
 	}
 	if _, ok := got.Config["AuthType"]; ok {

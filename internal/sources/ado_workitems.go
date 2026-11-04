@@ -263,13 +263,14 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		filters.Add(models.FilterWorkItemType, wiType)
 		filters.Add(models.FilterState, state)
 		filters.Add(models.FilterIterationPath, iteration)
+		filters.Add(models.FilterAreaPath, area)
 		filters.Add(models.FilterAssignedTo, identityValues(item.Fields["System.AssignedTo"])...)
 		filters.Add(models.FilterTag, strings.Split(fieldString(item.Fields, "System.Tags"), ";")...)
 
 		docs = append(docs, models.SourceDocument{
 			Filters: filters,
-			ID:   fmt.Sprintf("%s_capi_%d", a.src.ID, item.ID),
-			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
+			ID:      fmt.Sprintf("%s_capi_%d", a.src.ID, item.ID),
+			Text:    strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
 			Tags: map[string]string{
 				"source_id":   a.src.ID,
 				"source_name": a.src.Name,

@@ -2,7 +2,6 @@ package eval
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -27,16 +26,9 @@ type Backend interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 	// Search returns up to limit chunks nearest to vector matching filters.
 	Search(ctx context.Context, collection string, vector []float32, limit int, filters []rag.FieldCondition) ([]models.SearchResult, error)
-	// Points lists every chunk of collection matching filters with its
-	// filter fields, for counting facets.
-	Points(ctx context.Context, collection string, filters []rag.FieldCondition) ([]PointFields, error)
-}
-
-// PointFields is one stored chunk's document and filter fields (normalized
-// values, as stored).
-type PointFields struct {
-	DocID  string
-	Fields map[string][]string
+	// FacetValues and CountDocuments count documents for the facets mode
+	// (rag.Facets).
+	rag.FacetCounter
 }
 
 // QdrantBackend is the production stack.
@@ -94,27 +86,12 @@ func (b *QdrantBackend) Search(ctx context.Context, collection string, vector []
 	return out, nil
 }
 
-func (b *QdrantBackend) Points(ctx context.Context, collection string, filters []rag.FieldCondition) ([]PointFields, error) {
-	var filter *rag.Filter
-	if len(filters) > 0 {
-		filter = &rag.Filter{Must: filters}
-	}
-	var out []PointFields
-	var offset json.RawMessage
-	for {
-		points, next, err := b.store.Scroll(ctx, collection, filter, 256, offset, false)
-		if err != nil {
-			return nil, err
-		}
-		for _, p := range points {
-			docID, _ := p.Payload[models.PayloadSourceDocID].(string)
-			out = append(out, PointFields{DocID: docID, Fields: pointFields(p.Payload)})
-		}
-		if len(next) == 0 {
-			return out, nil
-		}
-		offset = next
-	}
+func (b *QdrantBackend) FacetValues(ctx context.Context, collection, key string, must []rag.FieldCondition, limit int) ([]rag.FacetValue, error) {
+	return rag.NewStoreFacetCounter(b.store, nil).FacetValues(ctx, collection, key, must, limit)
+}
+
+func (b *QdrantBackend) CountDocuments(ctx context.Context, collection string, must []rag.FieldCondition) (int, error) {
+	return rag.NewStoreFacetCounter(b.store, nil).CountDocuments(ctx, collection, must)
 }
 
 // conditions turns a scope's filters into Qdrant conditions, normalized the

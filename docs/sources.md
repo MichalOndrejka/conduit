@@ -55,7 +55,7 @@ Fetches from github.com or a GitHub Enterprise Server through the GitHub REST AP
 | Branch | `Branch` | Files and commits. Empty = the repository's default branch. |
 | File filter | `PathFilter` | Files. Comma-separated wildcards, same as Azure DevOps. |
 | Max items | `Top` | Commits and issues: newest first. |
-| Fetch as | `FetchMode` | Requirements / Test Cases: `files` (default) or `workitems` (issues). |
+| Test file patterns | `TestFilePatterns` | Code. Which files are tests, for the `code_kind` filter; see [Code: tests and production](#code-tests-and-production). |
 | Issue types | `WorkItemTypes` | Issues. Comma-separated organization issue types (Bug, Feature, …), picked from tiles loaded from `GET /orgs/{owner}/issue-types`; an issue of any of them is fetched. Empty = every issue, typed or not. Combines with Labels: an issue needs one of the labels and one of the types. Personal accounts and GitHub Enterprise Server versions without issue types have none to pick. |
 | Labels | `Labels` | Issues. Comma-separated; an issue with any of them is fetched. Empty = every issue. |
 | Workflow | `Workflow` | Pipeline Runs. Workflow file name (`ci.yml`) or numeric ID. |
@@ -64,35 +64,77 @@ Fetches from github.com or a GitHub Enterprise Server through the GitHub REST AP
 
 What each source type fetches:
 
-- **Source Code / Test Code / Documentation** (and Requirements / Test Cases in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. The branch is downloaded as a single tarball (`/repos/{owner}/{repo}/tarball/{branch}`) and read as it streams in, so a sync costs one API request, plus one to look up the default branch when `Branch` is empty, whatever the repository size. A download cut off part-way is restarted.
+- **Code / Documentation**: one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. The branch is downloaded as a single tarball (`/repos/{owner}/{repo}/tarball/{branch}`) and read as it streams in, so a sync costs one API request, plus one to look up the default branch when `Branch` is empty, whatever the repository size. A download cut off part-way is restarted.
 - **Commit History**: one document per commit with its full message and the patch of every changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case.
-- **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
+- **Work Items**: open and closed issues with their bodies and every comment. Pull requests are left out. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
 - **Pipeline Runs**: one document per completed workflow run; a failed run (failure, timed_out, startup_failure) also lists its failed jobs' annotations and yields one document per failed job with the complete job log (`parent_doc_id` links it to the run). Logs GitHub has already deleted are noted. GitHub returns at most 1000 runs per query; a window holding more fails the sync and asks for fewer Days.
 
 The owner fills the `project` filter and the repository the `repository` filter, so search narrows GitHub and Azure DevOps sources the same way.
 
 ## Source types and collections
 
-The source **type** only decides which Qdrant collection a source's documents land in — it has no effect on how documents are fetched (that's the provider's job).
+A source's **type** says where its data lives (its shape), which decides the Qdrant collection and search tool its documents go to. It has no effect on how documents are fetched; that's the provider's job.
 
-| Source Type | Collection |
-|-------------|------------|
-| Work Items | `conduit_workitems` |
-| Requirements | `conduit_requirements` |
-| Test Cases | `conduit_testcases` |
-| Commit History | `conduit_commits` |
-| Pipeline Runs | `conduit_pipeline_runs` |
-| Source Code | `conduit_code` |
-| Test Code | `conduit_testcode` |
-| Documentation | `conduit_documentation` |
+| Source Type | Collection | Search tool | Holds |
+|-------------|------------|-------------|-------|
+| Work Items | `conduit_workitems` | `search_workitem` | Every tracked item: bugs, tasks, stories, and requirements or test cases kept as work items or issues |
+| Code | `conduit_code` | `search_code` | Source files, production code and tests together |
+| Documentation | `conduit_documentation` | `search_documentation` | Repository and wiki documents, including requirements or test cases kept as files |
+| Commit History | `conduit_commits` | `search_commit` | Commits with their diffs |
+| Pipeline Runs | `conduit_pipeline_runs` | `search_pipeline_run` | Pipeline runs, failed steps and failed tests |
+
+Types follow shape rather than vocabulary because what one company calls a requirement or a test case, another keeps as a different work item type or as Markdown files. Within a collection, an agent narrows to exactly what it wants with that company's own values: `work_item_type` (e.g. `Product Requirement`), `path` (e.g. `docs/requirements`) or `code_kind`. The `facets` mode of every search tool lists those values with their document counts (see [mcp-tools.md](mcp-tools.md#facets)).
+
+### Filters on every document
+
+Besides each shape's own fields, every document carries:
+
+- `source`: the source's name in Conduit;
+- `provider`: `azure-devops` or `github`.
+
+Work items also carry `area_path` (hierarchical, like `iteration_path`). Pipeline runs carry `project` and `repository`.
+
+All `f_*` filter fields, the date field, the chunk index and the source ID have payload indexes:
+- **Base indexes:** created for every collection at startup and before every write.
+- **Per-level path keys:** the indexer adds an index for each one as it writes them.
+
+Without the indexes, Qdrant plans selective filters poorly and can return fewer than the requested top results.
+
+### Code: tests and production
+
+Code sources hold production code and tests together. Each file's `code_kind` filter is `test` or `production`, so `search_code` can be narrowed to either.
+
+- **By default,** `code_kind` comes from common conventions:
+  - **Folders:** `test`, `tests`, `__tests__`, `spec`, `.Tests` projects and `src/test`.
+  - **File names:** `*_test.go`, `test_*.py`, `*.test.ts`, `*.spec.ts`, `*Tests.cs` and `*Test.java`.
+- **Test file patterns** (`TestFilePatterns`) override the conventions per source. They're comma-separated wildcards:
+  - a pattern without a folder matches the file name anywhere, e.g. `*_test.go`;
+  - a pattern with one matches from the repository root, e.g. `qa/**`.
+
+  Only files that match are tests.
+
+### Migrating from the old types
+
+Requirements, Test Cases and Test Code were merged into the shape types. Saved sources and imported source files that still carry an old type are re-typed automatically, the first time they're read:
+
+| Old type | Becomes |
+|----------|---------|
+| Requirements or Test Cases fetched as work items (`FetchMode` `workitems`) | Work Items, with the same work item types |
+| Requirements or Test Cases fetched as files | Documentation |
+| Test Code | Code with Test file patterns `**`, so every file stays a test |
+
+A re-typed source is reset to never synced. Re-sync it to move its data:
+1. The re-sync writes the source's documents into the new collection.
+2. It then removes the source's points from the old collection (`conduit_requirements`, `conduit_testcases` or `conduit_testcode`).
+3. An old collection left empty is dropped, on that sync or at the next start.
 
 ## Platform presets (UI convenience, not backend code)
 
-The **Sources → Create** flow offers a friendly **Azure DevOps** tab. It's a frontend-only preset: filling in org/project/PAT/resource fields compiles them into the generic API keys above on submit (`Url`, `AuthType=basic`, `Password=<credential>`, `ItemsPath=value`, …), and the source is stored as an ordinary generic API source. Commit History, Source Code, Test Code and Documentation sources additionally get backend-side ADO enrichment (real diffs / real file content, see above); Work Items sources are fetched entirely server-side (see below). A few UI-only metadata keys (`Platform`, `AdoOrg`, `AdoProject`, `AdoApiVersion`, `AdoResource`, `AdoRepo`, `AdoQuery`) are persisted alongside the generic keys purely so the editor can re-open a source in the right tab, pre-filled.
+The **Sources → Create** flow offers a friendly **Azure DevOps** tab. It's a frontend-only preset: filling in org/project/PAT/resource fields compiles them into the generic API keys above on submit (`Url`, `AuthType=basic`, `Password=<credential>`, `ItemsPath=value`, …), and the source is stored as an ordinary generic API source. Commit History, Code and Documentation sources additionally get backend-side ADO enrichment (real diffs / real file content, see above); Work Items sources are fetched entirely server-side (see below). A few UI-only metadata keys (`Platform`, `AdoOrg`, `AdoProject`, `AdoApiVersion`, `AdoResource`, `AdoRepo`, `AdoQuery`) are persisted alongside the generic keys purely so the editor can re-open a source in the right tab, pre-filled.
 
 Commit History sources on the Azure DevOps tab expose a **Max commits** field (`Top` config key, default `100`) instead of the raw `Top` key — Azure DevOps' commits-list endpoint caps a single response at 100 commits, so values above that are fetched by paging with `searchCriteria.$top`/`searchCriteria.$skip` rather than the generic `NextUrlPath` mechanism. They also expose a **Branch** field (`Branch` config key; empty = the repository's default branch, looked up from the repository), applied as `searchCriteria.itemVersion.version` — without it, ADO's commits endpoint walks every branch's history, duplicating commits shared with the default branch and pulling in stray feature-branch work.
 
-Source Code, Test Code and Documentation sources (and Requirements / Test Cases in Files mode) have an optional **Branch** field too (`Branch` config key), applied to the items listing as `versionDescriptor` so files and their web links come from that branch; empty = the repository's default branch.
+Code and Documentation sources have an optional **Branch** field too (`Branch` config key), applied to the items listing as `versionDescriptor` so files and their web links come from that branch; empty = the repository's default branch.
 
 The generic API config keys aren't tied to Azure DevOps — the backend runs any single-endpoint JSON API this way — but the web UI no longer exposes a form for building one from scratch; non-ADO API sources must be added directly to `conduit-sources.json`. Examples expressible as pure configuration:
 
@@ -123,20 +165,11 @@ Properties: `type` (`run`, `step`, `test`), `build_id`, `result`, `branch`, `com
 
 Fetching is lossless: any run, timeline, log or test-result request that still fails after retries — including a 404 for a log Azure DevOps already purged — fails the sync, leaving the previous snapshot untouched.
 
-### Requirements and Test Cases (dual-mode)
-
-Requirements and Test Cases sources can be fetched either way, since teams keep them as repo files (often `.md`) or as Azure DevOps work items interchangeably. The Azure DevOps tab shows a **Fetch as** toggle — `FetchMode` config key, `files` (default) or `workitems`:
-
-- **Files** — same as Documentation: **Repository name**, **Branch** + **File filter** point at a repo items endpoint, and Conduit fetches real file content for each match (best-effort — falls back to raw metadata if the resource isn't a repo, e.g. it points at a wiki instead).
-- **Work Items** — identical to the Work Items source above, including the project's type picker: **Area paths** + **Work item types** drive a WIQL query, `WorkItemTypes` requires at least one type selected.
-
-Switching the toggle swaps which field set is submitted; the other is disabled client-side so its stale values aren't persisted.
-
 ## Common patterns
 
 ### Targeting multiple sources of the same type
 
-Create one source per system/repository. Use the `source_name` filter on MCP search tools to limit results to a specific one.
+Create one source per system/repository. Use the `source` filter on MCP search tools to limit results to a specific one (`facets` on `source` lists them).
 
 ### Paginated APIs
 

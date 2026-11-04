@@ -151,8 +151,10 @@ func TestWorkItemDocumentsCarryFilters(t *testing.T) {
 			t.Errorf("%s = %v, want %v", field, got, w)
 		}
 	}
-	if _, ok := f.Fields["area_path"]; ok {
-		t.Error("work item area path must not be stored as a filter (the source is already scoped to it)")
+	// Area paths are the team structure a source spans, so they narrow
+	// within it like iterations do.
+	if got, w := f.Fields[models.FilterAreaPath], []string{"payments", `payments\team a`}; !reflect.DeepEqual(got, w) {
+		t.Errorf("area_path = %v, want %v", got, w)
 	}
 	if !f.Date.IsZero() {
 		t.Errorf("work item date must not be stored as a filter, got %v", f.Date)

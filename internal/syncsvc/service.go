@@ -216,6 +216,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		failedOutcome("fetch", err)
 		return
 	}
+	sources.AddSourceFilters(src, docs)
 
 	// ── Phase 1.5: optional LLM preprocessing (summarize before indexing) ──
 	// Built per-sync so a Settings change applies without a restart (the web
@@ -287,16 +288,14 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		src.SyncErrorPhase = nil
 		finish()
 		record("completed")
+		// Now in its new collection, the source's points in a legacy one
+		// (from before the source types were merged) are obsolete.
+		s.indexer.Store().RemoveFromLegacyCollections(ctx, src.ID)
 	}
 }
 
 // providerName is the source's provider for stats: github or azure-devops.
-func providerName(src *models.SourceDefinition) string {
-	if src.GetConfig("Provider") == "github" {
-		return "github"
-	}
-	return "azure-devops"
-}
+func providerName(src *models.SourceDefinition) string { return sources.ProviderName(src) }
 
 // isCancelled reports whether err resulted from a sync cancellation — either
 // the cooperative ErrSyncCancelled returned at a checkpoint, or a

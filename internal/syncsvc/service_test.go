@@ -6,6 +6,7 @@ package syncsvc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -139,6 +140,14 @@ func (f *fakeQdrant) handler() http.Handler {
 			}
 		}
 		_, _ = w.Write([]byte(`{"result": true}`))
+	})
+	mux.HandleFunc("POST /collections/{name}/points/count", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"count": len(f.collections[r.PathValue("name")])}})
+	})
+	mux.HandleFunc("PUT /collections/{name}/index", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"result": {"status": "completed"}}`))
 	})
 	return mux
 }
@@ -683,5 +692,40 @@ func TestSyncAfterShutdownIsRefused(t *testing.T) {
 	saved, _ := st.Get(src.ID)
 	if saved.SyncStatus != "idle" {
 		t.Errorf("status = %q, want idle", saved.SyncStatus)
+	}
+}
+
+// Every synced document carries its source and provider; once a source has
+// re-synced into its new collection, its points in a legacy collection go,
+// and a legacy collection left empty is dropped.
+func TestSyncAddsSourceFiltersAndClearsLegacyCollections(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{{"id": 1, "title": "Reset link expiry"}}})
+	}))
+	defer apiSrv.Close()
+
+	svc, _, qd, src := setupPipeline(t, apiSrv.URL)
+	qd.mu.Lock()
+	qd.collections["conduit_requirements"] = map[string]map[string]any{"old": {"tag_source_id": src.ID}}
+	qd.collections["conduit_testcases"] = map[string]map[string]any{
+		"mine": {"tag_source_id": src.ID}, "theirs": {"tag_source_id": "other-src"},
+	}
+	qd.mu.Unlock()
+
+	svc.Sync(context.Background(), src.ID)
+
+	qd.mu.Lock()
+	defer qd.mu.Unlock()
+	for _, payload := range qd.collections[models.CollectionWorkItems] {
+		if fmt.Sprint(payload["f_source"]) != "[fake api]" || fmt.Sprint(payload["f_provider"]) != "[azure-devops]" {
+			t.Errorf("payload = %v, want source and provider filters", payload)
+		}
+	}
+	if _, ok := qd.collections["conduit_requirements"]; ok {
+		t.Error("the emptied legacy collection must be dropped")
+	}
+	tc := qd.collections["conduit_testcases"]
+	if _, mine := tc["mine"]; mine || len(tc) != 1 {
+		t.Errorf("conduit_testcases = %v, want only the other source's point", tc)
 	}
 }

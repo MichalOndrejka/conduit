@@ -218,7 +218,8 @@ func (v *VectorStore) EnsureCollections(ctx context.Context, names []string, dim
 }
 
 // CreateCollection creates a cosine-distance collection; dimensions <= 0 uses
-// the configured embedding dimensions.
+// the configured embedding dimensions. Payload indexes are added by
+// EnsureBaseIndexes at startup and by the indexer before every write.
 func (v *VectorStore) CreateCollection(ctx context.Context, name string, dimensions int) error {
 	size := dimensions
 	if size <= 0 {
@@ -234,6 +235,70 @@ func (v *VectorStore) CreateCollection(ctx context.Context, name string, dimensi
 		return nil
 	}
 	return err
+}
+
+// PayloadSchema returns a collection's payload indexes: key → type.
+func (v *VectorStore) PayloadSchema(ctx context.Context, name string) (map[string]string, error) {
+	var resp struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := v.do(ctx, http.MethodGet, "/collections/"+name, nil, &resp); err != nil {
+		return nil, err
+	}
+	var info struct {
+		PayloadSchema map[string]struct {
+			DataType string `json:"data_type"`
+		} `json:"payload_schema"`
+	}
+	// A result without a payload schema (not an object, or no indexes yet)
+	// means no indexes.
+	_ = json.Unmarshal(resp.Result, &info)
+	out := make(map[string]string, len(info.PayloadSchema))
+	for k, s := range info.PayloadSchema {
+		out[k] = s.DataType
+	}
+	return out, nil
+}
+
+// EnsurePayloadIndexes creates whichever of indexes (key → keyword |
+// integer) the collection lacks. Existing points are indexed by Qdrant in
+// the background; creating an index never changes stored data.
+func (v *VectorStore) EnsurePayloadIndexes(ctx context.Context, name string, indexes map[string]string) error {
+	existing, err := v.PayloadSchema(ctx, name)
+	if err != nil {
+		return err
+	}
+	keys := make([]string, 0, len(indexes))
+	for k := range indexes {
+		if _, ok := existing[k]; !ok {
+			keys = append(keys, k)
+		}
+	}
+	slices.Sort(keys) // deterministic request order
+	var errs []error
+	for _, k := range keys {
+		body := map[string]any{"field_name": k, "field_schema": indexes[k]}
+		if err := v.do(ctx, http.MethodPut, "/collections/"+name+"/index?wait=true", body, nil); err != nil {
+			errs = append(errs, fmt.Errorf("payload index %s: %w", k, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// EnsureBaseIndexes adds the base payload indexes to every existing
+// collection of names (collections created before indexes were introduced).
+func (v *VectorStore) EnsureBaseIndexes(ctx context.Context, names []string) error {
+	existing, err := v.ListCollections(ctx)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, name := range names {
+		if slices.Contains(existing, name) {
+			errs = append(errs, v.EnsurePayloadIndexes(ctx, name, models.BasePayloadIndexes()))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (v *VectorStore) DeleteCollection(ctx context.Context, name string) error {
@@ -394,9 +459,16 @@ func (v *VectorStore) DeleteByIDs(ctx context.Context, collection string, ids []
 }
 
 func (v *VectorStore) Count(ctx context.Context, collection string, filter *Filter) int {
-	// exact: true — Conduit creates no payload indexes, so Qdrant's
-	// approximate count for a filtered query is always 0, which would make
-	// every source look like it has no embedded data.
+	n, _ := v.CountExact(ctx, collection, filter)
+	return n
+}
+
+// CountExact counts the points matching filter; a missing collection has
+// none.
+func (v *VectorStore) CountExact(ctx context.Context, collection string, filter *Filter) (int, error) {
+	// exact: true — an approximate count is a cardinality estimate from the
+	// payload indexes, too rough for the per-source chunk and document
+	// counts this serves.
 	body := map[string]any{"exact": true}
 	if filter != nil {
 		body["filter"] = filter
@@ -407,9 +479,55 @@ func (v *VectorStore) Count(ctx context.Context, collection string, filter *Filt
 		} `json:"result"`
 	}
 	if err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/points/count", body, &resp); err != nil {
-		return 0
+		if errors.Is(err, ErrCollectionNotFound) {
+			return 0, nil
+		}
+		return 0, err
 	}
-	return resp.Result.Count
+	return resp.Result.Count, nil
+}
+
+// FacetHit is one value of a payload key and how many points carry it.
+type FacetHit struct {
+	Value string
+	Count int
+}
+
+// Facet counts the points matching filter per value of key, most frequent
+// first, at most limit values (Qdrant's facet API, exact counts). The key
+// needs a keyword payload index; a missing one is created and the call
+// retried once. A missing collection has no values.
+func (v *VectorStore) Facet(ctx context.Context, collection, key string, filter *Filter, limit int) ([]FacetHit, error) {
+	body := map[string]any{"key": key, "limit": limit, "exact": true}
+	if filter != nil {
+		body["filter"] = filter
+	}
+	var resp struct {
+		Result struct {
+			Hits []struct {
+				Value any `json:"value"`
+				Count int `json:"count"`
+			} `json:"hits"`
+		} `json:"result"`
+	}
+	err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/facet", body, &resp)
+	if err != nil && strings.Contains(err.Error(), "Index required") {
+		if ierr := v.EnsurePayloadIndexes(ctx, collection, map[string]string{key: models.IndexKeyword}); ierr != nil {
+			return nil, ierr
+		}
+		err = v.do(ctx, http.MethodPost, "/collections/"+collection+"/facet", body, &resp)
+	}
+	if err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	out := make([]FacetHit, 0, len(resp.Result.Hits))
+	for _, h := range resp.Result.Hits {
+		out = append(out, FacetHit{Value: fmt.Sprint(h.Value), Count: h.Count})
+	}
+	return out, nil
 }
 
 // HealthCheck errors if Qdrant is unreachable.

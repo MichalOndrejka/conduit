@@ -21,20 +21,19 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/store"
 )
 
-// TypeInfo describes a source type: a generic domain category that routes to
-// a Qdrant collection (not provider-specific).
+// TypeInfo describes a source type: where the data lives (its shape),
+// which routes it to a Qdrant collection — never a company's own vocabulary.
+// Requirements, test cases or specs are whichever of these a team keeps them
+// as, narrowed in search by the team's own work item types and folders.
 type TypeInfo struct{ Value, Label, Description string }
 
 // Types drives the UI's type-picker tiles and the MCP tool's type list.
 var Types = []TypeInfo{
-	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks from a work-tracking system."},
-	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
-	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
+	{models.SourceWorkItemQuery, "Work Items", "Everything tracked as work items or issues: bugs, tasks, stories, and requirements or test cases kept as work items."},
+	{models.SourceCodeRepo, "Code", "Source files from a repository, production code and tests alike."},
+	{models.SourceDocumentation, "Documentation", "Wiki pages and documents from a repository, including requirements or test cases kept as files."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
 	{models.SourcePipelineRun, "Pipeline Runs", "Build pipeline runs with failed-step logs and failed test results."},
-	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
-	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
-	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
 }
 
 // Label returns a type's display name, or the type itself if unknown.
@@ -65,7 +64,7 @@ var APIConfigKeys = []string{
 	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
 	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"FetchMode", "DefinitionId", "Days",
+	"DefinitionId", "Days", models.ConfigTestFilePatterns,
 }
 
 // PresetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
@@ -80,7 +79,7 @@ var PresetConfigKeys = []string{
 // internal/sources/github.go). Token names a stored credential.
 var GitHubConfigKeys = []string{
 	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "PathFilter",
-	"Top", "FetchMode", "WorkItemTypes", "Labels", "Workflow", "Days", "VerifySSL",
+	"Top", "WorkItemTypes", "Labels", "Workflow", "Days", "VerifySSL", models.ConfigTestFilePatterns,
 }
 
 // Providers are the values of the Provider config key: "api" runs the
@@ -139,7 +138,7 @@ func Validate(srcType string, cfg map[string]string) string {
 				return "Commit History sources require an Azure DevOps commits API URL (…/_apis/git/repositories/{repo}/commits) — diffs are always fetched for this source type."
 			}
 		}
-		if srcType == models.SourceCodeRepo || srcType == models.SourceTestCodeRepo {
+		if srcType == models.SourceCodeRepo {
 			if _, ok := sources.AdoItemsAPIBase(cfg["Url"]); !ok {
 				return fmt.Sprintf("%s sources require an Azure DevOps items API URL (…/_apis/git/repositories/{repo}/items) — file content is always fetched for this source type.", Label(srcType))
 			}
@@ -242,6 +241,7 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	}
 	// Best-effort vector cleanup — the source record is removed either way.
 	_ = m.vectors.DeleteByFilter(ctx, sources.CollectionFor(src), sourceFilter(src.ID))
+	m.vectors.RemoveFromLegacyCollections(ctx, src.ID)
 	return m.sources.Delete(src.ID)
 }
 

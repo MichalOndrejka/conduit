@@ -8,6 +8,7 @@ import (
 	"context"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,6 +66,9 @@ type IndexBatchOptions struct {
 	// batch is stored (for sync statistics).
 	Chunks *int
 }
+
+// Store is the vector store the indexer writes to.
+func (d *DocumentIndexer) Store() *VectorStore { return d.store }
 
 func (d *DocumentIndexer) Index(ctx context.Context, collection string, doc models.SourceDocument) error {
 	return d.IndexBatch(ctx, collection, []models.SourceDocument{doc}, IndexBatchOptions{})
@@ -185,6 +189,11 @@ dispatch:
 			}
 			for k, v := range job.doc.Filters.Fields {
 				payload[models.FilterKey(k)] = v
+				if models.IsHierarchical(k) {
+					for level, vs := range models.FilterLevels(k, v) {
+						payload[models.FilterLevelKey(k, level)] = vs
+					}
+				}
 			}
 			if d := job.doc.Filters.Date; !d.IsZero() {
 				payload[models.FilterDateKey] = d.Unix()
@@ -238,6 +247,15 @@ dispatch:
 		return err
 	}
 
+	// Every filter key written gets a payload index (the base ones, plus the
+	// per-level keys of hierarchical fields this batch uses), so filtered
+	// searches and facets are planned on indexes. A failure only costs
+	// query planning (facets create a missing index themselves), so it is
+	// logged rather than failing the sync, and retried on the next one.
+	if err := d.store.EnsurePayloadIndexes(ctx, collection, payloadIndexesFor(points)); err != nil {
+		log.Printf("warning: payload indexes for %s: %v", collection, err)
+	}
+
 	// ── Between phases: replace old vectors for this source ────────────────
 	// Deleting here (after all embeds succeed, before any writes) means:
 	//   - embed failure → old vectors intact, nothing lost
@@ -274,4 +292,18 @@ dispatch:
 		*opts.Chunks = len(points)
 	}
 	return nil
+}
+
+// payloadIndexesFor is the base payload indexes plus a keyword index for
+// every other filter key the points carry.
+func payloadIndexesFor(points []Point) map[string]string {
+	out := models.BasePayloadIndexes()
+	for _, p := range points {
+		for k := range p.Payload {
+			if _, ok := out[k]; !ok && strings.HasPrefix(k, models.FilterPrefix) {
+				out[k] = models.IndexKeyword
+			}
+		}
+	}
+	return out
 }

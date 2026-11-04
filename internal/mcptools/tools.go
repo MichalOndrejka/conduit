@@ -1,5 +1,6 @@
 // Package mcptools is the Go port of app/mcp_tools/tools.py: registers the
-// seven collection search tools and the two experience-memory tools on an MCP
+// collection search tools (one per shape: work items, code, documentation,
+// commits, pipeline runs) and the two experience-memory tools on an MCP
 // server (mark3labs/mcp-go, streamable HTTP transport).
 package mcptools
 
@@ -7,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -19,301 +19,13 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/stats"
 )
 
-// chunkQuery is one mode of the "request" oneOf parameter every search tool
-// accepts. resolve runs the query and builds the full JSON-able response
-// payload itself, so the tool handler never branches on which mode was
-// requested — that's decided once, when parseChunkQuery picks the concrete
-// type.
-type chunkQuery interface {
-	resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error)
-}
-
-// semanticSearchRequest is request.mode == "semantic_search": today's ranked
-// vector search, returning up to a page's worth of the most relevant matches
-// per call (see pageSize in internal/rag/search.go).
-type semanticSearchRequest struct {
-	Query   string
-	Page    int
-	Filters []rag.FieldCondition
-}
-
-func (q semanticSearchRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
-	results, hasMore, err := search.Search(ctx, collection, q.Query, q.Page, q.Filters)
-	if err != nil {
-		return nil, err
-	}
-	payload := map[string]any{"results": results, "page": q.Page, "has_more": hasMore}
-	if len(results) == 0 {
-		payload["results"] = []any{}
-		if q.Page == 1 {
-			payload["note"] = "No data embedded for this query — the source may not be synced yet, or nothing matched."
-		} else {
-			payload["note"] = fmt.Sprintf("No further matches beyond page %d — this was the last page.", q.Page-1)
-		}
-	}
-	return payload, nil
-}
-
-// retrieveChunkRequest is request.mode == "retrieve_chunk": a deterministic
-// fetch of one exact chunk by source_doc_id + chunk_index — no embedding
-// call, so it can reliably walk to the chunk before/after a search hit that
-// got cut off.
-type retrieveChunkRequest struct {
-	SourceDocID string
-	ChunkIndex  int
-}
-
-func (q retrieveChunkRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
-	result, found, err := search.GetChunk(ctx, collection, q.SourceDocID, q.ChunkIndex)
-	if err != nil {
-		return nil, err
-	}
-	if !found {
-		return map[string]any{
-			"results": []any{},
-			"note": fmt.Sprintf(
-				"No chunk at index %d for source_doc_id %q — check has_previous/has_next on the original result, "+
-					"or this document may not be indexed under this collection.",
-				q.ChunkIndex, q.SourceDocID),
-		}, nil
-	}
-	return map[string]any{"results": []models.SearchResult{result}}, nil
-}
-
-// patternSearchRequest is request.mode == "pattern_search": a deterministic
-// literal-substring or regex scan of chunk text — no embedding call, for
-// exact matches semantic search can't guarantee (e.g. finding every usage of
-// a method or identifier). Returns up to a page's worth of matches per call,
-// same as semantic_search. Matcher is built once by parseChunkQuery so
-// resolve doesn't need to know whether Pattern is literal or regex.
-type patternSearchRequest struct {
-	Pattern string
-	Filters []rag.FieldCondition
-	Page    int
-	Matcher func(string) bool
-}
-
-func (q patternSearchRequest) resolve(ctx context.Context, search *rag.SearchService, collection string) (map[string]any, error) {
-	results, hasMore, truncated, err := search.PatternSearch(ctx, collection, q.Matcher, q.Page, q.Filters)
-	if err != nil {
-		return nil, err
-	}
-	payload := map[string]any{"results": results, "page": q.Page, "has_more": hasMore}
-	if len(results) == 0 {
-		payload["results"] = []any{}
-		switch {
-		case truncated:
-			payload["note"] = fmt.Sprintf(
-				"No match confirmed for page %d within the first several thousand chunks scanned — the collection "+
-					"may be larger than this tool scans in one call. Try narrowing the pattern.", q.Page)
-		case q.Page == 1:
-			payload["note"] = "No matches found for this pattern."
-		default:
-			payload["note"] = fmt.Sprintf("No further matches beyond page %d — this was the last page.", q.Page-1)
-		}
-	}
-	return payload, nil
-}
-
-// parseChunkQuery decodes the required "request" argument into the concrete
-// chunkQuery its "mode" field selects; fields are the filters the calling
-// tool's collection supports.
-func parseChunkQuery(args map[string]any, fields []filterField) (chunkQuery, error) {
-	raw, ok := args["request"].(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf(`missing required "request" object argument`)
-	}
-	mode, _ := raw["mode"].(string)
-	switch mode {
-	case "semantic_search":
-		query, ok := raw["query"].(string)
-		if !ok || query == "" {
-			return nil, fmt.Errorf(`request.query is required when mode is "semantic_search"`)
-		}
-		pageF, ok := raw["page"].(float64)
-		if !ok {
-			return nil, fmt.Errorf(`request.page is required when mode is "semantic_search"`)
-		}
-		page := int(pageF)
-		if page < 1 {
-			page = 1
-		}
-		filters, err := parseFilters(raw["filters"], fields)
-		if err != nil {
-			return nil, err
-		}
-		return semanticSearchRequest{Query: query, Page: page, Filters: filters}, nil
-	case "retrieve_chunk":
-		docID, ok := raw["source_doc_id"].(string)
-		if !ok || docID == "" {
-			return nil, fmt.Errorf(`request.source_doc_id is required when mode is "retrieve_chunk"`)
-		}
-		idxF, ok := raw["chunk_index"].(float64)
-		if !ok {
-			return nil, fmt.Errorf(`request.chunk_index is required when mode is "retrieve_chunk"`)
-		}
-		return retrieveChunkRequest{SourceDocID: docID, ChunkIndex: int(idxF)}, nil
-	case "pattern_search":
-		pattern, ok := raw["pattern"].(string)
-		if !ok || pattern == "" {
-			return nil, fmt.Errorf(`request.pattern is required when mode is "pattern_search"`)
-		}
-		pageF, ok := raw["page"].(float64)
-		if !ok {
-			return nil, fmt.Errorf(`request.page is required when mode is "pattern_search"`)
-		}
-		page := int(pageF)
-		if page < 1 {
-			page = 1
-		}
-		filters, err := parseFilters(raw["filters"], fields)
-		if err != nil {
-			return nil, err
-		}
-		useRegex, _ := raw["regex"].(bool)
-		var matcher func(string) bool
-		if useRegex {
-			re, err := regexp.Compile(pattern)
-			if err != nil {
-				return nil, fmt.Errorf("request.pattern is not a valid regular expression: %w", err)
-			}
-			matcher = re.MatchString
-		} else {
-			matcher = func(text string) bool { return strings.Contains(text, pattern) }
-		}
-		return patternSearchRequest{Pattern: pattern, Filters: filters, Page: page, Matcher: matcher}, nil
-	default:
-		return nil, fmt.Errorf(`request.mode must be "semantic_search", "retrieve_chunk", or "pattern_search", got %q`, mode)
-	}
-}
-
-// requestParamSchema is a discriminated union (JSON Schema oneOf) of the
-// three chunkQuery shapes above, keyed by a "mode" field; fields are the
-// filters the tool's collection supports.
-func requestParamSchema(fields []filterField) map[string]any {
-	return map[string]any{
-		"description": `A ranked semantic search, an exact text/regex search, or a deterministic fetch of one exact chunk by ID.`,
-		"oneOf": []any{
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"mode":  map[string]any{"const": "semantic_search"},
-					"query": map[string]any{"type": "string", "description": "Natural-language search query"},
-					"page": map[string]any{"type": "number", "description": "Which page of ranked results to return, starting at 1 (the most relevant matches). " +
-						"Call again with a higher page number to see the next batch of matches if these aren't sufficient. Start with 1."},
-					"filters": filtersSchema(fields),
-				},
-				"required": []string{"mode", "query", "page"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"mode":          map[string]any{"const": "retrieve_chunk"},
-					"source_doc_id": map[string]any{"type": "string", "description": "The source_doc_id field from a previous result returned by this tool"},
-					"chunk_index": map[string]any{"type": "number", "description": "The chunk_index to fetch. Use the previous result's " +
-						"chunk_index - 1 (or + 1) to walk to the previous (or next) chunk when has_previous/has_next is true."},
-				},
-				"required": []string{"mode", "source_doc_id", "chunk_index"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"mode":    map[string]any{"const": "pattern_search"},
-					"pattern": map[string]any{"type": "string", "description": "Literal text to find, or a regular expression when regex is true"},
-					"regex": map[string]any{"type": "boolean", "description": "If true, interpret pattern as a Go RE2 regular expression instead " +
-						"of a literal substring. Defaults to false."},
-					"filters": filtersSchema(fields),
-					"page": map[string]any{"type": "number", "description": "Which page of matches to return, starting at 1 (the first matches found, in " +
-						"index order — not ranked). Call again with a higher page number to see the next batch of matches if these aren't sufficient. Start with 1."},
-				},
-				"required": []string{"mode", "pattern", "page"},
-			},
-		},
-	}
-}
-
-func withRequestParam(fields []filterField) mcp.ToolOption {
-	return func(t *mcp.Tool) {
-		t.InputSchema.Properties["request"] = requestParamSchema(fields)
-		t.InputSchema.Required = append(t.InputSchema.Required, "request")
-	}
-}
-
 // RegisterTools registers all MCP tools. Called once at startup.
 func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.Service) {
 
 	// ── Knowledge search tools ─────────────────────────────────────────────
-	// request.mode="semantic_search" returns a page's worth of the most
-	// relevant matches — the rest of the ranked list is reachable by paging,
-	// never dumped in one response. request.mode="retrieve_chunk" fetches one
-	// exact chunk of a document by ID (see chunk_index/has_previous/has_next on any
-	// result) — deterministic, no embedding call, for walking to a chunk that
-	// got cut off by the chunker. request.mode="pattern_search" is a
-	// deterministic literal/regex text scan — no embedding call, no ranking —
-	// for exact matches semantic search can't guarantee, such as finding
-	// every usage of a method or identifier.
-	const requestModeNote = ` Pass request={"mode":"semantic_search","query":...,"page":1} for a ranked search — each ` +
-		`call returns a page of the top matches; call again with a higher page number for the next batch. ` +
-		`Each result includes chunk_index/total_chunks and has_previous/has_next; if a match looks cut off, pass ` +
-		`request={"mode":"retrieve_chunk","source_doc_id":...,"chunk_index":...} (from the result, chunk_index ± 1) ` +
-		`to fetch the exact adjacent chunk. For an exact/deterministic text or regex match — e.g. finding all usages ` +
-		`of a method or identifier — pass request={"mode":"pattern_search","pattern":...,"page":1} ` +
-		`(add "regex":true to treat pattern as a Go RE2 regular expression); page through further matches the ` +
-		`same way as semantic_search. Both search modes accept an optional "filters" object to narrow results by ` +
-		`source-system fields — e.g. "filters":{"project":"Payments","repository":"api"} — see the schema for ` +
-		`the fields this tool supports; result properties (project, repository, state, …) show the values ` +
-		`available. When a result has properties.web_url, it is the browser link to the ` +
-		`source item (work item, file, commit, wiki page, pipeline run) — cite it as a markdown link, e.g. [title](web_url), ` +
-		`whenever you reference that result in an answer.`
-	makeSearchTool := func(collection, name, description string) {
-		fields := collectionFilters[collection]
-		tool := mcp.NewTool(name,
-			mcp.WithDescription(description+requestModeNote),
-			withRequestParam(fields),
-		)
-		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			query, err := parseChunkQuery(req.GetArguments(), fields)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			payload, err := query.resolve(ctx, search, collection)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			recordSearch(ctx, collection, req.GetArguments(), query, payload)
-			data, err := json.Marshal(payload)
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(string(data)), nil
-		})
+	for _, spec := range SearchTools() {
+		registerSearchTool(s, search, spec)
 	}
-
-	makeSearchTool(models.CollectionWorkItems, "search_workitem",
-		"Semantic search over work items (bugs, tasks, defects). "+
-			"Filter by project, type, state, iteration path, assignee or tags.")
-	makeSearchTool(models.CollectionRequirements, "search_requirement",
-		"Semantic search over requirements (features, user stories, epics).")
-	makeSearchTool(models.CollectionSourceCode, "search_source_code",
-		"Semantic search over production source code (classes, methods, functions). "+
-			"Does not include test files — use search_test_code for tests.")
-	makeSearchTool(models.CollectionTestCode, "search_test_code",
-		"Semantic search over test code — unit tests, integration tests and specs. "+
-			"Use this to find test coverage, test patterns, or examples of how code is tested.")
-	makeSearchTool(models.CollectionTestCases, "search_testcase",
-		"Semantic search over test cases including test steps.")
-	makeSearchTool(models.CollectionDocumentation, "search_documentation",
-		"Semantic search over wiki pages, repo documentation and uploaded documents.")
-	makeSearchTool(models.CollectionCommits, "search_commit",
-		"Semantic search over git commit history — each commit's message, author and complete code diff. "+
-			"Filter by project, repository, author, changed path or author date.")
-	makeSearchTool(models.CollectionPipelineRuns, "search_pipeline_run",
-		"Semantic search over completed Azure DevOps build pipeline runs. Every run has a summary document "+
-			"(result, reason, branch, triggering commit, requester, timing). Failed and partially succeeded runs "+
-			"also list their timeline errors/warnings and have separate documents for each failed step (its complete "+
-			"log) and each failed test (error message and stack trace); properties.type is run, step or test, and "+
-			"step/test documents carry properties.parent_doc_id, the source_doc_id of their run document. "+
-			"Filter by run result or branch.")
 
 	// ── Experience tools ───────────────────────────────────────────────────
 
@@ -402,6 +114,12 @@ func recordSearch(ctx context.Context, collection string, args map[string]any, q
 		tc.Query, tc.Page = q.Pattern, q.Page
 	case retrieveChunkRequest:
 		tc.Query = fmt.Sprintf("%s #%d", q.SourceDocID, q.ChunkIndex)
+	case facetsRequest:
+		names := make([]string, len(q.Fields))
+		for i, f := range q.Fields {
+			names[i] = f.Name
+		}
+		tc.Query = "facets: " + strings.Join(names, ", ")
 	}
 	if raw, ok := args["request"].(map[string]any); ok {
 		if f, ok := raw["filters"].(map[string]any); ok {
@@ -425,6 +143,9 @@ func recordSearch(ctx context.Context, collection string, args map[string]any, q
 		tc.Results = len(r)
 	case []any:
 		tc.Results = len(r)
+	}
+	if n, ok := payload["documents"].(int); ok {
+		tc.Results = n // facets: the documents counted
 	}
 	tc.HasMore, _ = payload["has_more"].(bool)
 }

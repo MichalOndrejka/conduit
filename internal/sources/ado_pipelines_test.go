@@ -225,6 +225,9 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 	if got := step.Filters.Fields[models.FilterResult]; len(got) != 1 || got[0] != "failed" {
 		t.Errorf("step result filter = %v", got)
 	}
+	if p, r := step.Filters.Fields[models.FilterProject], step.Filters.Fields[models.FilterRepository]; fmt.Sprint(p, r) != "[proj] [api]" {
+		t.Errorf("step project/repository filters = %v %v", p, r)
+	}
 	pr := docByID(docs, "src-1_run_1")
 	if got := strings.Join(pr.Filters.Fields[models.FilterBranch], ","); got != "refs/pull/42/merge,pull/42/merge" {
 		t.Errorf("PR branch filter = %q", got)

@@ -49,6 +49,12 @@ func (s *SearchService) excludedSourceIDs() []string {
 	return excludeSourceIDs
 }
 
+// Facets counts documents per value of req's fields within its filters,
+// leaving out disabled sources like every search does.
+func (s *SearchService) Facets(ctx context.Context, collection string, req FacetRequest) (FacetResult, error) {
+	return Facets(ctx, NewStoreFacetCounter(s.store, s.excludedSourceIDs()), collection, req)
+}
+
 // Search returns up to pageSize ranked matches for page (1-based; values
 // below 1 are treated as 1). hasMore reports whether a further page exists.
 func (s *SearchService) Search(

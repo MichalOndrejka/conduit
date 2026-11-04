@@ -2,9 +2,9 @@ package eval
 
 import (
 	"maps"
-	"regexp"
 	"slices"
-	"strings"
+
+	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
 // Physical indexes: how documents are distributed over collections. Every
@@ -40,7 +40,7 @@ const (
 	// here it is the document's intent.
 	FieldCategory = "category"
 	// FieldCodeKind is "test" or "production", derived from the file path.
-	FieldCodeKind = "code_kind"
+	FieldCodeKind = models.FilterCodeKind
 )
 
 // currentCollection is where today's layout stores a document of intent:
@@ -102,35 +102,17 @@ func indexFields(index string, d Document) map[string][]string {
 		return out
 	}
 	out[FieldCategory] = []string{d.Intent}
-	if mergedCollection(d) == CollCode {
-		kind := "production"
+	if mergedCollection(d) == CollCode && len(out[FieldCodeKind]) == 0 {
+		// As a sync derives it (sources.AddSourceFilters), from the path.
+		kind := models.CodeKindProduction
 		for _, p := range d.Fields["path"] {
-			if IsTestPath(p) {
-				kind = "test"
+			if models.IsTestPath(p) {
+				kind = models.CodeKindTest
 			}
 		}
 		out[FieldCodeKind] = []string{kind}
 	}
 	return out
-}
-
-// testPathPatterns are the common conventions for test files across
-// languages; the merged design's code_kind is derived from them (and would be
-// overridable per source).
-var testPathPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(^|/)(tests?|__tests__|spec|specs)/`),           // tests/, test/, __tests__/, spec/
-	regexp.MustCompile(`(^|/)src/test/`),                                // Maven / Gradle
-	regexp.MustCompile(`_test\.(go|py|rb|exs?)$`),                       // Go, Python, Ruby, Elixir
-	regexp.MustCompile(`(^|/)test_[^/]+\.py$`),                          // pytest
-	regexp.MustCompile(`\.(test|spec)\.(t|j)sx?$`),                      // JS / TS
-	regexp.MustCompile(`(Tests?|Spec|IT)\.(cs|java|kt|scala|swift|m)$`), // C#, Java, Kotlin, Swift, ObjC
-	regexp.MustCompile(`\.Tests?/`),                                     // .NET test projects
-}
-
-// IsTestPath reports whether p looks like a test file by common conventions.
-func IsTestPath(p string) bool {
-	p = strings.TrimPrefix(strings.ReplaceAll(p, `\`, "/"), "/")
-	return slices.ContainsFunc(testPathPatterns, func(re *regexp.Regexp) bool { return re.MatchString(p) })
 }
 
 // Target is one collection a layout searches for a question, with filters.

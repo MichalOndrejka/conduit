@@ -49,6 +49,11 @@ func TestSearchToolCallsAreRecordedInStats(t *testing.T) {
 		"mode": "semantic_search", "query": "nothing here", "page": float64(2),
 	}})
 
+	qd.countResult = 4
+	callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+		"mode": "facets", "fields": []any{"code_kind", "path"},
+	}})
+
 	events, _ := rec.Load()
 	var calls []*stats.ToolCall
 	for _, e := range events {
@@ -56,8 +61,11 @@ func TestSearchToolCallsAreRecordedInStats(t *testing.T) {
 			calls = append(calls, e.Tool)
 		}
 	}
-	if len(calls) != 2 {
+	if len(calls) != 3 {
 		t.Fatalf("tool calls = %d", len(calls))
+	}
+	if f := calls[2]; f.Mode != "facets" || f.Query != "facets: code_kind, path" || f.Results != 4 || !f.Counted {
+		t.Errorf("facets call = %+v", f)
 	}
 	first := calls[0]
 	if first.Name != "search_workitem" || first.Mode != "semantic_search" || first.Query != "login bug" || first.Page != 1 ||
