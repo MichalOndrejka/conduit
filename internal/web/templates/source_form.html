@@ -1,8 +1,19 @@
 {{define "title"}}{{if .IsNew}}New source{{else}}Edit source{{end}} — Conduit{{end}}
 
-<!-- Shared by the Work Items tab and the Requirements/Test Cases "workitems"
-     fetch mode: a preset tile picker (see WorkItemTypePresets, set per
-     source type in routes_manage.go). -->
+<!-- Type tiles, shared by both tabs: the types the provider defines (an Azure
+     DevOps project's work item types, a GitHub organization's issue types),
+     loaded by loadTypes, plus any saved selection. The ticked types are
+     submitted as WorkItemTypes through the hidden input. -->
+{{define "type-tiles"}}
+<div class="type-picker">
+  <p class="type-status hidden mb-3 rounded-lg border border-dashed border-slate-700 px-3 py-2 text-sm text-slate-400"></p>
+  <div class="type-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"></div>
+  <input type="hidden" name="WorkItemTypes" class="type-value" value="{{.Source.GetConfig `WorkItemTypes`}}">
+</div>
+{{end}}
+
+<!-- Azure DevOps work item fields: the Work Items type and the
+     Requirements/Test Cases Work Items fetch mode. -->
 {{define "worktype-picker"}}
 {{$s := .Source}}
 <div>
@@ -11,16 +22,17 @@
          class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
 </div>
 <div>
-  <label class="block text-sm font-medium text-slate-300 mb-1">Work item types {{template "tip" "Conduit queries work items directly; tick the types to embed."}}</label>
-  <div id="worktype-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-    {{range .WorkItemTypePresets}}
-    <label class="group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30">
-      <input type="checkbox" class="ado-worktype peer sr-only" value="{{.}}">
-      <div class="text-sm font-medium text-white group-hover:text-violet-300 peer-checked:text-violet-300">{{.}}</div>
-    </label>
-    {{end}}
-  </div>
-  <input type="hidden" name="WorkItemTypes" id="ado-worktypes" value="{{$s.GetConfig `WorkItemTypes`}}">
+  <label class="block text-sm font-medium text-slate-300 mb-1">Work item types {{template "tip" "The project's own work item types, as its process defines them. Tick the types to embed."}}</label>
+  {{template "type-tiles" .}}
+</div>
+{{end}}
+
+<!-- Branch field shared by every repository-backed source on both tabs. -->
+{{define "branch"}}
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Branch {{template "tip" "Empty = the repository's default branch."}}</label>
+  <input name="Branch" value="{{.Source.GetConfig `Branch`}}" placeholder="main"
+         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
 </div>
 {{end}}
 
@@ -28,11 +40,7 @@
 {{define "gh-files"}}
 {{$s := .Source}}
 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-  <div>
-    <label class="block text-sm font-medium text-slate-300 mb-1">Branch {{template "tip" "Empty = the repository's default branch."}}</label>
-    <input name="Branch" value="{{$s.GetConfig `Branch`}}" placeholder="main"
-           class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-  </div>
+  {{template "branch" .}}
   <div>
     <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md or docs/**. Empty = all files. Each matching file's full content is embedded; binary files and files over 200 KB are skipped."}}</label>
     <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
@@ -43,6 +51,10 @@
 
 {{define "gh-labels"}}
 {{$s := .Source}}
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Issue types {{template "tip" "The organization's issue types, as its admins defined them. Tick the types to embed; none ticked = issues of every type, and issues without one."}}</label>
+  {{template "type-tiles" .}}
+</div>
 <div>
   <label class="block text-sm font-medium text-slate-300 mb-1">Labels {{template "tip" "Comma-separated; an issue with any of them is embedded. Empty = every issue. Open and closed issues are embedded with all their comments; pull requests are not."}}</label>
   <input name="Labels" value="{{$s.GetConfig `Labels`}}" placeholder="bug, enhancement"
@@ -140,19 +152,22 @@
         <div class="tabs" role="tablist">
           <label class="tab">
             <input type="radio" name="AdoFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            Files in a repo
+            Files
           </label>
           <label class="tab">
             <input type="radio" name="AdoFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            Azure DevOps work items
+            Work Items
           </label>
         </div>
 
         <div id="fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
-            <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
+              <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
+                     class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+            </div>
+            {{template "branch" .}}
           </div>
           <div>
             <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
@@ -173,11 +188,7 @@
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Branch</label>
-          <input name="Branch" value="{{or ($s.GetConfig `Branch`) `main`}}" placeholder="main"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
+        {{template "branch" .}}
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Most recent first, fetched in pages of 100. Every commit embeds its full message and the complete diff of every changed file."}}</label>
           <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
@@ -198,10 +209,13 @@
         </div>
       </div>
       {{else}}
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
-        <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
-               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
+          <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        {{template "branch" .}}
       </div>
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.cs, *.ts. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
@@ -262,11 +276,11 @@
         <div class="tabs" role="tablist">
           <label class="tab">
             <input type="radio" name="GitHubFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            Files in a repo
+            Files
           </label>
           <label class="tab">
             <input type="radio" name="GitHubFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
-            GitHub issues
+            Issues
           </label>
         </div>
 
@@ -281,11 +295,7 @@
 
       {{else if eq $s.Type "commit-history"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Branch {{template "tip" "Empty = the repository's default branch."}}</label>
-          <input name="Branch" value="{{$s.GetConfig `Branch`}}" placeholder="main"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
+        {{template "branch" .}}
         <div>
           <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Most recent first. Every commit embeds its full message and the patch of each changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case."}}</label>
           <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
@@ -368,6 +378,7 @@ function setTab(name) {
   document.getElementById('f-provider').value = isGitHub ? 'github' : 'api';
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
   updateFetchMode();
+  loadTypes();
 }
 
 // Each provider tab has its own "Fetch as" radio group (one shared name
@@ -398,6 +409,8 @@ function adoVal(name) {
 var SOURCE_TYPE = document.querySelector('input[name="type"]').value;
 
 function prepareSubmit() {
+  var activePicker = typePicker();
+  if (activePicker) activePicker.querySelector('.type-value').value = selectedTypes(activePicker).join(',');
   if (currentTab === 'ado') {
     var org = adoVal('AdoOrg').replace(/\/+$/, '');
     var proj = encodeURIComponent(adoVal('AdoProject'));
@@ -412,16 +425,14 @@ function prepareSubmit() {
       // (see fetchAdoWorkItems), not a single GET — this URL is only stored
       // so the source re-opens on the right tab, pre-filled.
       document.getElementById('ado-url').value = org + '/' + proj;
-      var checked = Array.prototype.slice.call(document.querySelectorAll('.ado-worktype:checked'))
-        .map(function (el) { return el.value; });
-      if (checked.length === 0) {
+      var picker = typePicker();
+      if (picker && selectedTypes(picker).length === 0) {
         alert('Select at least one work item type.');
         return false;
       }
-      document.getElementById('ado-worktypes').value = checked.join(',');
     } else {
       var ver = adoVal('AdoApiVersion') || '7.1';
-      // "Files in a repo" types (Source Code, Test Code, Documentation, and
+      // "Files" types (Source Code, Test Code, Documentation, and
       // Requirements/Test Cases in file mode) hit the items endpoint of a
       // single named repo, and Commit History hits the commits endpoint of
       // one — the repo name is all the user needs to give, the rest of the
@@ -532,14 +543,57 @@ function loadPreviewPage(offset) {
     });
 }
 
-function addWorkItemTypeTile(value, checked) {
-  var grid = document.getElementById('worktype-grid');
-  if (!grid) return null;
+// ── Type tiles ──────────────────────────────────────────────────────────────
+// Each tab's type picker lists the types its provider defines: an Azure DevOps
+// project's work item types, or a GitHub organization's issue types. They're
+// loaded with the form's current (unsaved) values once the fields a lookup
+// needs are filled in; until then the status line names what's missing.
+var TYPE_SOURCES = {
+  ado: {
+    endpoint: '/sources/ado/workitemtypes',
+    // The organization URL counts as empty while it's only the pre-filled
+    // host (https://dev.azure.com/).
+    required: [
+      { name: 'AdoOrg', label: 'Organization URL', empty: function (v) { return !v.replace(/^https?:\/\/[^\/]*\/?$/, ''); } },
+      { name: 'AdoProject', label: 'Project' },
+      { name: 'Password', label: 'Personal Access Token' }
+    ],
+    watch: ['AdoOrg', 'AdoProject', 'AdoApiVersion', 'Password'],
+    noun: 'work item types',
+    whose: 'the project\'s work item types'
+  },
+  github: {
+    endpoint: '/sources/github/issuetypes',
+    required: [
+      { name: 'GitHubUrl', label: 'Server URL' },
+      { name: 'GitHubOwner', label: 'Owner' }
+    ],
+    watch: ['GitHubUrl', 'GitHubOwner', 'Token'],
+    noun: 'issue types',
+    whose: 'the organization\'s issue types',
+    unavailable: function () {
+      return tabVal('github', 'GitHubOwner') + ' has no issue types (personal accounts and older GitHub Enterprise ' +
+        'Server versions don\'t have them), so issues are filtered by labels only.';
+    }
+  }
+};
+
+function tabVal(tab, name) {
+  var el = document.querySelector('#' + tab + '-block [name="' + name + '"]');
+  return el ? el.value.trim() : '';
+}
+
+// typePicker is the active tab's picker, or null if this source has none.
+function typePicker(tab) {
+  return document.querySelector('#' + (tab || currentTab) + '-block .type-picker');
+}
+
+function addTypeTile(picker, value, checked) {
   var label = document.createElement('label');
   label.className = 'group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30';
   var input = document.createElement('input');
   input.type = 'checkbox';
-  input.className = 'ado-worktype peer sr-only';
+  input.className = 'type-tile peer sr-only';
   input.value = value;
   input.checked = !!checked;
   var div = document.createElement('div');
@@ -547,24 +601,106 @@ function addWorkItemTypeTile(value, checked) {
   div.textContent = value;
   label.appendChild(input);
   label.appendChild(div);
-  grid.appendChild(label);
-  return input;
+  picker.querySelector('.type-grid').appendChild(label);
 }
 
-(function initWorkItemTypes() {
-  var hidden = document.getElementById('ado-worktypes');
-  if (!hidden || !hidden.value) return;
-  var selected = hidden.value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
-  selected.forEach(function (value) {
-    var existing = Array.prototype.slice.call(document.querySelectorAll('.ado-worktype'))
-      .filter(function (el) { return el.value === value; })[0];
-    if (existing) {
-      existing.checked = true;
-    } else {
-      addWorkItemTypeTile(value, true);
-    }
+// selectedTypes is the ticked tiles, or the saved selection before any tile
+// exists.
+function selectedTypes(picker) {
+  var tiles = picker.querySelectorAll('.type-tile');
+  if (tiles.length === 0) {
+    return picker.querySelector('.type-value').value.split(',')
+      .map(function (s) { return s.trim(); }).filter(Boolean);
+  }
+  return Array.prototype.slice.call(tiles).filter(function (el) { return el.checked; })
+    .map(function (el) { return el.value; });
+}
+
+// renderTypes rebuilds the tiles: the provider's types, then any selected
+// type it doesn't list (renamed, or saved earlier), so a saved selection is
+// never silently dropped.
+function renderTypes(picker, types) {
+  var selected = selectedTypes(picker);
+  picker.querySelector('.type-grid').innerHTML = '';
+  types.forEach(function (t) { addTypeTile(picker, t, selected.indexOf(t) >= 0); });
+  selected.forEach(function (t) { if (types.indexOf(t) < 0) addTypeTile(picker, t, true); });
+}
+
+function setTypeStatus(picker, msg) {
+  var el = picker.querySelector('.type-status');
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+function joinFieldNames(names) {
+  return names.length < 2 ? names.join('') :
+    names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+// refreshTypeStatus shows which required fields are still empty, or the
+// lookup's state (picker.typeNote: loading, or "no types"); returns whether
+// the lookup can run.
+function refreshTypeStatus(tab, picker) {
+  var cfg = TYPE_SOURCES[tab];
+  var missing = cfg.required.filter(function (f) {
+    var v = tabVal(tab, f.name);
+    return f.empty ? f.empty(v) : !v;
+  }).map(function (f) { return f.label; });
+  if (missing.length) {
+    setTypeStatus(picker, 'Fill in ' + joinFieldNames(missing) + ' to load ' + cfg.whose + '.');
+    return false;
+  }
+  setTypeStatus(picker, picker.typeNote || '');
+  return true;
+}
+
+// loadTypes asks the server for the active tab's types.
+var typesRequest = 0;
+function loadTypes() {
+  var tab = currentTab, picker = typePicker(tab), cfg = TYPE_SOURCES[tab];
+  if (!picker || !cfg) return;
+  picker.typeNote = '';
+  if (!refreshTypeStatus(tab, picker)) return;
+  var req = ++typesRequest;
+  picker.typeNote = 'Loading ' + cfg.noun + '…';
+  refreshTypeStatus(tab, picker);
+  var finish = function (note) {
+    picker.typeNote = note || '';
+    refreshTypeStatus(tab, picker);
+  };
+  fetch(cfg.endpoint, { method: 'POST', body: new FormData(document.getElementById('source-form')) })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (req !== typesRequest) return; // a newer request superseded this one
+      if (!res.ok) {
+        finish();
+        showToast('Could not load ' + cfg.noun + ': ' + res.error, 'error');
+        return;
+      }
+      finish(res.available === false && cfg.unavailable ? cfg.unavailable() : '');
+      renderTypes(picker, res.types || []);
+    })
+    .catch(function (err) {
+      if (req !== typesRequest) return;
+      finish();
+      showToast('Could not load ' + cfg.noun + ': ' + err, 'error');
+    });
+}
+
+(function initTypePickers() {
+  Object.keys(TYPE_SOURCES).forEach(function (tab) {
+    var picker = typePicker(tab);
+    if (!picker) return;
+    renderTypes(picker, []); // the saved selection, until the provider's types arrive
+    TYPE_SOURCES[tab].watch.forEach(function (name) {
+      var el = document.querySelector('#' + tab + '-block [name="' + name + '"]');
+      if (!el) return;
+      el.addEventListener('change', loadTypes);
+      // The message follows typing; the lookup itself waits for change.
+      el.addEventListener('input', function () { picker.typeNote = ''; refreshTypeStatus(tab, picker); });
+    });
   });
-})();
+})(); // setTab below loads the active tab's types
 
 setTab(INITIAL_TAB);
 </script>

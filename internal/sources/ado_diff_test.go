@@ -16,7 +16,16 @@ import (
 
 // commitSrc builds a commit-history-typed source, since diff enrichment is now
 // driven entirely by Type rather than a config flag.
+// commitSrc builds a commit-history source. Branch defaults to "main" so a
+// test's fake server needn't answer the default-branch lookup; set it
+// (even to "") to control that.
 func commitSrc(cfg map[string]string) *models.SourceDefinition {
+	if cfg == nil {
+		cfg = map[string]string{}
+	}
+	if _, ok := cfg["Branch"]; !ok {
+		cfg["Branch"] = "main"
+	}
 	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: models.SourceGitCommits, Config: cfg}
 }
 
@@ -775,15 +784,15 @@ func TestFetchDocumentsCommitHistoryRespectsTopAcrossPages(t *testing.T) {
 
 // TestFetchDocumentsCommitHistoryFiltersByBranch verifies that a
 // commit-history source scopes ADO's commits-list request to a single
-// branch — defaulting to "main" when Branch is unset — rather than walking
-// every branch in the repository.
+// branch — defaulting to the repository's default branch when Branch is
+// unset — rather than walking every branch in the repository.
 func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 	cases := []struct {
 		name       string
 		branchCfg  string
 		wantBranch string
 	}{
-		{name: "default", branchCfg: "", wantBranch: "main"},
+		{name: "default", branchCfg: "", wantBranch: "trunk"},
 		{name: "explicit", branchCfg: "release/2.0", wantBranch: "release/2.0"},
 	}
 
@@ -792,6 +801,11 @@ func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 			var gotBranch string
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch {
+				case r.URL.Path == "/_apis/git/repositories/repo":
+					if c.branchCfg != "" {
+						t.Error("default branch looked up although Branch is set")
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"defaultBranch": "refs/heads/trunk"})
 				case r.URL.Path == "/_apis/git/repositories/repo/commits":
 					gotBranch = r.URL.Query().Get("searchCriteria.itemVersion.version")
 					if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
@@ -816,9 +830,7 @@ func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 				"TitleField":    "comment",
 				"ContentFields": "comment",
 			}
-			if c.branchCfg != "" {
-				cfg["Branch"] = c.branchCfg
-			}
+			cfg["Branch"] = c.branchCfg
 			s := &APISource{src: commitSrc(cfg)}
 
 			if _, err := s.FetchDocuments(context.Background(), nil); err != nil {
@@ -828,5 +840,59 @@ func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 				t.Errorf("searchCriteria.itemVersion.version = %q, want %q", gotBranch, c.wantBranch)
 			}
 		})
+	}
+}
+
+func TestWithAdoItemsBranch(t *testing.T) {
+	const base = "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1"
+	cases := []struct{ in, branch, want string }{
+		{base, "", base},
+		{base, "  ", base},
+		{base, "release/2.0", "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1&versionDescriptor.version=release%2F2.0&versionDescriptor.versionType=branch"},
+		{base, "refs/heads/dev", "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1&versionDescriptor.version=dev&versionDescriptor.versionType=branch"},
+		// A version already in the URL wins.
+		{base + "&versionDescriptor.version=v1&versionDescriptor.versionType=tag", "dev", base + "&versionDescriptor.version=v1&versionDescriptor.versionType=tag"},
+	}
+	for _, c := range cases {
+		if got := withAdoItemsBranch(c.in, c.branch); got != c.want {
+			t.Errorf("withAdoItemsBranch(%q, %q) = %q, want %q", c.in, c.branch, got, c.want)
+		}
+	}
+}
+
+// A code source's Branch scopes the items listing and the documents' web
+// links to that branch.
+func TestFetchDocumentsFilesUseBranch(t *testing.T) {
+	var gotVersion, gotType string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/items"):
+			gotVersion = r.URL.Query().Get("versionDescriptor.version")
+			gotType = r.URL.Query().Get("versionDescriptor.versionType")
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
+				{"objectId": "b1", "gitObjectType": "blob", "path": "/main.go"},
+			}})
+		case strings.Contains(r.URL.Path, "/blobs/"):
+			fmt.Fprint(w, "package main")
+		default:
+			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: &models.SourceDefinition{ID: "s", Type: models.SourceCodeRepo, Config: map[string]string{
+		"Url":       srv.URL + "/org/proj/_apis/git/repositories/repo/items?api-version=7.1",
+		"ItemsPath": "value", "IdField": "objectId", "TitleField": "path",
+		"Branch": "dev",
+	}}}
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotVersion != "dev" || gotType != "branch" {
+		t.Errorf("versionDescriptor = %q/%q, want dev/branch", gotVersion, gotType)
+	}
+	if len(docs) != 1 || !strings.Contains(docs[0].Properties["web_url"], "version=GBdev") {
+		t.Errorf("docs = %+v, want one doc linking to GBdev", docs)
 	}
 }

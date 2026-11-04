@@ -41,15 +41,17 @@
 //	more than one page (adoCommitsPageSize items) is fetched by paging
 //	manually via searchCriteria.$top/$skip until Top is reached or the repo
 //	runs out of commits.
-//	Branch             branch whose history is listed (default "main") —
-//	                   otherwise ADO's commits endpoint walks every branch,
-//	                   duplicating shared commits and pulling in stray
-//	                   feature-branch work.
+//	Branch             branch whose history is listed (default: the
+//	                   repository's default branch) — otherwise ADO's commits
+//	                   endpoint walks every branch, duplicating shared commits
+//	                   and pulling in stray feature-branch work.
 //
 //	For sources of type code or test-code, each item is automatically enriched
 //	with its real file content (in place of the raw JSON metadata), fetched
 //	from Azure DevOps' Git REST API. Requires Url to be an ADO
-//	".../_apis/git/repositories/{repo}/items" endpoint. Documentation sources
+//	".../_apis/git/repositories/{repo}/items" endpoint. Branch selects the
+//	branch the files are read from (default: the repository's default
+//	branch). Documentation sources
 //	get the same treatment on a best-effort basis, falling back to plain
 //	metadata if Url isn't an ADO repo-items endpoint (e.g. a wiki).
 //
@@ -87,6 +89,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/stats"
 )
 
 const (
@@ -172,8 +175,14 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		return a.fetchAdoWorkItems(ctx, a.httpClient(), top, progress)
 	}
 
-	fetchURL := url
 	fileContentType := isFileContentType(cfg)
+	if fileContentType {
+		// Files come from Branch, or the repository's default branch when it
+		// is empty (ADO's own default with no versionDescriptor). Applied to
+		// url itself so the documents' web links open the same branch.
+		url = withAdoItemsBranch(url, cfg.GetConfig("Branch"))
+	}
+	fetchURL := url
 	if fileContentType {
 		// ADO's items-list endpoint returns only the repo root without this —
 		// not user-configurable now that the "Extra query" field is gone.
@@ -204,10 +213,15 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		// Unfiltered, ADO's commits endpoint walks every branch's history,
 		// which duplicates commits shared with the default branch and pulls
 		// in throwaway feature-branch work — almost never what a "commit
-		// history" source wants indexed.
-		branch := cfg.GetConfig("Branch")
+		// history" source wants indexed. An empty Branch means the
+		// repository's default branch.
+		branch := strings.TrimSpace(cfg.GetConfig("Branch"))
 		if branch == "" {
-			branch = defaultCommitsBranch
+			b, err := a.adoDefaultBranch(ctx, client, url)
+			if err != nil {
+				return nil, err
+			}
+			branch = b
 		}
 		fetchURL = withAdoBranchFilter(fetchURL, branch)
 	}
@@ -423,6 +437,8 @@ func (a *APISource) httpClient() *http.Client {
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // self-hosted instances with private CAs
 		}
 	}
+	// Counts requests (and rate-limit refusals) for the sync's statistics.
+	client.Transport = stats.CountingTransport(client.Transport)
 	return client
 }
 
@@ -589,8 +605,8 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 		}
 		docs = append(docs, models.SourceDocument{
 			Filters: filters,
-			ID:   docID,
-			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
+			ID:      docID,
+			Text:    strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
 			Tags: map[string]string{
 				"source_id":   a.src.ID,
 				"source_name": a.src.Name,

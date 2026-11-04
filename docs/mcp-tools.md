@@ -134,40 +134,40 @@ experience_remember(situation="Deploying to staging", guidance="Always run the D
 
 ## Source tools
 
-### `sync_sources`
+### `sync_source`
 
 Starts syncs and reports sync status, so an agent can refresh a source before relying on its search results.
 
 ```
-sync_sources(request: { mode: "status", source_ids?: [str] })
-sync_sources(request: { mode: "trigger", source_ids: [str] })
+sync_source(request: { mode: "status", source_ids?: [str] })
+sync_source(request: { mode: "trigger", source_ids: [str] })
 ```
 
 - **`status`** lists every source (or just `source_ids`) with `id`, `name`, `type`, `disabled`, `sync_status` (`idle`, `syncing`, `completed`, `failed`), `last_synced_at`, `sync_error` / `sync_error_phase` when the last sync failed, and live `progress` (`phase`, `current`, `total`) while a sync runs. IDs that match no source are listed under `not_found`. Source config is never returned.
 - **`trigger`** starts the given sources syncing in the background (at most 4 at once, same as **Sync selected** in the UI) and returns immediately with one outcome per ID: `started`, `already_syncing`, `disabled` or `not_found`. Poll `status` until `sync_status` is `completed` or `failed`.
 
 ```
-sync_sources(request={"mode":"trigger","source_ids":["a1b2"]})
+sync_source(request={"mode":"trigger","source_ids":["a1b2"]})
 → { "outcomes": { "a1b2": "started" } }
 ```
 
 The tool can't yet tell whether a source is out of date with its upstream system; `last_synced_at` is the only freshness signal.
 
-### `manage_sources`
+### `manage_source`
 
 Lists, reads, creates, updates and deletes API source configs, so an agent can set up a source for the user.
 
 ```
-manage_sources(request: { mode: "list" })
-manage_sources(request: { mode: "get", source_id: str })
-manage_sources(request: { mode: "create", name: str, type: str, config: {...}, disabled?: bool })
-manage_sources(request: { mode: "update", source_id: str, name?: str, type?: str, config?: {...}, disabled?: bool })
-manage_sources(request: { mode: "delete", source_id: str, confirm?: bool })
+manage_source(request: { mode: "list" })
+manage_source(request: { mode: "get", source_id: str })
+manage_source(request: { mode: "create", name: str, type: str, config: {...}, disabled?: bool })
+manage_source(request: { mode: "update", source_id: str, name?: str, type?: str, config?: {...}, disabled?: bool })
+manage_source(request: { mode: "delete", source_id: str, confirm?: bool })
 ```
 
 - **`list`** returns every source (`id`, `name`, `type`, `provider`, `disabled`, `sync_status`), the stored **credential names** and the source types.
 - **`get`** returns one source with its `config`.
-- **`create`** / **`update`** take the same config keys as the UI and the export file (see [Sources](sources.md)). `config.Provider` is `api` (Azure DevOps, the default) or `github`, and decides which keys are allowed. `update` merges `config` into the existing one; `""` removes a key. Changing `type` moves the source to another collection and removes its old vectors. Saving never syncs — call `sync_sources` `trigger` afterwards.
+- **`create`** / **`update`** take the same config keys as the UI and the export file (see [Sources](sources.md)). `config.Provider` is `api` (Azure DevOps, the default) or `github`, and decides which keys are allowed. `update` merges `config` into the existing one; `""` removes a key. Changing `type` moves the source to another collection and removes its old vectors. Saving never syncs — call `sync_source` `trigger` afterwards.
 - **`delete`** without `confirm: true` only reports what would go (`indexed_chunks`); with it, the source and its vectors are deleted.
 
 Credentials are referenced by name only. `Token`, `Password` and `ApiKeyValue` must name a credential from `list`; anything else is rejected (and not echoed back), so a pasted secret is never stored. New credentials are added in the UI at `/credentials`.
@@ -175,10 +175,10 @@ Credentials are referenced by name only. `Token`, `Password` and `ApiKeyValue` m
 Sources that are currently syncing can't be changed by the tool.
 
 ```
-manage_sources(request={"mode":"create","name":"Bugs","type":"work-item",
+manage_source(request={"mode":"create","name":"Bugs","type":"work-item",
   "config":{"Url":"https://ado.example/org/proj/_apis/wit/wiql?api-version=7.1","HttpMethod":"POST",
             "Body":"{\"query\":\"SELECT [System.Id] FROM WorkItems\"}","AuthType":"basic","Password":"ado-pat"}})
-→ { "source": { "id": "c0ffee…", "name": "Bugs", "sync_status": "idle", "config": {...} }, "next": "Call sync_sources trigger with this id to index it." }
+→ { "source": { "id": "c0ffee…", "name": "Bugs", "sync_status": "idle", "config": {...} }, "next": "Call sync_source trigger with this id to index it." }
 ```
 
 ---

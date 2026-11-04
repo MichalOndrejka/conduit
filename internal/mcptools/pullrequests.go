@@ -29,7 +29,7 @@ func pullRequestRequestSchema() map[string]any {
 		"description": "List pull requests, or read one pull request's details, changed files, diffs, comment threads, iterations or commits.",
 		"oneOf": []any{
 			variant("list", map[string]any{
-				"source_id": str("A configured Azure DevOps or GitHub source of the repository (ids from sync_sources status mode)"),
+				"source_id": str("A configured Azure DevOps or GitHub source of the repository (ids from sync_source status mode)"),
 				"status":    map[string]any{"type": "string", "enum": []string{"active", "completed", "abandoned", "all"}, "description": "Default active"},
 				"author":    str(`Optional: "me" (the token's owner), an email (Azure DevOps) or a login (GitHub)`),
 				"reviewer": str(`Optional: "me", an email (Azure DevOps) or a login (GitHub). On GitHub this matches pull ` +
@@ -135,7 +135,7 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 				"pull_requests": prs, "page": page, "has_more": hasMore,
 			}, nil
 		}
-		return nil, fmt.Errorf("no source has id %q — sync_sources status mode lists them", id)
+		return nil, fmt.Errorf("no source has id %q — sync_source status mode lists them", id)
 	}
 
 	switch mode {

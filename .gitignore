@@ -7,6 +7,8 @@
 conduit-sources.json
 conduit-settings.json
 conduit-embedding.json
+conduit-stats.jsonl
+conduit-stats.jsonl.tmp
 *.local.json
 .secret_key
 credentials.enc.json
@@ -44,3 +46,7 @@ coverage/
 
 # Playwright MCP browser snapshots and screenshots
 .playwright-mcp/
+
+# Eval reports and private eval datasets (exported from real sources)
+eval-results/
+eval-private/

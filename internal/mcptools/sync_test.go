@@ -59,7 +59,7 @@ func TestSyncStatusListsEverySourceWithoutConfig(t *testing.T) {
 	runner.progress.Set("code", models.SyncProgress{Phase: "indexing", Current: 3, Total: 10})
 	s, ctx := setupSync(t, runner)
 
-	result := callTool(t, s, ctx, "sync_sources", map[string]any{"request": map[string]any{"mode": "status"}})
+	result := callTool(t, s, ctx, "sync_source", map[string]any{"request": map[string]any{"mode": "status"}})
 	text := resultText(t, result)
 	if result.IsError {
 		t.Fatalf("status failed: %s", text)
@@ -96,7 +96,7 @@ func TestSyncStatusListsEverySourceWithoutConfig(t *testing.T) {
 
 func TestSyncStatusFiltersBySourceIDs(t *testing.T) {
 	s, ctx := setupSync(t, newFakeRunner())
-	text := resultText(t, callTool(t, s, ctx, "sync_sources", map[string]any{"request": map[string]any{
+	text := resultText(t, callTool(t, s, ctx, "sync_source", map[string]any{"request": map[string]any{
 		"mode": "status", "source_ids": []any{"docs", "missing"},
 	}}))
 	var out struct {
@@ -119,7 +119,7 @@ func TestSyncTriggerStartsOnlyEligibleSources(t *testing.T) {
 	runner.syncing["code"] = true
 	s, ctx := setupSync(t, runner)
 
-	result := callTool(t, s, ctx, "sync_sources", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "sync_source", map[string]any{"request": map[string]any{
 		"mode": "trigger", "source_ids": []any{"wi", "docs", "wi", "code", "old", "missing"},
 	}})
 	text := resultText(t, result)
@@ -156,7 +156,7 @@ func TestSyncTriggerRejectsBadRequests(t *testing.T) {
 		"non-string id": {"mode": "trigger", "source_ids": []any{1}},
 		"unknown mode":  {"mode": "delete"},
 	} {
-		if result := callTool(t, s, ctx, "sync_sources", map[string]any{"request": req}); !result.IsError {
+		if result := callTool(t, s, ctx, "sync_source", map[string]any{"request": req}); !result.IsError {
 			t.Errorf("%s: expected a tool error, got %s", name, resultText(t, result))
 		}
 	}

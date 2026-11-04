@@ -19,6 +19,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/sources"
+	"github.com/MichalOndrejka/conduit/internal/stats"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncsvc"
 )
@@ -53,6 +54,7 @@ type Server struct {
 	secrets *secrets.Store
 	sync    *syncsvc.Service
 	health  *health.Monitor
+	stats   *stats.Recorder // nil: the Stats page says stats are off
 
 	indexTmpl         *template.Template
 	itemsTmpl         *template.Template
@@ -64,6 +66,7 @@ type Server struct {
 	credsNewTmpl      *template.Template
 	mapTmpl           *template.Template
 	settingsTmpl      *template.Template
+	statsTmpl         *template.Template
 }
 
 func NewServer(
@@ -97,6 +100,7 @@ func NewServer(
 		credsNewTmpl:      page("credential_new.html"),
 		mapTmpl:           page("map.html"),
 		settingsTmpl:      page("settings.html"),
+		statsTmpl:         page("stats.html"),
 	}
 }
 
@@ -124,6 +128,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /sources/{id}/edit", s.handleSourceEditGet)
 	mux.HandleFunc("POST /sources/{id}/edit", s.handleSourceEditPost)
 	mux.HandleFunc("POST /sources/preview", s.handleSourcePreview)
+	mux.HandleFunc("POST /sources/ado/workitemtypes", s.handleAdoWorkItemTypes)
+	mux.HandleFunc("POST /sources/github/issuetypes", s.handleGitHubIssueTypes)
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
 	mux.HandleFunc("POST /sources/{id}/toggle", s.handleSourceToggle)
 	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)
@@ -147,6 +153,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/map-data", s.handleMapData)
 
 	// Settings (see routes_settings.go)
+	mux.HandleFunc("GET /stats", s.handleStats)
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("POST /settings/embedding", s.handleSettingsEmbedding)
 	mux.HandleFunc("POST /settings/qdrant", s.handleSettingsQdrant)

@@ -1,5 +1,5 @@
 // Package sourcemgmt holds the source-config rules shared by the web UI and
-// the manage_sources MCP tool: which source types and config keys exist, how
+// the manage_source MCP tool: which source types and config keys exist, how
 // a config is validated, and how saving or deleting a source keeps its
 // indexed vectors consistent.
 package sourcemgmt
@@ -80,7 +80,7 @@ var PresetConfigKeys = []string{
 // internal/sources/github.go). Token names a stored credential.
 var GitHubConfigKeys = []string{
 	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "PathFilter",
-	"Top", "FetchMode", "Labels", "Workflow", "Days", "VerifySSL",
+	"Top", "FetchMode", "WorkItemTypes", "Labels", "Workflow", "Days", "VerifySSL",
 }
 
 // Providers are the values of the Provider config key: "api" runs the

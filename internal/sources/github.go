@@ -16,6 +16,9 @@
 //	             (issues)
 //	Labels       issues: comma-separated labels; an issue matching any of
 //	             them is fetched (default: every issue)
+//	WorkItemTypes issues: comma-separated organization issue types (Bug,
+//	             Feature, …); an issue of any of them is fetched (default:
+//	             every issue, typed or not)
 //	Workflow     pipeline runs: workflow file name (ci.yml) or numeric ID
 //	Days         pipeline runs: completed runs of the last N days
 //	VerifySSL    "false" to skip TLS verification (self-hosted servers)
@@ -38,6 +41,7 @@ import (
 
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/stats"
 )
 
 // githubPageSize is the per_page requested from GitHub's paged listings (its
@@ -76,6 +80,8 @@ func newGitHubSource(src *models.SourceDefinition, store secrets.Reader) (*GitHu
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, // self-hosted servers with private CAs
 		}
 	}
+	// Counts requests (and rate-limit refusals) for the sync's statistics.
+	g.client.Transport = stats.CountingTransport(g.client.Transport)
 	return g, nil
 }
 
@@ -141,21 +147,7 @@ func (g *GitHubSource) top() int {
 // get performs an authenticated GET; accept overrides the JSON media type
 // (e.g. raw blob content).
 func (g *GitHubSource) get(ctx context.Context, reqURL, accept string) ([]byte, http.Header, error) {
-	if accept == "" {
-		accept = "application/vnd.github+json"
-	}
-	token := ""
-	if name := g.src.GetConfig("Token"); name != "" && g.secrets != nil {
-		token = g.secrets.GetValue(name)
-	}
-	return getWithRetry(ctx, g.client, reqURL, func(req *http.Request) {
-		req.Header.Set("Accept", accept)
-		if token != "" {
-			// "token" rather than "Bearer": every GitHub Enterprise Server
-			// version accepts it for personal access tokens.
-			req.Header.Set("Authorization", "token "+token)
-		}
-	})
+	return getWithRetry(ctx, g.client, reqURL, g.prepare(accept))
 }
 
 func (g *GitHubSource) getJSON(ctx context.Context, reqURL string, v any) (http.Header, error) {

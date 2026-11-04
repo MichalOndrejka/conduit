@@ -1,6 +1,9 @@
 package sources
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -80,42 +84,72 @@ func TestGitHubBases(t *testing.T) {
 	}
 }
 
+// repoTarball builds a gzipped tarball laid out as GitHub's: a pax global
+// header, then every entry under one {owner}-{repo}-{sha}/ directory.
+func repoTarball(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	write := func(h *tar.Header, body string) {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(&tar.Header{Typeflag: tar.TypeXGlobalHeader, Name: "pax_global_header", PAXRecords: map[string]string{"comment": "abc123"}}, "")
+	write(&tar.Header{Typeflag: tar.TypeDir, Name: "acme-app-abc123/", Mode: 0o755}, "")
+	write(&tar.Header{Typeflag: tar.TypeSymlink, Name: "acme-app-abc123/docs/link.md", Linkname: "guide.md", Mode: 0o777}, "")
+	for name, body := range files {
+		write(&tar.Header{Typeflag: tar.TypeReg, Name: "acme-app-abc123/" + name, Size: int64(len(body)), Mode: 0o644}, body)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 func TestGitHubFetchFiles(t *testing.T) {
 	f := newFakeGitHub(t)
 	f.handleJSON("", map[string]any{"default_branch": "main"})
-	f.HandleFunc("/api/v3/repos/acme/app/commits/main", func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Accept") != "application/vnd.github.sha" {
-			t.Errorf("commit SHA requested with Accept %q", r.Header.Get("Accept"))
-		}
-		fmt.Fprint(w, "abc123")
+	tarball := repoTarball(t, map[string]string{
+		"docs/guide.md": "# Guide\nhello",
+		"docs/logo.png": "\x89PN\x00",
+		"docs/huge.md":  strings.Repeat("x", maxRepoFileBytes+1),
+		"main.go":       "package main",
 	})
-	f.handleJSON("/git/trees/abc123", map[string]any{"tree": []map[string]any{
-		{"path": "docs", "type": "tree", "sha": "t1"},
-		{"path": "docs/guide.md", "type": "blob", "sha": "b1", "size": 12},
-		{"path": "docs/logo.png", "type": "blob", "sha": "b2", "size": 4},
-		{"path": "docs/huge.md", "type": "blob", "sha": "b3", "size": maxRepoFileBytes + 1},
-		{"path": "main.go", "type": "blob", "sha": "b4", "size": 10},
-	}})
-	f.HandleFunc("/api/v3/repos/acme/app/git/blobs/{sha}", func(w http.ResponseWriter, r *http.Request) {
-		switch r.PathValue("sha") {
-		case "b1":
-			fmt.Fprint(w, "# Guide\nhello")
-		case "b2":
-			w.Write([]byte{0x89, 'P', 'N', 0})
-		default:
-			t.Errorf("unexpected blob %s fetched", r.PathValue("sha"))
-		}
+	var requests atomic.Int32
+	// Like github.com, the API redirects to a separate download URL.
+	f.HandleFunc("/api/v3/repos/acme/app/tarball/main", func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		http.Redirect(w, r, "/codeload/acme/app/tar.gz/main", http.StatusFound)
+	})
+	f.HandleFunc("/codeload/acme/app/tar.gz/main", func(w http.ResponseWriter, r *http.Request) {
+		w.Write(tarball)
 	})
 
 	docs, err := f.source(t, models.SourceDocumentation, map[string]string{"PathFilter": "docs/*"}).FetchDocuments(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 3 {
-		t.Fatalf("got %d docs, want 3 (main.go filtered out)", len(docs))
+	if len(docs) != 4 {
+		t.Fatalf("got %d docs, want 4 (main.go filtered out)", len(docs))
+	}
+	if requests.Load() != 1 {
+		t.Errorf("tarball requested %d times, want 1", requests.Load())
 	}
 	if f.auth != "token tok" { // handlers are done: FetchDocuments returned
 		t.Errorf("Authorization = %q", f.auth)
+	}
+	for i := 1; i < len(docs); i++ {
+		if docs[i-1].Properties["title"] > docs[i].Properties["title"] {
+			t.Errorf("docs not sorted by path: %q before %q", docs[i-1].Properties["title"], docs[i].Properties["title"])
+		}
 	}
 	byTitle := map[string]models.SourceDocument{}
 	for _, d := range docs {
@@ -136,15 +170,52 @@ func TestGitHubFetchFiles(t *testing.T) {
 			t.Errorf("%s text = %q, want it skipped", p, byTitle[p].Text)
 		}
 	}
+	if got := byTitle["docs/link.md"].Text; got != "docs/link.md\n\nguide.md" {
+		t.Errorf("symlink text = %q", got)
+	}
 }
 
-func TestGitHubFetchFilesFailsOnTruncatedTree(t *testing.T) {
+// A download cut off part-way is restarted, and the retry's files replace
+// the partial ones rather than adding to them.
+func TestGitHubFetchFilesRetriesCutDownload(t *testing.T) {
+	defer func(d time.Duration) { retryBaseDelay = d }(retryBaseDelay)
+	retryBaseDelay = time.Millisecond
+
 	f := newFakeGitHub(t)
-	f.HandleFunc("/api/v3/repos/acme/app/commits/dev", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "abc") })
-	f.handleJSON("/git/trees/abc", map[string]any{"tree": []any{}, "truncated": true})
+	files := map[string]string{}
+	for i := range 50 {
+		files[fmt.Sprintf("src/f%02d.go", i)] = strings.Repeat(fmt.Sprintf("line %d\n", i), 200)
+	}
+	tarball := repoTarball(t, files)
+	var requests atomic.Int32
+	f.HandleFunc("/api/v3/repos/acme/app/tarball/dev", func(w http.ResponseWriter, r *http.Request) {
+		if requests.Add(1) == 1 {
+			w.Write(tarball[:len(tarball)/2])
+			return
+		}
+		w.Write(tarball)
+	})
+
+	docs, err := f.source(t, models.SourceCodeRepo, map[string]string{"Branch": "dev"}).FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 2 {
+		t.Errorf("tarball requested %d times, want 2", requests.Load())
+	}
+	if len(docs) != 51 { // 50 files + the symlink
+		t.Errorf("got %d docs, want 51", len(docs))
+	}
+}
+
+func TestGitHubFetchFilesReportsHTTPError(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.HandleFunc("/api/v3/repos/acme/app/tarball/dev", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
 	_, err := f.source(t, models.SourceCodeRepo, map[string]string{"Branch": "dev"}).FetchDocuments(context.Background(), nil)
-	if err == nil || !strings.Contains(err.Error(), "more files") {
-		t.Errorf("err = %v, want a truncated-tree error", err)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 404") {
+		t.Errorf("err = %v, want an HTTP 404 error", err)
 	}
 }
 
@@ -416,5 +487,74 @@ func TestGitHubRunsToleratesNewRunDuringListing(t *testing.T) {
 	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "7"}).FetchDocuments(context.Background(), nil)
 	if err != nil || len(docs) != 2 {
 		t.Errorf("got %d docs, err %v; want both runs", len(docs), err)
+	}
+}
+
+// Issue types are queried one per request and checked on each issue too: a
+// server without issue types ignores the type parameter and returns every
+// issue, which must not leak untyped or other-typed issues in.
+func TestGitHubFetchIssuesByType(t *testing.T) {
+	f := newFakeGitHub(t)
+	issue := func(n int, typ string) map[string]any {
+		m := map[string]any{"number": n, "title": fmt.Sprintf("Issue %d", n), "state": "open", "user": map[string]any{"login": "bob"}}
+		if typ != "" {
+			m["type"] = map[string]any{"name": typ}
+		}
+		return m
+	}
+	var gotTypes []string
+	f.HandleFunc("/api/v3/repos/acme/app/issues", func(w http.ResponseWriter, r *http.Request) {
+		gotTypes = append(gotTypes, r.URL.Query().Get("type"))
+		// Behave like a server that ignores the type parameter.
+		_ = json.NewEncoder(w).Encode([]any{issue(4, "Task"), issue(3, "bug"), issue(2, ""), issue(1, "Feature")})
+	})
+
+	docs, err := f.source(t, models.SourceWorkItemQuery, map[string]string{"WorkItemTypes": "Bug, Feature"}).FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(gotTypes, ",") != "Bug,Feature" {
+		t.Errorf("type parameters = %v, want Bug then Feature", gotTypes)
+	}
+	var got []string
+	for _, d := range docs {
+		got = append(got, d.Properties["type"])
+	}
+	if strings.Join(got, ",") != "bug,Feature" {
+		t.Errorf("doc types = %v, want issue 3 (bug) and issue 1 (Feature)", got)
+	}
+	if !strings.Contains(docs[0].Text, "Type: bug") {
+		t.Errorf("text lacks the type:\n%s", docs[0].Text)
+	}
+}
+
+func TestGitHubIssueTypes(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.HandleFunc("/api/v3/orgs/acme/issue-types", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]any{
+			map[string]any{"name": "Task", "is_enabled": true},
+			map[string]any{"name": "Bug"},
+			map[string]any{"name": "Retired", "is_enabled": false},
+		})
+	})
+	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceWorkItemQuery, nil).src, fakeSecrets{"gh": "tok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available || strings.Join(types, ",") != "Bug,Task" {
+		t.Errorf("types = %v, available = %v; want Bug,Task", types, available)
+	}
+	if f.auth != "token tok" {
+		t.Errorf("Authorization = %q", f.auth)
+	}
+}
+
+// A personal account (or a server without issue types) answers 404: no
+// types, not an error.
+func TestGitHubIssueTypesUnavailable(t *testing.T) {
+	f := newFakeGitHub(t)
+	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceWorkItemQuery, nil).src, nil)
+	if err != nil || available || len(types) != 0 {
+		t.Errorf("types = %v, available = %v, err = %v; want none, unavailable, no error", types, available, err)
 	}
 }

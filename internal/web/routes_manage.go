@@ -24,18 +24,6 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
 
-// workItemTypePresets seeds the work-item-type tile picker for each
-// dual-purpose source with types relevant to that domain — the only types
-// selectable in the UI. A source saved before this was the only option may
-// still carry a WorkItemTypes value outside these presets; the picker
-// renders an extra tile for it (see initWorkItemTypes in source_form.html)
-// so re-opening the form doesn't silently drop it.
-var workItemTypePresets = map[string][]string{
-	models.SourceWorkItemQuery: {"Epic", "Feature", "User Story", "Bug", "Task", "Issue"},
-	models.SourceRequirements:  {"Product Requirement", "Software Requirements", "Risk", "Architecture Item"},
-	models.SourceTestCase:      {"Test Case"},
-}
-
 // adoRepoNamePattern extracts the repo name from a legacy AdoResource preset
 // value (e.g. "git/repositories/MyRepo/items" or ".../commits") — sources
 // saved before the dedicated repo-name field existed still pre-fill it.
@@ -97,14 +85,13 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 	}
 
 	s.render(w, s.sourceFormTmpl, "base", map[string]any{
-		"Active":              "sources",
-		"Source":              src,
-		"IsNew":               src.ID == "",
-		"Error":               errMsg,
-		"TypeLabel":           sourcemgmt.Label(src.Type),
-		"Tab":                 tab,
-		"Credentials":         creds,
-		"WorkItemTypePresets": workItemTypePresets[src.Type],
+		"Active":      "sources",
+		"Source":      src,
+		"IsNew":       src.ID == "",
+		"Error":       errMsg,
+		"TypeLabel":   sourcemgmt.Label(src.Type),
+		"Tab":         tab,
+		"Credentials": creds,
 	})
 }
 
@@ -309,6 +296,36 @@ func (s *Server) handleSourcePreview(w http.ResponseWriter, r *http.Request) {
 		"total":      total,
 		"totalExact": totalExact,
 	})
+}
+
+// handleAdoWorkItemTypes lists the work item types of the Azure DevOps
+// project named in the form (organization, project, API version and
+// credential, unsaved), for the work-item-type picker.
+func (s *Server) handleAdoWorkItemTypes(w http.ResponseWriter, r *http.Request) {
+	src := sourceFromForm(r, &models.SourceDefinition{})
+	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
+	defer cancel()
+	types, err := sources.AdoWorkItemTypes(ctx, src, s.secrets)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "types": types})
+}
+
+// handleGitHubIssueTypes lists the issue types of the GitHub owner named in
+// the form (server URL, owner, repository and token, unsaved), for the
+// issue-type picker. available is false when the owner has no issue types.
+func (s *Server) handleGitHubIssueTypes(w http.ResponseWriter, r *http.Request) {
+	src := sourceFromForm(r, &models.SourceDefinition{})
+	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
+	defer cancel()
+	types, available, err := sources.GitHubIssueTypes(ctx, src, s.secrets)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "types": types, "available": available})
 }
 
 // handleSourceDelete removes the source and its vectors, mirroring

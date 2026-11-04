@@ -896,3 +896,66 @@ func TestHandleMapDataQdrantUnreachableReturnsEmptyWithError(t *testing.T) {
 		t.Errorf("payload = %+v, want empty points and a qdrant_error while health is not yet ready", payload)
 	}
 }
+
+func TestAdoWorkItemTypesEndpoint(t *testing.T) {
+	h := newHarness(t)
+	ado := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/workitemtypes"):
+			_, _ = w.Write([]byte(`{"value":[{"name":"Product Backlog Item"},{"name":"Impediment"}]}`))
+		case strings.HasSuffix(r.URL.Path, "/workitemtypecategories"):
+			_, _ = w.Write([]byte(`{"value":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ado.Close()
+
+	resp := h.postForm("/sources/ado/workitemtypes", url.Values{
+		"type": {"work-item"}, "provider": {"api"}, "AdoOrg": {ado.URL}, "AdoProject": {"Proj"},
+	})
+	var out struct {
+		Ok    bool     `json:"ok"`
+		Types []string `json:"types"`
+		Error string   `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !out.Ok || strings.Join(out.Types, ",") != "Impediment,Product Backlog Item" {
+		t.Errorf("response = %+v", out)
+	}
+}
+
+func TestGitHubIssueTypesEndpoint(t *testing.T) {
+	h := newHarness(t)
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v3/orgs/acme/issue-types" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`[{"name":"Feature"},{"name":"Bug"}]`))
+	}))
+	defer gh.Close()
+
+	post := func(owner string) (ok, available bool, types []string) {
+		resp := h.postForm("/sources/github/issuetypes", url.Values{
+			"type": {"work-item"}, "provider": {"github"}, "GitHubUrl": {gh.URL}, "GitHubOwner": {owner}, "GitHubRepo": {"app"},
+		})
+		var out struct {
+			Ok        bool     `json:"ok"`
+			Available bool     `json:"available"`
+			Types     []string `json:"types"`
+		}
+		if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.Ok, out.Available, out.Types
+	}
+	if ok, available, types := post("acme"); !ok || !available || strings.Join(types, ",") != "Bug,Feature" {
+		t.Errorf("acme: ok=%v available=%v types=%v", ok, available, types)
+	}
+	if ok, available, types := post("someone"); !ok || available || len(types) != 0 {
+		t.Errorf("personal account: ok=%v available=%v types=%v, want ok and unavailable", ok, available, types)
+	}
+}

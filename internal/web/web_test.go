@@ -125,6 +125,7 @@ type harness struct {
 	cfg     *config.AppConfig
 	qd      *fakeQdrant
 	health  *health.Monitor
+	server  *Server
 }
 
 // newHarness wires a real *Server (real store/secrets/sync/health, real HTTP
@@ -206,7 +207,7 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 
 	return &harness{
 		t: t, http: httpSrv, client: client,
-		sources: sourceStore, secrets: secretsStore, cfg: cfg, qd: qd, health: healthMon,
+		sources: sourceStore, secrets: secretsStore, cfg: cfg, qd: qd, health: healthMon, server: srv,
 	}
 }
 

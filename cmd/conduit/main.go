@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/embedstate"
+	"github.com/MichalOndrejka/conduit/internal/eval"
 	"github.com/MichalOndrejka/conduit/internal/health"
 	"github.com/MichalOndrejka/conduit/internal/mcptools"
 	"github.com/MichalOndrejka/conduit/internal/memory"
@@ -27,6 +29,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/setup"
 	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
+	"github.com/MichalOndrejka/conduit/internal/stats"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncctl"
 	"github.com/MichalOndrejka/conduit/internal/syncsvc"
@@ -57,6 +60,18 @@ func main() {
 	//   conduit setup
 	if len(os.Args) > 1 && os.Args[1] == "setup" {
 		if err := runSetup(cfg); err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+	// Accuracy evals of source layouts (see internal/eval). Needs Qdrant and
+	// the embedding model; the agent run also the Claude API.
+	//   conduit eval <retrieval|agent|export|find> [flags]
+	if len(os.Args) > 1 && os.Args[1] == "eval" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := eval.Run(ctx, cfg, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+			fmt.Fprintln(os.Stderr, "eval:", err)
 			os.Exit(1)
 		}
 		return
@@ -126,8 +141,22 @@ func main() {
 		return
 	}
 
+	// ── Stats history (see internal/stats) ──────────────────────────────────
+	// Recorded per build (commit + uncommitted changes) in the data
+	// directory and kept across restarts, so versions can be compared on
+	// the Stats page. Failing to open it only turns stats off.
+	build := stats.DetectBuild(version)
+	statsRec, err := stats.Open(dataDir, build, statsKeepBuilds())
+	if err != nil {
+		log.Printf("warning: stats disabled: %v", err)
+		statsRec = nil
+	}
+	defer statsRec.Close()
+	log.Printf("build %s", build.Label())
+	syncSvc.SetRecorder(statsRec)
+
 	// ── MCP server (streamable HTTP at /mcp) ───────────────────────────────
-	mcpServer := server.NewMCPServer("Conduit", version)
+	mcpServer := server.NewMCPServer("Conduit", version, server.WithToolHandlerMiddleware(statsRec.ToolMiddleware))
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
 	mcptools.RegisterSyncTool(mcpServer, sourceStore, syncSvc)
 	mcptools.RegisterPullRequestTool(mcpServer, sourceStore, secretsStore)
@@ -137,6 +166,7 @@ func main() {
 	// ── HTTP wiring ─────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
 	webServer := web.NewServer(cfg, sourceStore, vectors, memorySvc, secretsStore, syncSvc, healthMon)
+	webServer.SetStats(statsRec)
 	webServer.Routes(mux)
 	mux.Handle("/mcp", mcpHTTP)
 
@@ -274,4 +304,13 @@ func runSearchCLI(searchSvc *rag.SearchService, args []string) {
 		log.Fatal(err)
 	}
 	fmt.Println(string(out))
+}
+
+// statsKeepBuilds is how many builds the stats history keeps:
+// CONDUIT_STATS_KEEP_BUILDS, or stats.DefaultKeepBuilds.
+func statsKeepBuilds() int {
+	if n, err := strconv.Atoi(os.Getenv("CONDUIT_STATS_KEEP_BUILDS")); err == nil && n > 0 {
+		return n
+	}
+	return stats.DefaultKeepBuilds
 }

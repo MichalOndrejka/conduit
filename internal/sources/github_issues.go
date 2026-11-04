@@ -30,6 +30,11 @@ type githubIssue struct {
 	Milestone *struct {
 		Title string `json:"title"`
 	} `json:"milestone"`
+	// Type is the organization issue type (Bug, Feature, …); nil when the
+	// issue has none or the server predates issue types.
+	Type *struct {
+		Name string `json:"name"`
+	} `json:"type"`
 	Comments    int    `json:"comments"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
@@ -119,36 +124,56 @@ func (g *GitHubSource) fetchIssues(ctx context.Context, progress ProgressCallbac
 // during listing would jump onto a page already read and be missed, while a
 // new issue only repeats one already listed. GitHub's labels parameter
 // requires all given labels, so each configured label is queried separately
-// and the results merged: an issue with any of them is included.
+// and the results merged: an issue with any of them is included. Issue types
+// (WorkItemTypes) are queried the same way, one per request, and combine
+// with labels: an issue must have one of the labels and one of the types.
+// The type is also checked on each returned issue, since a server without
+// issue types ignores the type parameter rather than rejecting it.
 func (g *GitHubSource) listIssues(ctx context.Context) ([]githubIssue, error) {
 	labels := parsePathFilter(g.src.GetConfig("Labels"))
 	if len(labels) == 0 {
 		labels = []string{""}
 	}
+	types := parseWorkItemTypes(g.src.GetConfig("WorkItemTypes"))
+	wantType := make(map[string]bool, len(types))
+	for _, t := range types {
+		wantType[strings.ToLower(t)] = true
+	}
+	if len(types) == 0 {
+		types = []string{""}
+	}
 	top := g.top()
 	byNumber := map[int]githubIssue{}
-	for _, label := range labels {
-		listURL := g.repoAPI() + "/issues?state=all&sort=created&direction=desc"
-		if label != "" {
-			listURL += "&labels=" + url.QueryEscape(label)
-		}
-		found := 0
-		err := g.pages(ctx, listURL, func(data []byte) (int, bool, error) {
-			var page []githubIssue
-			if err := json.Unmarshal(data, &page); err != nil {
-				return 0, false, err
+	for _, issueType := range types {
+		for _, label := range labels {
+			listURL := g.repoAPI() + "/issues?state=all&sort=created&direction=desc"
+			if label != "" {
+				listURL += "&labels=" + url.QueryEscape(label)
 			}
-			for _, is := range page {
-				if is.PullRequest != nil {
-					continue
+			if issueType != "" {
+				listURL += "&type=" + url.QueryEscape(issueType)
+			}
+			found := 0
+			err := g.pages(ctx, listURL, func(data []byte) (int, bool, error) {
+				var page []githubIssue
+				if err := json.Unmarshal(data, &page); err != nil {
+					return 0, false, err
 				}
-				byNumber[is.Number] = is
-				found++
+				for _, is := range page {
+					if is.PullRequest != nil {
+						continue
+					}
+					if len(wantType) > 0 && (is.Type == nil || !wantType[strings.ToLower(is.Type.Name)]) {
+						continue
+					}
+					byNumber[is.Number] = is
+					found++
+				}
+				return len(page), top == 0 || found < top, nil
+			})
+			if err != nil {
+				return nil, fmt.Errorf("listing issues: %w", err)
 			}
-			return len(page), top == 0 || found < top, nil
-		})
-		if err != nil {
-			return nil, fmt.Errorf("listing issues: %w", err)
 		}
 	}
 	issues := make([]githubIssue, 0, len(byNumber))
@@ -189,9 +214,17 @@ func (g *GitHubSource) issueDocument(is githubIssue, comments []githubComment) m
 		state += " (" + strings.ReplaceAll(is.StateReason, "_", " ") + ")"
 	}
 
+	issueType := "Issue"
+	if is.Type != nil && is.Type.Name != "" {
+		issueType = is.Type.Name
+	}
+
 	var sb strings.Builder
 	sb.WriteString(is.Title + "\n")
 	writeField(&sb, "Issue", "#"+strconv.Itoa(is.Number))
+	if issueType != "Issue" {
+		writeField(&sb, "Type", issueType)
+	}
 	writeField(&sb, "State", state)
 	writeField(&sb, "Author", is.User.Login)
 	writeField(&sb, "Assignees", strings.Join(assignees, ", "))
@@ -215,12 +248,12 @@ func (g *GitHubSource) issueDocument(is githubIssue, comments []githubComment) m
 	}
 	props := map[string]string{
 		"title":   is.Title,
-		"type":    "Issue",
+		"type":    issueType,
 		"state":   is.State,
 		"web_url": webURL,
 	}
 	filters := g.scopeFilters(props)
-	filters.Add(models.FilterWorkItemType, "Issue")
+	filters.Add(models.FilterWorkItemType, issueType)
 	filters.Add(models.FilterState, is.State)
 	filters.Add(models.FilterAssignedTo, assignees...)
 	filters.Add(models.FilterTag, labels...)

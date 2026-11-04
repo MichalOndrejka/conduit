@@ -61,6 +61,9 @@ type IndexBatchOptions struct {
 	// to an LLM as one oversized call. A nil entry for a given document falls
 	// back to chunking that document's text normally.
 	PrecomputedChunks [][]models.TextChunk
+	// Chunks, when non-nil, receives the number of chunks written once the
+	// batch is stored (for sync statistics).
+	Chunks *int
 }
 
 func (d *DocumentIndexer) Index(ctx context.Context, collection string, doc models.SourceDocument) error {
@@ -266,6 +269,9 @@ dispatch:
 		for _, p := range batch {
 			writtenIDs = append(writtenIDs, p.ID)
 		}
+	}
+	if opts.Chunks != nil {
+		*opts.Chunks = len(points)
 	}
 	return nil
 }

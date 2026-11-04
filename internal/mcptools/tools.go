@@ -16,6 +16,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
+	"github.com/MichalOndrejka/conduit/internal/stats"
 )
 
 // chunkQuery is one mode of the "request" oneOf parameter every search tool
@@ -279,6 +280,7 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+			recordSearch(ctx, collection, req.GetArguments(), query, payload)
 			data, err := json.Marshal(payload)
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
@@ -337,6 +339,12 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		if tc := stats.ToolCallFrom(ctx); tc != nil {
+			tc.Query, tc.Results, tc.Counted = query, len(results), true
+			for _, r := range results {
+				tc.Hits = append(tc.Hits, rag.Truncate(r.Situation, 200))
+			}
+		}
 		var payload any
 		if len(results) == 0 {
 			payload = map[string]any{"experience": []any{}, "note": "No relevant experience found."}
@@ -377,4 +385,46 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		data, _ := json.Marshal(map[string]string{"status": "stored", "entry_id": entryID})
 		return mcp.NewToolResultText(string(data)), nil
 	})
+}
+
+// recordSearch adds a search call's details to the stats record, when stats
+// are on: what was asked, with which filters, and how many results came back.
+func recordSearch(ctx context.Context, collection string, args map[string]any, query chunkQuery, payload map[string]any) {
+	tc := stats.ToolCallFrom(ctx)
+	if tc == nil {
+		return
+	}
+	tc.Collection, tc.Counted = collection, true
+	switch q := query.(type) {
+	case semanticSearchRequest:
+		tc.Query, tc.Page = q.Query, q.Page
+	case patternSearchRequest:
+		tc.Query, tc.Page = q.Pattern, q.Page
+	case retrieveChunkRequest:
+		tc.Query = fmt.Sprintf("%s #%d", q.SourceDocID, q.ChunkIndex)
+	}
+	if raw, ok := args["request"].(map[string]any); ok {
+		if f, ok := raw["filters"].(map[string]any); ok {
+			tc.Filters = map[string][]string{}
+			for field, v := range f {
+				switch t := v.(type) {
+				case string:
+					tc.Filters[field] = []string{t}
+				case []any:
+					for _, x := range t {
+						if s, ok := x.(string); ok {
+							tc.Filters[field] = append(tc.Filters[field], s)
+						}
+					}
+				}
+			}
+		}
+	}
+	switch r := payload["results"].(type) {
+	case []models.SearchResult:
+		tc.Results = len(r)
+	case []any:
+		tc.Results = len(r)
+	}
+	tc.HasMore, _ = payload["has_more"].(bool)
 }
