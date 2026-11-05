@@ -216,6 +216,16 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		failedOutcome("fetch", err)
 		return
 	}
+	// The token owner, so a "me" filter resolves from the cache. Not knowing
+	// it only leaves "me" unresolvable for this source; it doesn't fail the
+	// sync.
+	if ids, ok := impl.(sources.IdentitySource); ok {
+		if identity, err := ids.FetchIdentity(ctx); err != nil {
+			log.Printf("warning: reading the token owner of source %s: %v", sourceID, err)
+		} else {
+			src.Identity = identity
+		}
+	}
 
 	// ── Phase 1.5: optional LLM preprocessing (summarize before indexing) ──
 	// Built per-sync so a Settings change applies without a restart (the web

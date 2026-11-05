@@ -118,7 +118,7 @@ func (q patternSearchRequest) resolve(ctx context.Context, search *rag.SearchSer
 // parseChunkQuery decodes the required "request" argument into the concrete
 // chunkQuery its "mode" field selects; fields are the filters the calling
 // tool's collection supports.
-func parseChunkQuery(args map[string]any, fields []filterField) (chunkQuery, error) {
+func parseChunkQuery(args map[string]any, collection string, fields []filterField, sorts []sortField, me []string) (chunkQuery, error) {
 	raw, ok := args["request"].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf(`missing required "request" object argument`)
@@ -138,7 +138,7 @@ func parseChunkQuery(args map[string]any, fields []filterField) (chunkQuery, err
 		if page < 1 {
 			page = 1
 		}
-		filters, err := parseFilters(raw["filters"], fields)
+		filters, err := parseFiltersFor(raw["filters"], fields, me)
 		if err != nil {
 			return nil, err
 		}
@@ -166,7 +166,7 @@ func parseChunkQuery(args map[string]any, fields []filterField) (chunkQuery, err
 		if page < 1 {
 			page = 1
 		}
-		filters, err := parseFilters(raw["filters"], fields)
+		filters, err := parseFiltersFor(raw["filters"], fields, me)
 		if err != nil {
 			return nil, err
 		}
@@ -182,17 +182,19 @@ func parseChunkQuery(args map[string]any, fields []filterField) (chunkQuery, err
 			matcher = func(text string) bool { return strings.Contains(text, pattern) }
 		}
 		return patternSearchRequest{Pattern: pattern, Filters: filters, Page: page, Matcher: matcher}, nil
+	case "list":
+		return parseListRequest(raw, fields, sorts, me, collection)
 	default:
-		return nil, fmt.Errorf(`request.mode must be "semantic_search", "retrieve_chunk", or "pattern_search", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "semantic_search", "pattern_search", "list" or "retrieve_chunk", got %q`, mode)
 	}
 }
 
 // requestParamSchema is a discriminated union (JSON Schema oneOf) of the
 // three chunkQuery shapes above, keyed by a "mode" field; fields are the
 // filters the tool's collection supports.
-func requestParamSchema(fields []filterField) map[string]any {
-	return map[string]any{
-		"description": `A ranked semantic search, an exact text/regex search, or a deterministic fetch of one exact chunk by ID.`,
+func requestParamSchema(fields []filterField, sorts []sortField, withList bool) map[string]any {
+	schema := map[string]any{
+		"description": `A ranked semantic search, an exact text/regex search, a sorted listing of documents, or a deterministic fetch of one exact chunk by ID.`,
 		"oneOf": []any{
 			map[string]any{
 				"type": "object",
@@ -230,11 +232,15 @@ func requestParamSchema(fields []filterField) map[string]any {
 			},
 		},
 	}
+	if withList {
+		schema["oneOf"] = append(schema["oneOf"].([]any), listModeSchema(fields, sorts))
+	}
+	return schema
 }
 
-func withRequestParam(fields []filterField) mcp.ToolOption {
+func withRequestParam(fields []filterField, sorts []sortField) mcp.ToolOption {
 	return func(t *mcp.Tool) {
-		t.InputSchema.Properties["request"] = requestParamSchema(fields)
+		t.InputSchema.Properties["request"] = requestParamSchema(fields, sorts, true)
 		t.InputSchema.Required = append(t.InputSchema.Required, "request")
 	}
 }
@@ -268,13 +274,13 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		`source item (work item, file, commit, wiki page, pipeline run) — cite it as a markdown link, e.g. [title](web_url), ` +
 		`whenever you reference that result in an answer.`
 	makeSearchTool := func(collection, name, description string) {
-		fields := collectionFilters[collection]
+		fields, sorts := collectionFilters[collection], collectionSorts[collection]
 		tool := mcp.NewTool(name,
-			mcp.WithDescription(description+requestModeNote),
-			withRequestParam(fields),
+			mcp.WithDescription(description+requestModeNote+listModeNote(sorts)),
+			withRequestParam(fields, sorts),
 		)
 		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			query, err := parseChunkQuery(req.GetArguments(), fields)
+			query, err := parseChunkQuery(req.GetArguments(), collection, fields, sorts, search.Identities())
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
@@ -282,6 +288,7 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}
+			addAsOf(payload, search)
 			recordSearch(ctx, collection, req.GetArguments(), query, payload)
 			data, err := json.Marshal(payload)
 			if err != nil {
@@ -319,7 +326,13 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			"the source_doc_id of their run document. The run summary alone never says why a step failed: to explain a "+
 			"specific run (a link with buildId=…, a run number, a run found by an earlier search), search with "+
 			`"filters":{"build_id":"<properties.build_id>"} to get the run together with all its step logs and test `+
-			"documents, then page or retrieve_chunk through the logs. Filter by run result, branch, build_id or commit.")
+			"documents, then page or retrieve_chunk through the logs. "+
+			`For the latest runs use the list mode with filters.type "run" `+
+			`(e.g. last failed build on main: {"mode":"list","filters":{"type":"run","result":"failed","branch":"main"}}); `+
+			`builds running at the last sync: filters.status "inProgress" with order_by "queued"; what's deployed: type "deployment" `+
+			`with filters.environment; flaky or failing tests: type "test_history" with order_by "last_failed" or "fail_count"; the `+
+			`first run containing a commit: filters.contains_commit with direction "asc"; failures of a stage, job or step: `+
+			`filters.failed_stage / failed_job / failed_step. Each run lists the commits it built since the previous run.`)
 
 	// ── Experience tools ───────────────────────────────────────────────────
 

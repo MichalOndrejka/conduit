@@ -189,6 +189,9 @@ dispatch:
 			if d := job.doc.Filters.Date; !d.IsZero() {
 				payload[models.FilterDateKey] = d.Unix()
 			}
+			for k, v := range job.doc.Sort {
+				payload[models.SortKey(k)] = v
+			}
 			points[jobIdx] = Point{ID: pointID, Vector: vector, Payload: payload}
 
 			mu.Lock()

@@ -31,7 +31,7 @@ func pullRequestRequestSchema() map[string]any {
 		props["mode"] = mode(m)
 		return map[string]any{"type": "object", "properties": props, "required": append([]string{"mode"}, required...)}
 	}
-	indexed, _ := requestParamSchema(collectionFilters[models.CollectionPullRequests])["oneOf"].([]any)
+	indexed, _ := requestParamSchema(collectionFilters[models.CollectionPullRequests], nil, false)["oneOf"].([]any)
 	return map[string]any{
 		"description": "Search embedded pull requests by meaning or text, list pull requests, or read one pull request's " +
 			"details, changed files, diffs, comment threads, iterations or commits.",
@@ -118,7 +118,7 @@ func RegisterPullRequestTool(s *server.MCPServer, search *rag.SearchService, src
 // search tools do.
 func searchIndexedPullRequests(ctx context.Context, search *rag.SearchService, args map[string]any) (*mcp.CallToolResult, error) {
 	collection := models.CollectionPullRequests
-	query, err := parseChunkQuery(args, collectionFilters[collection])
+	query, err := parseChunkQuery(args, collection, collectionFilters[collection], nil, search.Identities())
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -126,6 +126,7 @@ func searchIndexedPullRequests(ctx context.Context, search *rag.SearchService, a
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
+	addAsOf(payload, search)
 	if q, ok := query.(semanticSearchRequest); ok && q.Page == 1 {
 		if results, isEmpty := payload["results"].([]any); isEmpty && len(results) == 0 {
 			payload["note"] = "No embedded pull request matched — add or sync a Pull Requests source for the repository, " +

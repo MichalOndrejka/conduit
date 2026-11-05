@@ -161,9 +161,44 @@ func (g *GitHubSource) fetchWorkflowRuns(ctx context.Context, progress ProgressC
 		return nil, err
 	}
 
+	// The form's preview (Top) stops at the runs themselves.
+	changes := make([][]githubCompareCommit, n)
+	var pending []githubRun
+	since := time.Now().UTC().AddDate(0, 0, -days)
+	if g.top() == 0 {
+		if progress != nil {
+			progress(models.SyncProgress{Phase: "fetching", Message: "Comparing runs"})
+		}
+		if changes, err = g.runChanges(ctx, runs); err != nil {
+			return nil, err
+		}
+		if pending, err = g.listPendingRuns(ctx, workflow, since); err != nil {
+			return nil, err
+		}
+	}
+
 	var docs []models.SourceDocument
 	for i, r := range runs {
-		docs = append(docs, g.runDocuments(r, details[i])...)
+		docs = append(docs, g.runDocuments(r, details[i], changes[i], workflow)...)
+	}
+	for _, r := range pending {
+		docs = append(docs, g.runDocuments(r, nil, nil, workflow)...)
+	}
+	if g.top() == 0 {
+		bySHA := map[string]githubRun{}
+		for _, r := range append(append([]githubRun{}, pending...), runs...) {
+			if _, seen := bySHA[r.HeadSHA]; !seen && r.HeadSHA != "" {
+				bySHA[r.HeadSHA] = r
+			}
+		}
+		if progress != nil {
+			progress(models.SyncProgress{Phase: "fetching", Message: "Fetching deployments"})
+		}
+		deployments, err := g.fetchGitHubDeployments(ctx, since, bySHA)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, deployments...)
 	}
 	return docs, nil
 }
@@ -288,7 +323,8 @@ func (g *GitHubSource) listAnnotations(ctx context.Context, jobID int64) ([]gith
 
 // runDocuments builds a run's document plus, for failed runs (detail !=
 // nil), one document per failed job.
-func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []models.SourceDocument {
+func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail, changes []githubCompareCommit, workflow string) []models.SourceDocument {
+	sortKeys := githubRunSort(r)
 	runDocID := fmt.Sprintf("%s_run_%d", g.src.ID, r.ID)
 	runLabel := fmt.Sprintf("%s #%d", r.Name, r.RunNumber)
 	runWebURL := r.HTMLURL
@@ -311,6 +347,11 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 		filters.Add(models.FilterBranch, r.HeadBranch)
 		filters.Add(models.FilterBuildID, strconv.FormatInt(r.ID, 10))
 		filters.Add(models.FilterCommit, r.HeadSHA)
+		githubRunFilters(&filters, r, workflow, detail, changes)
+		filters.Add(models.FilterType, kind)
+		if kind == "job" {
+			filters.Add(models.FilterType, "step") // the same kind of document as an ADO failed step
+		}
 		if id != runDocID {
 			props["parent_doc_id"] = runDocID
 		}
@@ -320,12 +361,13 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 			Tags:        g.tags(),
 			Properties:  props,
 			Filters:     filters,
+			Sort:        sortKeys,
 			ChunkHeader: header,
 		}
 	}
 
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%s %s\n", runLabel, r.Conclusion)
+	fmt.Fprintf(&sb, "%s %s\n", runLabel, orDefault(r.Conclusion, r.Status))
 	writeField(&sb, "Workflow", r.Name)
 	writeField(&sb, "Run", fmt.Sprintf("#%d (id %d, attempt %d)", r.RunNumber, r.ID, r.RunAttempt))
 	writeField(&sb, "Title", r.DisplayTitle)
@@ -342,6 +384,10 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 	if start, finish := parseTime(r.RunStartedAt), parseTime(r.UpdatedAt); !start.IsZero() && !finish.IsZero() {
 		writeField(&sb, "Duration", finish.Sub(start).Round(time.Second).String())
 	}
+	if !strings.EqualFold(r.Status, "completed") {
+		sb.WriteString("The run hadn't completed when Conduit last synced; sync again for its result.\n")
+	}
+	writeGitHubChanges(&sb, changes)
 
 	var children []models.SourceDocument
 	if detail != nil {

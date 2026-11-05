@@ -60,6 +60,9 @@ type SourceDefinition struct {
 	SyncError      *string           `json:"sync_error"`
 	SyncErrorPhase *string           `json:"sync_error_phase"` // fetch | embed
 	Config         map[string]string `json:"config"`
+	// Identity is the source token's owner (names, emails, logins), recorded
+	// at sync so a "me" filter resolves without calling the source.
+	Identity []string `json:"identity,omitempty"`
 }
 
 // GetConfig mirrors SourceDefinition.get_config in app/models.py.
@@ -100,6 +103,9 @@ type SourceDocument struct {
 	// "[<ChunkHeader> | chunk k/N]" so a chunk deep inside a long text still
 	// names what it belongs to (see rag.WithChunkHeaders).
 	ChunkHeader string `json:"-"`
+	// Sort holds numeric sort keys (dates as Unix seconds, durations,
+	// counts), stored on every chunk as SortKey(name) for the list mode.
+	Sort map[string]float64 `json:"-"`
 }
 
 type TextChunk struct {
@@ -133,3 +139,9 @@ func TagKey(key string) string { return TagPrefix + key }
 
 // PropKey mirrors PayloadKeys.prop in app/models.py.
 func PropKey(key string) string { return PropPrefix + key }
+
+// SortPrefix namespaces numeric sort keys in a chunk's payload.
+const SortPrefix = "s_"
+
+// SortKey is the payload key a sort key is stored under.
+func SortKey(name string) string { return SortPrefix + name }

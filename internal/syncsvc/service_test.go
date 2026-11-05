@@ -569,7 +569,13 @@ func TestSyncPipelineRunSnapshot(t *testing.T) {
 	var logsGone atomic.Bool
 	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch strings.TrimPrefix(r.URL.Path, "/proj/_apis/") {
+		case "build/builds/5/changes":
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}})
 		case "build/builds":
+			if r.URL.Query().Get("statusFilter") != "completed" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}}) // nothing running
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{
 				"id": 5, "buildNumber": "5", "result": "failed", "sourceBranch": "refs/heads/main",
 				"definition": map[string]any{"id": 12, "name": "CI"},

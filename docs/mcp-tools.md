@@ -29,7 +29,12 @@ Every search tool takes one `request` argument, shaped by `mode`:
 tool_name(request: { mode: "semantic_search", query: str, page: int, source_name?: str })
 tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int })
 tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, source_name?: str })
+tool_name(request: { mode: "list", filters?: {...}, order_by?: str, direction?: "desc"|"asc", page?: int })
 ```
+
+**Conduit is a cache.** Only syncs talk to Azure DevOps or GitHub; a tool call reads the index and nothing else. Every response carries `as_of`, when each source in the results last synced (`"never"` if it hasn't). For a question about right now, the agent calls `sync_source` (`trigger`, then `status` until `completed`) and asks again.
+
+**`"me"`** works in person filters (`author`, `assigned_to`, `reviewer`, `requested_for`, …). Each sync records the source token's owner (Azure DevOps `connectionData`, GitHub `/user`), and `me` matches the owners of every enabled source. Before any source has synced, `me` is an error that says so.
 
 `semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
 
@@ -57,6 +62,28 @@ Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If 
   "page": 1,
   "has_more": true
 }
+```
+
+### `mode: "list"` — latest, last, sorted
+
+Answers "the latest …", "the last failed …", "every … matching …" without a search. It returns whole documents, one result each (its first chunk; walk the rest with `retrieve_chunk`), 20 per page with `has_more`, sorted by `order_by` (default: the collection's primary date, newest first). `direction: "asc"` puts the oldest or smallest first. Pages go up to 50.
+
+| Tool | `order_by` |
+|---|---|
+| `search_pipeline_run` | `finished` (default), `queued`, `started`, `duration`, `attempts`, `last_failed`, `fail_count`, `flaky_count` |
+| `search_commit` | `authored` (default) |
+| others | none yet — documents come in storage order |
+
+On `search_pipeline_run`, a listing returns run documents unless `filters.type` asks for `step`, `test`, `deployment` or `test_history`. The response's `list_notes` says so. They also note when the order leaves documents out: the default `finished` order leaves out runs still queued or running, which are listed with `filters.status` and `order_by: "queued"`. Conduit creates the sort indexes in the background at startup, so the first listing doesn't wait for one to build.
+
+Sort keys and filter values are computed at sync. Documents synced before Conduit stored a key don't carry it and don't appear in a listing sorted by it until their source syncs again.
+
+```
+search_pipeline_run(request={"mode":"list","filters":{"type":"run","result":"failed","branch":"main"}})   → the last failed build on main
+search_pipeline_run(request={"mode":"list","filters":{"status":"inProgress"},"order_by":"queued"})       → running at the last sync
+search_pipeline_run(request={"mode":"list","filters":{"type":"deployment","environment":"production"}})  → what's on prod
+search_pipeline_run(request={"mode":"list","filters":{"type":"test_history","flaky":"true"},"order_by":"flaky_count"})
+search_commit(request={"mode":"list","filters":{"author":"me","since":"2026-11-01"}})
 ```
 
 ### `mode: "semantic_search"` — ranked, natural-language search
@@ -97,7 +124,7 @@ When a result names another item by its ID (a work item `#1234`, a pull request 
 | `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
 | `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
 | `search_commit` | Git commit history — messages, authors, file changes (filter `commit` opens one by its full or 7+ character SHA) | When a change was made, which commit introduced a behaviour |
-| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`, `build_id`, `commit`, `attempt`; `build_id` returns a run with all its step logs and test documents) | Why a run failed or needed several attempts, whether an error or test failed before, which commit a run built |
+| `search_pipeline_run` | Build pipeline runs — run summaries with the commits each built, failed-step logs, failed tests, deployments, test history. Filters: `type`, `pipeline`, `result`, `status`, `reason`, `requested_for`, `branch`, `build_id`, `build_number`, `commit`, `contains_commit`, `rerun`, `attempt`, `failed_stage`/`failed_job`/`failed_step`/`failed_test`, `flaky`, `environment`, `tags`, `since`/`until`; `build_id` returns a run with all its step logs and test documents | The last (failed) build, why a run failed or needed several attempts, what changed since the last green run, what's deployed where, flaky tests |
 
 ---
 

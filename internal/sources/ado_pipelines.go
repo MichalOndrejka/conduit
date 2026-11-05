@@ -88,6 +88,7 @@ type adoBuild struct {
 		UniqueName  string `json:"uniqueName"`
 	} `json:"requestedFor"`
 	TriggerInfo map[string]string `json:"triggerInfo"`
+	Tags        []string          `json:"tags"`
 	Links       struct {
 		Web struct {
 			Href string `json:"href"`
@@ -234,6 +235,8 @@ type pipelineRunDetail struct {
 	issues   []string // "[error] Stage > Job > Task: message"
 	steps    []pipelineStep
 	tests    []pipelineTest
+	// failedStages/Jobs/Steps name every record that failed in any attempt.
+	failedStages, failedJobs, failedSteps []string
 }
 
 // adoPipelineScope holds the resolved configuration of a pipeline-run source.
@@ -297,6 +300,7 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 
 	n := len(builds)
 	details := make([]*pipelineRunDetail, n)
+	changes := make([][]adoBuildChange, n)
 
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -340,7 +344,12 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 				fail(fmt.Errorf("pipeline run #%s (build %d): %w", builds[i].BuildNumber, builds[i].ID, err))
 				return
 			}
-			details[i] = detail
+			ch, err := a.fetchBuildChanges(workCtx, client, scope, builds[i].ID)
+			if err != nil {
+				fail(fmt.Errorf("pipeline run #%s (build %d): %w", builds[i].BuildNumber, builds[i].ID, err))
+				return
+			}
+			details[i], changes[i] = detail, ch
 			report()
 		}(i)
 	}
@@ -350,8 +359,34 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 	}
 
 	var docs []models.SourceDocument
+	byID := make(map[int]adoBuild, n)
 	for i, b := range builds {
-		docs = append(docs, a.pipelineRunDocuments(scope, b, details[i])...)
+		docs = append(docs, a.pipelineRunDocuments(scope, b, details[i], changes[i])...)
+		byID[b.ID] = b
+	}
+
+	// Runs still queued or running at this sync: summaries, so "is anything
+	// running" is answered from the cache.
+	minTime := time.Now().UTC().AddDate(0, 0, -scope.days)
+	if top == unlimitedTop {
+		pending, err := a.listAdoBuildsWith(ctx, client, scope, minTime, unlimitedTop, "inProgress,notStarted,cancelling", "queueTimeDescending")
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range pending {
+			docs = append(docs, a.adoPendingRunDocument(scope, b))
+			byID[b.ID] = b
+		}
+
+		if progress != nil {
+			progress(models.SyncProgress{Phase: "fetching", Message: "Fetching deployments"})
+		}
+		deployments, err := a.fetchAdoDeployments(ctx, client, scope, minTime, byID)
+		if err != nil {
+			return nil, err
+		}
+		docs = append(docs, deployments...)
+		docs = append(docs, a.testHistoryDocuments(scope, builds, details)...)
 	}
 	return docs, nil
 }
@@ -360,11 +395,17 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 // finished at or after minTime (newest first, at most top), following
 // x-ms-continuationtoken.
 func (a *APISource) listAdoBuilds(ctx context.Context, client *http.Client, scope adoPipelineScope, minTime time.Time, top int) ([]adoBuild, error) {
+	return a.listAdoBuildsWith(ctx, client, scope, minTime, top, "completed", "finishTimeDescending")
+}
+
+// listAdoBuildsWith lists the definition's runs with status (a build
+// status filter, e.g. "completed" or "inProgress,notStarted") since minTime.
+func (a *APISource) listAdoBuildsWith(ctx context.Context, client *http.Client, scope adoPipelineScope, minTime time.Time, top int, status, order string) ([]adoBuild, error) {
 	q := url.Values{}
 	q.Set("definitions", strconv.Itoa(scope.definitionID))
-	q.Set("statusFilter", "completed")
+	q.Set("statusFilter", status)
 	q.Set("minTime", minTime.Format(time.RFC3339))
-	q.Set("queryOrder", "finishTimeDescending")
+	q.Set("queryOrder", order)
 	q.Set("$top", strconv.Itoa(min(adoBuildsPageSize, top)))
 	q.Set("api-version", scope.apiVersion)
 	baseURL := scope.apiBase() + "/build/builds?" + q.Encode()
@@ -481,6 +522,8 @@ func (a *APISource) fetchPipelineRunDetail(ctx context.Context, client *http.Cli
 			})
 		}
 	}
+
+	detail.collectFailedNames(timelines)
 
 	// A green build that was never rerun has no failed test to find (short
 	// of an in-run test retry, deliberately not checked — it would cost the
@@ -731,7 +774,7 @@ func shortBranch(ref string) string {
 
 // pipelineRunDocuments builds a run's document plus, for failed/partial
 // runs (detail != nil), its step and test documents.
-func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, detail *pipelineRunDetail) []models.SourceDocument {
+func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, detail *pipelineRunDetail, changes []adoBuildChange) []models.SourceDocument {
 	runDocID := fmt.Sprintf("%s_run_%d", a.src.ID, b.ID)
 	runLabel := fmt.Sprintf("%s #%s", b.Definition.Name, b.BuildNumber)
 	runWebURL := b.Links.Web.Href
@@ -746,8 +789,12 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 	var filters models.DocumentFilters
 	filters.Add(models.FilterResult, b.Result)
 	filters.Add(models.FilterBranch, b.SourceBranch, shortBranch(b.SourceBranch))
-	filters.Add(models.FilterBuildID, strconv.Itoa(b.ID))
-	filters.Add(models.FilterCommit, b.SourceVersion)
+	attempts := 1
+	if detail != nil {
+		attempts = detail.attempts
+	}
+	adoRunFilters(&filters, b, detail, changes)
+	sortKeys := adoRunSort(b, attempts)
 
 	newDoc := func(id, title, text, kind, webURL, header string) models.SourceDocument {
 		props := map[string]string{
@@ -766,12 +813,15 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 		if id != runDocID {
 			props["parent_doc_id"] = runDocID
 		}
+		f := filters.Clone()
+		f.Add(models.FilterType, kind)
 		return models.SourceDocument{
 			ID:          id,
 			Text:        strings.TrimSpace(text),
 			Tags:        map[string]string{"source_id": a.src.ID, "source_name": a.src.Name},
 			Properties:  props,
-			Filters:     filters,
+			Filters:     f,
+			Sort:        sortKeys,
 			ChunkHeader: header,
 		}
 	}
@@ -802,6 +852,9 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 	if start, finish := parseTime(b.StartTime), parseTime(b.FinishTime); !start.IsZero() && !finish.IsZero() {
 		writeField(&sb, "Duration", finish.Sub(start).Round(time.Second).String())
 	}
+
+	writeField(&sb, "Tags", strings.Join(b.Tags, ", "))
+	writeChanges(&sb, changes)
 
 	var children []models.SourceDocument
 	if detail != nil {

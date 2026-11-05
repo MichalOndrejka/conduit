@@ -118,6 +118,16 @@ func main() {
 		log.Printf("warning: could not create collections yet (retried by the Qdrant health probe): %v", err)
 	}
 	cancelEnsure()
+	// The list mode's sort indexes, in the background: building one on a
+	// large collection takes a while, and a listing would otherwise wait for
+	// it. A listing still creates a missing index itself.
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+		defer cancel()
+		if err := vectors.EnsureListIndexes(ctx, mcptools.ListIndexes()); err != nil {
+			log.Printf("warning: creating list sort indexes: %v", err)
+		}
+	}()
 
 	// ── Sync engine (sources: Azure DevOps, GitHub) ─────────────────────────
 	chunker := rag.NewTextChunker(cfg)

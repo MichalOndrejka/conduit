@@ -28,7 +28,23 @@ const (
 	FilterBuildID       = "build_id"       // pipeline run id: the run and its step/test documents
 	FilterID            = "id"             // work item id, issue number, pull request id/number
 	FilterCommit        = "commit"         // commit SHA; any prefix of 7+ characters matches
-	FilterAttempt       = "attempt"        // pipeline attempt a failed step or test belongs to
+
+	// Pipeline runs, their steps and tests, deployments and test history.
+	FilterType           = "type"            // document kind: run, step, test, deployment, test_history
+	FilterPipeline       = "pipeline"        // pipeline (definition / workflow) name and id
+	FilterStatus         = "status"          // run status at sync: completed, inprogress, notstarted
+	FilterReason         = "reason"          // what started the run: manual, ci, pullrequest, schedule, …
+	FilterRequestedFor   = "requested_for"   // who the run was requested for / triggered by
+	FilterBuildNumber    = "build_number"    // run number, e.g. 20261105.3
+	FilterRerun          = "rerun"           // "true" when the run had more than one attempt
+	FilterFailedStage    = "failed_stage"    // names of stages that failed in any attempt
+	FilterFailedJob      = "failed_job"      // names of jobs that failed in any attempt
+	FilterFailedStep     = "failed_step"     // names of steps (tasks) that failed in any attempt
+	FilterFailedTest     = "failed_test"     // names of tests that failed or were flaky
+	FilterContainsCommit = "contains_commit" // SHAs (and 7+ prefixes) of the commits a run built since the previous run
+	FilterEnvironment    = "environment"     // deployment environment
+	FilterFlaky          = "flaky"           // "true" for a test that passed only on retry
+	FilterAttempt        = "attempt"         // pipeline attempt a failed step or test belongs to
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
@@ -79,7 +95,7 @@ func FilterValues(field, raw string) []string {
 	if v == "" {
 		return nil
 	}
-	if field == FilterCommit {
+	if field == FilterCommit || field == FilterContainsCommit {
 		// Every prefix from git's short form up, so a short SHA from a log,
 		// a link or a build summary matches with plain equality.
 		out := []string{v}
@@ -120,6 +136,16 @@ func (f *DocumentFilters) Add(field string, raw ...string) {
 			}
 		}
 	}
+}
+
+// Clone returns a copy whose fields can be extended without touching f, for
+// documents that share most of their filters.
+func (f DocumentFilters) Clone() DocumentFilters {
+	out := DocumentFilters{Date: f.Date, Fields: make(map[string][]string, len(f.Fields))}
+	for k, v := range f.Fields {
+		out.Fields[k] = append([]string(nil), v...)
+	}
+	return out
 }
 
 func containsString(list []string, s string) bool {

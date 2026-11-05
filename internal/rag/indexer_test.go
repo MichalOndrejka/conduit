@@ -23,6 +23,7 @@ type minimalQdrant struct {
 	mu          sync.Mutex
 	upsertCalls int
 	upsertedIDs []string
+	payloads    []map[string]any
 }
 
 func (q *minimalQdrant) handler() http.HandlerFunc {
@@ -46,6 +47,7 @@ func (q *minimalQdrant) handler() http.HandlerFunc {
 			q.upsertCalls++
 			for _, p := range body.Points {
 				q.upsertedIDs = append(q.upsertedIDs, p.ID)
+				q.payloads = append(q.payloads, p.Payload)
 			}
 			q.mu.Unlock()
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
@@ -531,5 +533,28 @@ func TestIndexBatchPrefixesChunkHeaders(t *testing.T) {
 	}
 	if stepChunks < 2 {
 		t.Errorf("embedded %d step chunks, want several", stepChunks)
+	}
+}
+
+// Sort keys are stored on every chunk, so a list sorted by one returns the
+// document whichever chunk Qdrant reads.
+func TestIndexBatchStoresSortKeysOnEveryChunk(t *testing.T) {
+	embed := func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{0.1, 0.2}}}})
+	}
+	indexer, qd := testIndexer(t, embed, 2)
+	doc := models.SourceDocument{ID: "run-1", Text: strings.Repeat("word ", 3000), Sort: map[string]float64{"finished": 1762300000, "duration": 95}}
+	if err := indexer.IndexBatch(context.Background(), "conduit_test", []models.SourceDocument{doc}, IndexBatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	qd.mu.Lock()
+	defer qd.mu.Unlock()
+	if len(qd.payloads) < 2 {
+		t.Fatalf("want several chunks, got %d", len(qd.payloads))
+	}
+	for i, p := range qd.payloads {
+		if p[models.SortKey("finished")] != float64(1762300000) || p[models.SortKey("duration")] != float64(95) {
+			t.Errorf("chunk %d payload sort keys = %v / %v", i, p[models.SortKey("finished")], p[models.SortKey("duration")])
+		}
 	}
 }

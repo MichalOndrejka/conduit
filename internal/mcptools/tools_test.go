@@ -561,9 +561,16 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 		}
 	}
 	pipeline := filterProps("search_pipeline_run")
-	if len(pipeline) != 5 || pipeline["result"] == nil || pipeline["branch"] == nil || pipeline["build_id"] == nil ||
-		pipeline["commit"] == nil || pipeline["attempt"] == nil {
-		t.Errorf("search_pipeline_run filters = %v, want exactly result, branch, build_id, commit and attempt", pipeline)
+	for _, f := range []string{"type", "pipeline", "result", "status", "reason", "requested_for", "branch", "build_id", "build_number",
+		"commit", "contains_commit", "rerun", "failed_stage", "failed_job", "failed_step", "failed_test", "flaky", "environment", "since", "until"} {
+		if pipeline[f] == nil {
+			t.Errorf("search_pipeline_run lacks the %q filter", f)
+		}
+	}
+	for _, f := range []string{"project", "state", "work_item_type", "author"} {
+		if pipeline[f] != nil {
+			t.Errorf("search_pipeline_run must not offer %q", f)
+		}
 	}
 	// Every item another result can name by id is reachable by that id.
 	for tool, field := range map[string]string{

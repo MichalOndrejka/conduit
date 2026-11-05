@@ -67,6 +67,26 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 		q := r.URL.Query()
 		path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/")
 		switch {
+		case path == "build/builds" && q.Get("statusFilter") != "completed":
+			running := build(5, "20261014.5", "", "refs/heads/main")
+			running["status"], running["queueTime"], running["finishTime"] = "inProgress", "2026-10-14T09:00:00Z", ""
+			writeJSON(w, map[string]any{"value": []any{running}})
+		case path == "build/builds/3/changes":
+			writeJSON(w, map[string]any{"value": []any{
+				map[string]any{"id": "abc1234def", "message": "Break the parser\n\nlonger body", "author": map[string]any{"displayName": "Jane"}, "timestamp": "2026-10-14T07:50:00Z"},
+				map[string]any{"id": "0123456789", "message": "Bump version", "author": map[string]any{"displayName": "Bot"}},
+			}})
+		case strings.HasPrefix(path, "build/builds/") && strings.HasSuffix(path, "/changes"):
+			writeJSON(w, map[string]any{"value": []any{}})
+		case path == "distributedtask/environments":
+			writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 1, "name": "prod"}}})
+		case path == "distributedtask/environments/1/environmentdeploymentrecords":
+			writeJSON(w, map[string]any{"value": []any{
+				map[string]any{"id": 900, "stageName": "Deploy", "result": "succeeded", "queueTime": time.Now().UTC().Format(time.RFC3339),
+					"finishTime": "2026-10-14T08:20:00Z", "definition": map[string]any{"id": 12, "name": "CI"}, "owner": map[string]any{"id": 4, "name": "20261014.4"}},
+				map[string]any{"id": 901, "result": "succeeded", "queueTime": time.Now().UTC().Format(time.RFC3339),
+					"definition": map[string]any{"id": 99, "name": "Other"}, "owner": map[string]any{"id": 77, "name": "x"}},
+			}})
 		case path == "build/builds":
 			if q.Get("continuationToken") == "" {
 				w.Header().Set("x-ms-continuationtoken", "tok1")
@@ -190,6 +210,23 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// servePipelineExtras answers the sync-time extras a test doesn't care
+// about with nothing: no pending runs, no changes, no environments.
+func servePipelineExtras(w http.ResponseWriter, r *http.Request) bool {
+	path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/")
+	switch {
+	case path == "build/builds" && r.URL.Query().Get("statusFilter") != "completed":
+		writeJSON(w, map[string]any{"value": []any{}})
+	case strings.HasPrefix(path, "build/builds/") && strings.HasSuffix(path, "/changes"):
+		writeJSON(w, map[string]any{"value": []any{}})
+	case strings.HasPrefix(path, "distributedtask/environments"):
+		writeJSON(w, map[string]any{"value": []any{}})
+	default:
+		return false
+	}
+	return true
+}
+
 func fetchPipeline(t *testing.T, stub *pipelineStub, cfg map[string]string) ([]models.SourceDocument, error) {
 	t.Helper()
 	srv := httptest.NewServer(stub.handler(t))
@@ -223,6 +260,14 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 		"src-1_run_4",
 		"src-1_run_2", "src-1_run_2_step_t1", "src-1_run_2_test_200_9", "src-1_run_2_test_201_11",
 		"src-1_run_1",
+		"src-1_run_5",                                                    // still running at sync
+		"src-1_deployment_900",                                           // the pipeline's deployment to prod (not the other pipeline's)
+		"src-1_testhistory_", "src-1_testhistory_", "src-1_testhistory_", // one per failed or flaky test
+	}
+	for i := range ids {
+		if i < len(want) && strings.HasSuffix(want[i], "_") && strings.HasPrefix(ids[i], want[i]) {
+			ids[i] = want[i]
+		}
 	}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
 		t.Fatalf("doc IDs = %v, want %v", ids, want)
@@ -358,6 +403,9 @@ func TestFetchPipelineRunsKeepsFailuresOfRerunAttempts(t *testing.T) {
 // steps under distinct document ids.
 func TestFetchPipelineRunsDistinguishesAttemptsOfTheSameStep(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePipelineExtras(w, r) {
+			return
+		}
 		switch path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/"); path {
 		case "build/builds":
 			writeJSON(w, map[string]any{"value": []any{build(5, "5", "failed", "refs/heads/main")}})
@@ -400,8 +448,9 @@ func TestFetchPipelineRunsSendsWindowAndTestQueries(t *testing.T) {
 	}
 	var listCalls int
 	for _, r := range stub.requests {
-		if strings.Contains(r, "/build/builds/4/") && !strings.HasPrefix(r, "/proj/_apis/build/builds/4/timeline?") {
-			t.Errorf("a green single-attempt run may cost only its timeline call: %s", r)
+		if strings.Contains(r, "/build/builds/4/") && !strings.HasPrefix(r, "/proj/_apis/build/builds/4/timeline?") &&
+			!strings.HasPrefix(r, "/proj/_apis/build/builds/4/changes?") {
+			t.Errorf("a green single-attempt run may cost only its timeline and changes calls: %s", r)
 		}
 		if strings.Contains(r, "buildUri=vstfs%3A%2F%2F%2FBuild%2FBuild%2F4") || strings.Contains(r, "Build/Build/4") {
 			t.Errorf("checked test runs of a green single-attempt run: %s", r)
@@ -412,7 +461,7 @@ func TestFetchPipelineRunsSendsWindowAndTestQueries(t *testing.T) {
 		if strings.Contains(r, "/results?") && !strings.Contains(r, "detailsToInclude=SubResults") {
 			t.Errorf("test results request lacks sub-results: %s", r)
 		}
-		if strings.HasPrefix(r, "/proj/_apis/build/builds?") {
+		if strings.HasPrefix(r, "/proj/_apis/build/builds?") && strings.Contains(r, "statusFilter=completed") {
 			listCalls++
 			u, _ := http.NewRequest(http.MethodGet, r, nil)
 			q := u.URL.Query()
@@ -452,6 +501,9 @@ func TestFetchPipelineRunsFailsWhenALogCannotBeFetched(t *testing.T) {
 func TestFetchPipelineRunsPagesThroughTestResults(t *testing.T) {
 	var skips []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if servePipelineExtras(w, r) {
+			return
+		}
 		path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/")
 		switch path {
 		case "build/builds":
@@ -486,7 +538,13 @@ func TestFetchPipelineRunsPagesThroughTestResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := len(docs) - 1; got != adoTestResultsPageSize+1 {
+	tests := 0
+	for _, d := range docs {
+		if d.Properties["type"] == "test" {
+			tests++
+		}
+	}
+	if got := tests; got != adoTestResultsPageSize+1 {
 		t.Errorf("got %d test docs, want %d", got, adoTestResultsPageSize+1)
 	}
 	if strings.Join(skips, ",") != "0,1000" {
@@ -534,6 +592,72 @@ func TestCleanLogText(t *testing.T) {
 				t.Errorf("cleanLogText(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// Everything the list mode filters and sorts on is computed at sync, so a
+// tool call answers "last failed build", "last time stage X failed", "what
+// changed", "what's on prod" or "is test X flaky" from the index alone.
+func TestFetchPipelineRunsStoresFiltersSortKeysAndExtras(t *testing.T) {
+	docs, err := fetchPipeline(t, &pipelineStub{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	has := func(d *models.SourceDocument, field, value string) bool {
+		return slices.Contains(d.Filters.Fields[field], value)
+	}
+
+	run := docByID(docs, "src-1_run_3")
+	for field, value := range map[string]string{
+		models.FilterType: "run", models.FilterPipeline: "ci", models.FilterStatus: "completed",
+		models.FilterReason: "ci", models.FilterRequestedFor: "jane@example.com", models.FilterBuildNumber: "20261014.3",
+		models.FilterRerun: "false", models.FilterFailedStage: "build", models.FilterFailedJob: "windows",
+		models.FilterFailedStep: "compile", models.FilterFailedTest: "parser.tests.parsesempty",
+		models.FilterContainsCommit: "abc1234",
+	} {
+		if !has(run, field, value) {
+			t.Errorf("run 3 %s filter = %v, want %q", field, run.Filters.Fields[field], value)
+		}
+	}
+	if run.Sort["finished"] == 0 || run.Sort["duration"] != 630 || run.Sort["attempts"] != 1 {
+		t.Errorf("run 3 sort keys = %v", run.Sort)
+	}
+	if !strings.Contains(run.Text, "Changes since the previous run (2):\n- abc1234def Jane (2026-10-14T07:50:00Z): Break the parser") {
+		t.Errorf("run 3 text lacks its changes:\n%s", run.Text)
+	}
+	// Step and test documents carry the run's filters plus their own type.
+	step := docByID(docs, "src-1_run_3_step_t1")
+	if !has(step, models.FilterType, "step") || has(step, models.FilterType, "run") || !has(step, models.FilterFailedStage, "build") {
+		t.Errorf("step filters = %v", step.Filters.Fields)
+	}
+	if rerun := docByID(docs, "src-1_run_2"); !has(rerun, models.FilterRerun, "true") || rerun.Sort["attempts"] != 2 {
+		t.Errorf("rerun run 2: %v / %v", rerun.Filters.Fields[models.FilterRerun], rerun.Sort)
+	}
+
+	running := docByID(docs, "src-1_run_5")
+	if running == nil || !has(running, models.FilterStatus, "inprogress") || running.Sort["queued"] == 0 ||
+		!strings.Contains(running.Text, "hadn't completed when Conduit last synced") {
+		t.Errorf("pending run = %+v", running)
+	}
+
+	dep := docByID(docs, "src-1_deployment_900")
+	if dep == nil || !has(dep, models.FilterEnvironment, "prod") || !has(dep, models.FilterBuildID, "4") ||
+		!has(dep, models.FilterCommit, "sha4") || !has(dep, models.FilterType, "deployment") || dep.Sort["finished"] == 0 {
+		t.Fatalf("deployment = %+v", dep)
+	}
+	if docByID(docs, "src-1_deployment_901") != nil {
+		t.Error("another pipeline's deployment must not be recorded")
+	}
+
+	var flaky *models.SourceDocument
+	for i := range docs {
+		if docs[i].Properties["title"] == "Test history: Api.Tests.Retry" {
+			flaky = &docs[i]
+		}
+	}
+	if flaky == nil || !has(flaky, models.FilterFlaky, "true") || flaky.Sort["flaky_count"] != 1 ||
+		!strings.Contains(flaky.Text, "passed only on retry in 1 of the 4 completed runs") {
+		t.Fatalf("flaky test history = %+v", flaky)
 	}
 }
 
