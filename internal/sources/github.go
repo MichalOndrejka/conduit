@@ -1,5 +1,6 @@
 // GitHub source: repository files, commit history with diffs, issues with
-// their comments, and GitHub Actions workflow runs, read from the GitHub REST
+// their comments, pull requests with their discussion, and GitHub Actions
+// workflow runs, read from the GitHub REST
 // API of github.com or a GitHub Enterprise Server.
 //
 //	GitHubUrl    server URL: https://github.com (default) or a GitHub
@@ -20,7 +21,8 @@
 //	             Feature, …); an issue of any of them is fetched (default:
 //	             every issue, typed or not)
 //	Workflow     pipeline runs: workflow file name (ci.yml) or numeric ID
-//	Days         pipeline runs: completed runs of the last N days
+//	Days         pipeline runs: completed runs of the last N days; pull
+//	             requests: those created in the last N days
 //	VerifySSL    "false" to skip TLS verification (self-hosted servers)
 //
 // GitHub's own limits apply and are noted on the affected documents rather
@@ -116,6 +118,8 @@ func (g *GitHubSource) FetchDocuments(ctx context.Context, progress ProgressCall
 	switch {
 	case g.src.Type == models.SourcePipelineRun:
 		return g.fetchWorkflowRuns(ctx, progress)
+	case g.src.Type == models.SourcePullRequest:
+		return g.fetchPullRequests(ctx, progress)
 	case isWorkItemQuery(g.src):
 		return g.fetchIssues(ctx, progress)
 	case g.src.Type == models.SourceGitCommits:

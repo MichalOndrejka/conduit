@@ -1,5 +1,6 @@
-// Pull requests, read live from Azure DevOps or GitHub for review — never
-// synced or indexed. A pull request is addressed by its web URL, which is
+// Pull requests, read live from Azure DevOps or GitHub for review.
+// Pull-request sources also index them (pullrequest_sync.go) so search can
+// find them; diffs always come from the live reads here. A pull request is addressed by its web URL, which is
 // matched to a configured source of the same server/organization so that
 // source's credentials are used; listing takes a source directly.
 //
@@ -263,7 +264,7 @@ func PullRequestProviderFor(src *models.SourceDefinition, store secrets.Reader) 
 		org, project, repo := adoSourceScope(src)
 		if org == "" || project == "" || repo == "" {
 			return nil, fmt.Errorf("source %q doesn't name an Azure DevOps repository — use a code, test code, "+
-				"documentation or commit-history source of the repository", src.Name)
+				"documentation, commit-history or pull-request source of the repository", src.Name)
 		}
 		return newAdoPRClient(src, store, org, project, repo), nil
 	default:

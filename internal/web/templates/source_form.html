@@ -12,6 +12,15 @@
 </div>
 {{end}}
 
+<!-- Pull Requests window, shared by both tabs. -->
+{{define "pr-days"}}
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> {{template "tip" "Pull requests created in the last N days, of any status. Each one embeds its title, description, reviewers and votes, linked work items, commit messages, changed-file list and every comment thread. Diffs aren't embedded; search_pull_request reads them live."}}</label>
+  <input type="number" name="Days" min="1" required value="{{or (.Source.GetConfig `Days`) `90`}}" placeholder="90"
+         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+</div>
+{{end}}
+
 <!-- Azure DevOps work item fields: the Work Items type and the
      Requirements/Test Cases Work Items fetch mode. -->
 {{define "worktype-picker"}}
@@ -195,6 +204,15 @@
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
       </div>
+      {{else if eq $s.Type "pull-request"}}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Repository name <span class="text-red-400">*</span></label>
+          <input name="AdoRepo" required value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+        {{template "pr-days" .}}
+      </div>
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -301,6 +319,10 @@
           <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
+      </div>
+      {{else if eq $s.Type "pull-request"}}
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {{template "pr-days" .}}
       </div>
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -438,7 +460,7 @@ function prepareSubmit() {
       // one — the repo name is all the user needs to give, the rest of the
       // path is fixed.
       var res = 'git/repositories/' + encodeURIComponent(adoVal('AdoRepo')) + '/' +
-        (SOURCE_TYPE === 'commit-history' ? 'commits' : 'items');
+        (SOURCE_TYPE === 'commit-history' ? 'commits' : SOURCE_TYPE === 'pull-request' ? 'pullrequests' : 'items');
       var q = adoVal('AdoQuery').replace(/^[?&]+/, '');
       var url = org + '/' + proj + '/_apis/' + res + '?api-version=' + encodeURIComponent(ver);
       if (q) url += '&' + q;

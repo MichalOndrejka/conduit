@@ -113,3 +113,30 @@ func TestValidateAuthType(t *testing.T) {
 		t.Error("expected an unknown AuthType to be rejected")
 	}
 }
+
+func TestValidatePullRequest(t *testing.T) {
+	valid := func() map[string]string {
+		return map[string]string{
+			"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example", "AdoProject": "proj", "AdoRepo": "web",
+			"Url": "https://ado.example/proj/_apis/git/repositories/web/pullrequests?api-version=7.1", "Days": "90",
+		}
+	}
+	if msg := Validate(models.SourcePullRequest, valid()); msg != "" {
+		t.Errorf("valid ADO pull-request config rejected: %q", msg)
+	}
+	for key, bad := range map[string]string{"AdoRepo": " ", "Days": "0", "Platform": ""} {
+		cfg := valid()
+		cfg[key] = bad
+		if msg := Validate(models.SourcePullRequest, cfg); msg == "" {
+			t.Errorf("%s=%q: expected a validation error", key, bad)
+		}
+	}
+	gh := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Days": "30"}
+	if msg := Validate(models.SourcePullRequest, gh); msg != "" {
+		t.Errorf("valid GitHub pull-request config rejected: %q", msg)
+	}
+	delete(gh, "Days")
+	if msg := Validate(models.SourcePullRequest, gh); msg == "" {
+		t.Error("GitHub without Days: expected a validation error")
+	}
+}

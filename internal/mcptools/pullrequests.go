@@ -8,9 +8,15 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
+
+// indexedPRModes are the search_pull_request modes served from the
+// conduit_pull_requests collection (pull-request sources) rather than live.
+var indexedPRModes = map[string]bool{"semantic_search": true, "pattern_search": true, "retrieve_chunk": true}
 
 func pullRequestRequestSchema() map[string]any {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -25,9 +31,11 @@ func pullRequestRequestSchema() map[string]any {
 		props["mode"] = mode(m)
 		return map[string]any{"type": "object", "properties": props, "required": append([]string{"mode"}, required...)}
 	}
+	indexed, _ := requestParamSchema(collectionFilters[models.CollectionPullRequests])["oneOf"].([]any)
 	return map[string]any{
-		"description": "List pull requests, or read one pull request's details, changed files, diffs, comment threads, iterations or commits.",
-		"oneOf": []any{
+		"description": "Search embedded pull requests by meaning or text, list pull requests, or read one pull request's " +
+			"details, changed files, diffs, comment threads, iterations or commits.",
+		"oneOf": append(indexed, []any{
 			variant("list", map[string]any{
 				"source_id": str("A configured Azure DevOps or GitHub source of the repository (ids from sync_source status mode)"),
 				"status":    map[string]any{"type": "string", "enum": []string{"active", "completed", "abandoned", "all"}, "description": "Default active"},
@@ -50,17 +58,26 @@ func pullRequestRequestSchema() map[string]any {
 			variant("threads", map[string]any{"url": prURL, "page": page}, "url"),
 			variant("iterations", map[string]any{"url": prURL}, "url"),
 			variant("commits", map[string]any{"url": prURL, "page": page}, "url"),
-		},
+		}...),
 	}
 }
 
 // RegisterPullRequestTool registers the search_pull_request tool. Called once at
 // startup, alongside RegisterTools.
-func RegisterPullRequestTool(s *server.MCPServer, srcs SourceLister, store secrets.Reader) {
+func RegisterPullRequestTool(s *server.MCPServer, search *rag.SearchService, srcs SourceLister, store secrets.Reader) {
 	tool := mcp.NewTool("search_pull_request",
-		mcp.WithDescription(`Read Azure DevOps and GitHub pull requests live, for code review. Read-only; nothing is indexed, `+
-			`so results are always current. Every mode but list takes the pull request's web URL, which is matched to a `+
-			`configured source of the same organization or server for credentials. `+
+		mcp.WithDescription(`Find Azure DevOps and GitHub pull requests, and read them live for code review. Read-only. `+
+			`To find a pull request without its URL — by topic, the code or work item it touched, its discussion, `+
+			`author or reviewer — use request={"mode":"semantic_search","query":...,"page":1} (or "pattern_search" for `+
+			`exact text) over the pull requests embedded by pull-request sources: each result holds one pull request's `+
+			`title, description, status, branches, reviewers and votes, linked work items, commit messages, changed-file `+
+			`list and comment threads (no diffs), and is a snapshot from the last sync. Narrow with "filters" (project, `+
+			`repository, author, reviewer, state, branch = target branch, since/until on the creation date). Pass a `+
+			`result's properties.web_url as "url" to the live modes below for current details and diffs; if a match `+
+			`looks cut off, {"mode":"retrieve_chunk","source_doc_id":...,"chunk_index":...} fetches the adjacent chunk. `+
+			`The live modes read the provider directly, so they are always current. Every live mode but list takes the `+
+			`pull request's web URL, which is matched to a configured source of the same organization or server for `+
+			`credentials. `+
 			`Typical review: request={"mode":"get","url":...} for the title, description, branches, reviewers and votes, `+
 			`linked work items and checks; {"mode":"files","url":...} for the changed files with +/- counts; then `+
 			`{"mode":"diff","url":...,"path":...} for one file's unified diff (merge base → head), or "page" for 20 files `+
@@ -78,7 +95,13 @@ func RegisterPullRequestTool(s *server.MCPServer, srcs SourceLister, store secre
 		},
 	)
 	s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		payload, err := handlePullRequestRequest(ctx, req.GetArguments(), srcs, store)
+		args := req.GetArguments()
+		if r, ok := args["request"].(map[string]any); ok {
+			if mode, _ := r["mode"].(string); indexedPRModes[mode] {
+				return searchIndexedPullRequests(ctx, search, args)
+			}
+		}
+		payload, err := handlePullRequestRequest(ctx, args, srcs, store)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
@@ -88,6 +111,33 @@ func RegisterPullRequestTool(s *server.MCPServer, srcs SourceLister, store secre
 		}
 		return mcp.NewToolResultText(string(data)), nil
 	})
+}
+
+// searchIndexedPullRequests serves the semantic_search, pattern_search and
+// retrieve_chunk modes from the embedded pull requests, as the collection
+// search tools do.
+func searchIndexedPullRequests(ctx context.Context, search *rag.SearchService, args map[string]any) (*mcp.CallToolResult, error) {
+	collection := models.CollectionPullRequests
+	query, err := parseChunkQuery(args, collectionFilters[collection])
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	payload, err := query.resolve(ctx, search, collection)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	if q, ok := query.(semanticSearchRequest); ok && q.Page == 1 {
+		if results, isEmpty := payload["results"].([]any); isEmpty && len(results) == 0 {
+			payload["note"] = "No embedded pull request matched — add or sync a Pull Requests source for the repository, " +
+				`or use {"mode":"list","source_id":...} to browse pull requests live.`
+		}
+	}
+	recordSearch(ctx, collection, args, query, payload)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+	return mcp.NewToolResultText(string(data)), nil
 }
 
 func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs SourceLister, store secrets.Reader) (map[string]any, error) {
@@ -141,7 +191,8 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 	switch mode {
 	case "get", "files", "diff", "threads", "iterations", "commits":
 	default:
-		return nil, fmt.Errorf(`request.mode must be "list", "get", "files", "diff", "threads", "iterations" or "commits", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "semantic_search", "pattern_search", "retrieve_chunk", "list", "get", `+
+			`"files", "diff", "threads", "iterations" or "commits", got %q`, mode)
 	}
 	if str("url") == "" {
 		return nil, fmt.Errorf("%s mode requires url, the pull request's web URL", mode)

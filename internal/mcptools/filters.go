@@ -64,6 +64,12 @@ var collectionFilters = map[string][]filterField{
 		{name: models.FilterPath, desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}},
 		dateFields("author date")...),
 	models.CollectionPipelineRuns: {fResult, fBranch},
+	models.CollectionPullRequests: append([]filterField{fProject, fRepository,
+		{name: models.FilterAuthor, desc: "Pull request author's name, email (Azure DevOps) or login (GitHub)"},
+		{name: models.FilterReviewer, desc: "A reviewer's name, email (Azure DevOps) or login (GitHub)"},
+		{name: models.FilterState, desc: "Pull request status: active (open), completed (merged) or abandoned (closed unmerged)"},
+		{name: models.FilterBranch, desc: "Target branch, e.g. main"}},
+		dateFields("creation date")...),
 }
 
 // filtersSchema is the JSON Schema of the "filters" object for fields.

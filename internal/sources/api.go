@@ -155,6 +155,11 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	if cfg.Type == models.SourcePipelineRun {
 		return a.fetchAdoPipelineRuns(ctx, a.httpClient(), progress)
 	}
+	// Pull-request sources read the repository named by AdoOrg / AdoProject /
+	// AdoRepo (or the Url's path) through the pull request API.
+	if cfg.Type == models.SourcePullRequest {
+		return a.fetchAdoPullRequests(ctx, progress)
+	}
 	url := cfg.GetConfig("Url")
 	if url == "" {
 		return nil, fmt.Errorf("API source requires a Url")

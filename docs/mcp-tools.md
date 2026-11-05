@@ -187,9 +187,17 @@ manage_source(request={"mode":"create","name":"Bugs","type":"work-item",
 
 ### `search_pull_request`
 
-Reads Azure DevOps and GitHub pull requests **live**, for code review. It is read-only and nothing is synced or indexed, so results always reflect the pull request as it is now.
+Finds Azure DevOps and GitHub pull requests, and reads them **live** for code review. It is read-only.
+
+It has two kinds of modes:
+
+- **Indexed search** (`semantic_search`, `pattern_search`, `retrieve_chunk`) finds a pull request without its URL: by topic, the code or work item it touched, its discussion, author or reviewer. It searches `conduit_pull_requests`, the pull requests embedded by **Pull Requests** sources (see [sources](sources.md#pull-requests)). Each result is one pull request as of the last sync: title, description, status, branches, reviewers and votes, linked work items, commit messages, the changed-file list and every comment thread. Diffs and checks aren't embedded. Filters: `project`, `repository`, `author`, `reviewer`, `state` (`active`, `completed`, `abandoned`), `branch` (target branch), and `since`/`until` on the creation date. The request shapes are the same as the collection search tools'.
+- **Live modes** (`list`, `get`, `files`, `diff`, `threads`, `iterations`, `commits`) read the provider directly, so they show the pull request as it is now. Pass an indexed result's `properties.web_url` as `url`.
 
 ```
+search_pull_request(request: { mode: "semantic_search", query: str, page: int, filters?: {...} })
+search_pull_request(request: { mode: "pattern_search", pattern: str, regex?: bool, page: int, filters?: {...} })
+search_pull_request(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int })
 search_pull_request(request: { mode: "list", source_id: str, status?: "active"|"completed"|"abandoned"|"all", author?: str, reviewer?: str, target_branch?: str, page?: int })
 search_pull_request(request: { mode: "get", url: str })
 search_pull_request(request: { mode: "files", url: str, page?: int, from_iteration?: int, to_iteration?: int })
@@ -199,7 +207,7 @@ search_pull_request(request: { mode: "iterations", url: str })
 search_pull_request(request: { mode: "commits", url: str, page?: int })
 ```
 
-**Credentials.** `url` is the pull request's web link: `…/{project}/_git/{repo}/pullrequest/{id}` (Azure DevOps Services or Server) or `…/{owner}/{repo}/pull/{number}` (github.com or GitHub Enterprise Server). Conduit uses the credentials of a configured source on the same organization or server. It prefers a source of the same repository, then of the same project or owner, then any source there. Between equally close sources, an enabled one wins. Every response says which source was used in `credentials_from`. A URL that no source matches is an error, so add a source for that organization first. `list` has no URL, so it takes the `source_id` of a source of the repository instead. For Azure DevOps that must be a code, test code, documentation or commit-history source.
+**Credentials.** `url` is the pull request's web link: `…/{project}/_git/{repo}/pullrequest/{id}` (Azure DevOps Services or Server) or `…/{owner}/{repo}/pull/{number}` (github.com or GitHub Enterprise Server). Conduit uses the credentials of a configured source on the same organization or server. It prefers a source of the same repository, then of the same project or owner, then any source there. Between equally close sources, an enabled one wins. Every response says which source was used in `credentials_from`. A URL that no source matches is an error, so add a source for that organization first. `list` has no URL, so it takes the `source_id` of a source of the repository instead. For Azure DevOps that must be a code, test code, documentation, commit-history or pull-request source.
 
 - **`list`**: pull requests, newest first, 20 per page with `has_more`. `status` defaults to `active`. `author` and `reviewer` take `me` (the token's owner), an email (Azure DevOps) or a login (GitHub). On GitHub, `reviewer` matches pull requests whose review is still requested from that user.
 - **`get`**: title, description, branches, merge status, head and base commits, reviewers with their votes, linked work items (on GitHub, the issues the description closes with `fixes #12`-style keywords), and checks (Azure DevOps statuses and branch policies; GitHub check runs and commit statuses). If work items or checks can't be read, `notes` says so and the rest is still returned.
@@ -212,6 +220,8 @@ search_pull_request(request: { mode: "commits", url: str, page?: int })
 **Large pull requests** are paged, never truncated. Where GitHub itself leaves data out, the response says so in `incomplete`, either on the file or at the top level. GitHub omits patches for binary or very large files, lists at most 3000 files and 250 commits of a pull request, and compares at most 300 files between iterations. Azure DevOps diffs are built from the file contents, so every text file's diff is complete. On both providers, binary files show only their path and change type.
 
 ```
+0. search_pull_request(request={"mode":"semantic_search","query":"retry on payment timeout","page":1})
+                                                                                   → properties.web_url of the match
 1. search_pull_request(request={"mode":"get","url":"https://dev.azure.com/acme/Shop/_git/web/pullrequest/12"})
 2. search_pull_request(request={"mode":"files","url":"…/pullrequest/12"})            → total_files: 7
 3. search_pull_request(request={"mode":"diff","url":"…/pullrequest/12","path":"/src/cart.ts","include_content":true})
@@ -247,4 +257,4 @@ Use `search_test_code` the same way to find where a method is tested.
 
 **Combining tools for a code change:** `experience_retrieve` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_workitem` (related requirements or bugs).
 
-**Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.
+**Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `semantic_search` if you don't have its URL → `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.

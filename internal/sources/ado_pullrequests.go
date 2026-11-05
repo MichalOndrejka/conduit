@@ -248,6 +248,12 @@ var adoVotes = map[int]string{
 }
 
 func (c *adoPRClient) Get(ctx context.Context, id int) (*PullRequest, error) {
+	return c.get(ctx, id, true)
+}
+
+// get reads a pull request's details; withChecks adds its statuses and
+// policy evaluations, which only the live tool needs.
+func (c *adoPRClient) get(ctx context.Context, id int, withChecks bool) (*PullRequest, error) {
 	var pr adoPullRequest
 	if _, err := c.getJSON(ctx, c.prAPI(id)+c.query(nil), &pr); err != nil {
 		return nil, err
@@ -269,6 +275,9 @@ func (c *adoPRClient) Get(ctx context.Context, id int) (*PullRequest, error) {
 	out.WorkItems = append(out.WorkItems, items...)
 	if err != nil {
 		out.Notes = append(out.Notes, "linked work items could not be read fully: "+err.Error())
+	}
+	if !withChecks {
+		return out, nil
 	}
 	checks, errs := c.checks(ctx, id, pr.Repository.Project.ID)
 	out.Checks = append(out.Checks, checks...)

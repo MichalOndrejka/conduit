@@ -17,6 +17,7 @@ const (
 	CollectionDocumentation = "conduit_documentation"
 	CollectionCommits       = "conduit_commits"
 	CollectionPipelineRuns  = "conduit_pipeline_runs"
+	CollectionPullRequests  = "conduit_pull_requests"
 	CollectionExperience    = "conduit_experience"
 )
 
@@ -25,7 +26,7 @@ var AllCollections = []string{
 	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
 	CollectionTestCode, CollectionTestCases,
 	CollectionDocumentation, CollectionCommits, CollectionPipelineRuns,
-	CollectionExperience,
+	CollectionPullRequests, CollectionExperience,
 }
 
 // ── Source types ─────────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ const (
 	SourceDocumentation = "documentation"
 	SourceGitCommits    = "commit-history"
 	SourcePipelineRun   = "pipeline-run"
+	SourcePullRequest   = "pull-request"
 )
 
 // ── Core domain models ────────────────────────────────────────────────────────

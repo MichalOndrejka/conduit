@@ -59,15 +59,17 @@ Fetches from github.com or a GitHub Enterprise Server through the GitHub REST AP
 | Issue types | `WorkItemTypes` | Issues. Comma-separated organization issue types (Bug, Feature, …), picked from tiles loaded from `GET /orgs/{owner}/issue-types`; an issue of any of them is fetched. Empty = every issue, typed or not. Combines with Labels: an issue needs one of the labels and one of the types. Personal accounts and GitHub Enterprise Server versions without issue types have none to pick. |
 | Labels | `Labels` | Issues. Comma-separated; an issue with any of them is fetched. Empty = every issue. |
 | Workflow | `Workflow` | Pipeline Runs. Workflow file name (`ci.yml`) or numeric ID. |
-| Days | `Days` | Pipeline Runs. Completed runs created in the last N days. |
+| Days | `Days` | Pipeline Runs: completed runs created in the last N days. Pull Requests: pull requests created in the last N days. |
 | Verify SSL | `VerifySSL` | `false` skips TLS verification (self-hosted servers with private CAs). |
 
 What each source type fetches:
 
 - **Source Code / Test Code / Documentation** (and Requirements / Test Cases in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. The branch is downloaded as a single tarball (`/repos/{owner}/{repo}/tarball/{branch}`) and read as it streams in, so a sync costs one API request, plus one to look up the default branch when `Branch` is empty, whatever the repository size. A download cut off part-way is restarted.
 - **Commit History**: one document per commit with its full message and the patch of every changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case.
-- **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
+- **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out; use a Pull Requests source for them. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
 - **Pipeline Runs**: one document per completed workflow run; a failed run (failure, timed_out, startup_failure) also lists its failed jobs' annotations and yields one document per failed job with the complete job log (`parent_doc_id` links it to the run). Logs GitHub has already deleted are noted. GitHub returns at most 1000 runs per query; a window holding more fails the sync and asks for fewer Days.
+
+- **Pull Requests**: see [Pull Requests](#pull-requests). They are listed from `/repos/{owner}/{repo}/pulls?state=all`, newest first. Linked work items are the issues the description closes with `fixes #12`-style keywords. GitHub lists at most 3000 files and 250 commits of a pull request; the document notes either case.
 
 The owner fills the `project` filter and the repository the `repository` filter, so search narrows GitHub and Azure DevOps sources the same way.
 
@@ -82,6 +84,7 @@ The source **type** only decides which Qdrant collection a source's documents la
 | Test Cases | `conduit_testcases` |
 | Commit History | `conduit_commits` |
 | Pipeline Runs | `conduit_pipeline_runs` |
+| Pull Requests | `conduit_pull_requests` |
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
@@ -155,3 +158,26 @@ Because the backend is a single generic HTTP-JSON provider, some fetch patterns 
 - Recursive wiki/tree-walk fetches.
 
 These require dedicated provider code, which the Go backend deliberately does not have (see [go-port.md](go-port.md) for the rationale).
+
+## Pull Requests
+
+Pull Requests sources (`pull-request`) embed a repository's pull requests, so an agent can find one by meaning instead of being given its URL. The indexed modes of [`search_pull_request`](mcp-tools.md#search_pull_request) search them. The same tool reads any result live (diffs, current checks) from its `web_url`.
+
+Config keys: the Azure DevOps tab takes `AdoOrg`, `AdoProject`, `AdoRepo` (required) and `AdoApiVersion`, and stores `Url` as `{org}/{project}/_apis/git/repositories/{repo}/pullrequests`. The GitHub tab takes the usual `GitHubUrl`, `GitHubOwner`, `GitHubRepo` and `Token`. Both take **Days** (`Days`, required, form default `90`).
+
+Each sync takes every pull request **created** in the last `Days` days, whatever its status (active, completed, abandoned), and fully replaces the source's previous documents. While a pull request is inside the window, each sync picks up its new comments, votes and status changes. Each pull request gets one document, ID `{source}_pr_{id}`, which holds:
+
+- title, status, draft flag, author, creation date, source and target branch, merge status and web URL
+- reviewers with their votes (and Azure DevOps' required flag)
+- linked work items with type, title and state
+- the description
+- every commit with its full message
+- the changed-file list with each file's change type (and a rename's old path)
+- every comment thread, with its file and line, status and replies. Azure DevOps system comments (votes, pushes, policy updates) are left out.
+- notes on anything the provider left out
+
+Diffs and checks aren't embedded. `search_commit` and the live `diff` mode cover diffs, and checks would go stale in a snapshot.
+
+Properties: `type` (`pull_request`), `pr_id`, `status`, `author`, `source_branch`, `target_branch`, `created_at`, `project`, `repository`, `web_url`. Filters: `project`, `repository`, `author`, `reviewer`, `state` (the status), `branch` (the target branch) and the creation date for `since`/`until`. Every chunk starts with a `[Pull request !12: <title> | chunk k/N]` header (`#12` on GitHub).
+
+Fetching is lossless: a sync fails if a pull request, commit list, changed-file list or thread list can't be read, and the previous snapshot stays untouched.

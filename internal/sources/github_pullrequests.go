@@ -189,6 +189,13 @@ func (c *githubPRClient) Get(ctx context.Context, id int) (*PullRequest, error) 
 	if err != nil {
 		return nil, err
 	}
+	return c.details(ctx, pr, true)
+}
+
+// details completes a pull request with its reviewers and linked issues;
+// withChecks adds the head commit's checks, which only the live tool needs.
+func (c *githubPRClient) details(ctx context.Context, pr githubPR, withChecks bool) (*PullRequest, error) {
+	id := pr.Number
 	out := &PullRequest{
 		PRSummary: PRSummary{
 			ID: pr.Number, Title: pr.Title, Status: githubPRStatus(pr.State, pr.MergedAt), Author: pr.User.Login,
@@ -247,6 +254,9 @@ func (c *githubPRClient) Get(ctx context.Context, id int) (*PullRequest, error) 
 		out.WorkItems = append(out.WorkItems, item)
 	}
 
+	if !withChecks {
+		return out, nil
+	}
 	checks, errs := c.checks(ctx, pr.Head.SHA)
 	out.Checks = append(out.Checks, checks...)
 	for _, err := range errs {

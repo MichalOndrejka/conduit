@@ -32,6 +32,7 @@ var Types = []TypeInfo{
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
 	{models.SourcePipelineRun, "Pipeline Runs", "Build pipeline runs with failed-step logs and failed test results."},
+	{models.SourcePullRequest, "Pull Requests", "Pull requests with their description, reviewers, commits, changed files and comment threads."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
 	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
@@ -121,8 +122,8 @@ func Validate(srcType string, cfg map[string]string) string {
 			if n, err := strconv.Atoi(strings.TrimSpace(cfg["DefinitionId"])); err != nil || n <= 0 {
 				return "Pipeline definition ID must be a positive number."
 			}
-			if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
-				return "Days must be a positive number."
+			if msg := validateDays(cfg); msg != "" {
+				return msg
 			}
 		}
 		u, err := url.Parse(cfg["Url"])
@@ -132,6 +133,17 @@ func Validate(srcType string, cfg map[string]string) string {
 		if top := cfg["Top"]; top != "" {
 			if n, err := strconv.Atoi(top); err != nil || n <= 0 {
 				return "Max items must be a positive number."
+			}
+		}
+		if srcType == models.SourcePullRequest {
+			if cfg["Platform"] != "ado" {
+				return "Pull Requests sources require the Azure DevOps provider."
+			}
+			if strings.TrimSpace(cfg["AdoRepo"]) == "" {
+				return "Repository is required for Pull Requests sources."
+			}
+			if msg := validateDays(cfg); msg != "" {
+				return msg
 			}
 		}
 		if srcType == models.SourceGitCommits {
@@ -180,9 +192,19 @@ func validateGitHub(srcType string, cfg map[string]string) string {
 		if strings.TrimSpace(cfg["Workflow"]) == "" {
 			return "Workflow is required: its file name (e.g. ci.yml) or numeric ID."
 		}
-		if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
-			return "Days must be a positive number."
+		if msg := validateDays(cfg); msg != "" {
+			return msg
 		}
+	}
+	if srcType == models.SourcePullRequest {
+		return validateDays(cfg)
+	}
+	return ""
+}
+
+func validateDays(cfg map[string]string) string {
+	if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
+		return "Days must be a positive number."
 	}
 	return ""
 }

@@ -23,7 +23,8 @@ const (
 	FilterAssignedTo    = "assigned_to"    // display name and unique name
 	FilterTag           = "tags"           // work item tags
 	FilterResult        = "result"         // pipeline run result
-	FilterBranch        = "branch"         // pipeline run source branch
+	FilterBranch        = "branch"         // pipeline run source branch; pull request target branch
+	FilterReviewer      = "reviewer"       // pull request reviewer name and unique name / login
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
@@ -80,7 +81,7 @@ func FilterValues(field, raw string) []string {
 // ready to use.
 type DocumentFilters struct {
 	Fields map[string][]string
-	Date   time.Time // commit author date; zero = no date
+	Date   time.Time // commit author date, pull request creation date; zero = no date
 }
 
 // Add stores raw (normalized, plus ancestors for hierarchical fields) under
