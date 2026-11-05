@@ -46,9 +46,11 @@ func build(id int, number, result, branch string) map[string]any {
 }
 
 // pipelineStub fakes the ADO build and test APIs for one definition: build 3
-// failed (a failed task and a job that failed without a failed task), build 2
-// succeeded, and build 1 (on a second page) partially succeeded with only a
-// warning and no test runs.
+// failed (a failed task and a job that failed without a failed task), build 4
+// succeeded cleanly (only a warning), build 2 succeeded after "Rerun failed
+// jobs" — attempt 1's Test task failed, a test failed in attempt 1's test run
+// and another passed only on an in-run retry — and build 1 (on a second page)
+// partially succeeded with only a warning and no test runs.
 type pipelineStub struct {
 	mu       sync.Mutex
 	requests []string
@@ -67,10 +69,33 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 		case path == "build/builds":
 			if q.Get("continuationToken") == "" {
 				w.Header().Set("x-ms-continuationtoken", "tok1")
-				writeJSON(w, map[string]any{"value": []any{build(3, "20261014.3", "failed", "refs/heads/main"), build(2, "20261014.2", "succeeded", "refs/heads/main")}})
+				writeJSON(w, map[string]any{"value": []any{build(3, "20261014.3", "failed", "refs/heads/main"),
+					build(4, "20261014.4", "succeeded", "refs/heads/main"), build(2, "20261014.2", "succeeded", "refs/heads/main")}})
 				return
 			}
 			writeJSON(w, map[string]any{"value": []any{build(1, "20261014.1", "partiallySucceeded", "refs/pull/42/merge")}})
+		case path == "build/builds/4/timeline":
+			writeJSON(w, map[string]any{"id": "tl-4", "records": []any{
+				map[string]any{"id": "y1", "type": "Task", "name": "Lint", "result": "succeededWithIssues", "log": map[string]any{"id": 2},
+					"issues": []any{map[string]any{"type": "warning", "message": "deprecated API"}}},
+			}})
+		case path == "build/builds/2/timeline":
+			writeJSON(w, map[string]any{"id": "tl-2", "records": []any{
+				map[string]any{"id": "s1", "type": "Stage", "name": "Build", "result": "succeeded", "order": 1, "attempt": 1},
+				map[string]any{"id": "p1", "parentId": "s1", "type": "Phase", "name": "Linux", "result": "succeeded", "order": 1, "attempt": 2},
+				map[string]any{"id": "j1", "parentId": "p1", "type": "Job", "name": "Linux", "result": "succeeded", "order": 1, "attempt": 2,
+					"log": map[string]any{"id": 30}, "previousAttempts": []any{map[string]any{"attempt": 1, "timelineId": "tl-2a1", "recordId": "j1"}}},
+				map[string]any{"id": "t1", "parentId": "j1", "type": "Task", "name": "Test", "result": "succeeded", "order": 1, "attempt": 2, "log": map[string]any{"id": 31}},
+			}})
+		case path == "build/builds/2/timeline/tl-2a1":
+			// The previous attempt's timeline holds only the rerun job.
+			writeJSON(w, map[string]any{"id": "tl-2a1", "records": []any{
+				map[string]any{"id": "j1", "parentId": "p1", "type": "Job", "name": "Linux", "result": "failed", "order": 1, "attempt": 1, "log": map[string]any{"id": 20}},
+				map[string]any{"id": "t1", "parentId": "j1", "type": "Task", "name": "Test", "result": "failed", "order": 1, "attempt": 1, "log": map[string]any{"id": 21},
+					"issues": []any{map[string]any{"type": "error", "message": "connection reset"}}},
+			}})
+		case path == "build/builds/2/logs/21":
+			fmt.Fprint(w, "2026-10-14T08:00:00.0000000Z ##[error]connection reset\n")
 		case path == "build/builds/3/timeline":
 			writeJSON(w, map[string]any{"records": []any{
 				map[string]any{"id": "s1", "type": "Stage", "name": "Build", "result": "failed", "order": 1},
@@ -103,17 +128,51 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 				http.NotFound(w, r)
 			}
 		case path == "test/runs":
-			if q.Get("buildUri") == "vstfs:///Build/Build/3" {
+			switch q.Get("buildUri") {
+			case "vstfs:///Build/Build/3":
+				// No runStatistics: passed results must be checked for retries too.
 				writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 100, "name": "Unit tests"}}})
+			case "vstfs:///Build/Build/2":
+				writeJSON(w, map[string]any{"value": []any{
+					map[string]any{"id": 200, "name": "Integration (attempt 1)", "runStatistics": []any{
+						map[string]any{"outcome": "Failed", "count": 1}, map[string]any{"outcome": "Passed", "count": 5}}},
+					map[string]any{"id": 201, "name": "Integration (attempt 2)", "runStatistics": []any{
+						map[string]any{"outcome": "Passed", "count": 6},
+						map[string]any{"outcome": "Passed", "count": 1, "resultMetadata": "rerun"}}},
+				}})
+			default:
+				writeJSON(w, map[string]any{"value": []any{}})
+			}
+		case path == "test/Runs/100/results":
+			if q.Get("outcomes") == "Passed" {
+				writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 8, "automatedTestName": "Parser.Tests.Stable", "outcome": "Passed"}}})
 				return
 			}
-			writeJSON(w, map[string]any{"value": []any{}})
-		case path == "test/Runs/100/results":
 			writeJSON(w, map[string]any{"value": []any{map[string]any{
 				"id": 7, "automatedTestName": "Parser.Tests.ParsesEmpty", "automatedTestStorage": "parser.tests.dll",
 				"outcome": "Failed", "durationInMs": 1500, "errorMessage": "Expected 0 but was 1",
 				"stackTrace": "at Parser.Tests.ParsesEmpty() in ParserTests.cs:line 42",
 			}}})
+		case path == "test/Runs/200/results":
+			if q.Get("outcomes") == "Passed" {
+				t.Errorf("run 200 has no retried results; passed results must not be fetched")
+			}
+			writeJSON(w, map[string]any{"value": []any{map[string]any{
+				"id": 9, "automatedTestName": "Api.Tests.Upload", "outcome": "Failed", "errorMessage": "socket closed",
+			}}})
+		case path == "test/Runs/201/results":
+			if q.Get("outcomes") != "Passed" {
+				writeJSON(w, map[string]any{"value": []any{}})
+				return
+			}
+			writeJSON(w, map[string]any{"value": []any{
+				map[string]any{"id": 10, "automatedTestName": "Api.Tests.Download", "outcome": "Passed"},
+				map[string]any{"id": 11, "automatedTestName": "Api.Tests.Retry", "outcome": "Passed", "resultGroupType": "rerun",
+					"subResults": []any{
+						map[string]any{"id": 1, "displayName": "Attempt 1", "outcome": "Failed", "errorMessage": "timeout waiting for lock", "stackTrace": "at Lock.Wait()"},
+						map[string]any{"id": 2, "displayName": "Attempt 2", "outcome": "Passed"},
+					}},
+			}})
 		default:
 			t.Errorf("unexpected request %s", r.URL)
 			http.NotFound(w, r)
@@ -156,7 +215,8 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 	}
 	want := []string{
 		"src-1_run_3", "src-1_run_3_step_t1", "src-1_run_3_step_j2", "src-1_run_3_test_100_7",
-		"src-1_run_2",
+		"src-1_run_4",
+		"src-1_run_2", "src-1_run_2_step_t1", "src-1_run_2_test_200_9", "src-1_run_2_test_201_11",
 		"src-1_run_1",
 	}
 	if strings.Join(ids, ",") != strings.Join(want, ",") {
@@ -232,12 +292,95 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 	if !strings.Contains(pr.Text, "[warning] Lint: deprecated API") {
 		t.Errorf("partially succeeded run doc missing its warning:\n%s", pr.Text)
 	}
-	if strings.Contains(docByID(docs, "src-1_run_2").Text, "Issues:") {
-		t.Error("succeeded run must not fetch timeline details")
+	if clean := docByID(docs, "src-1_run_4"); strings.Contains(clean.Text, "Issues:") || strings.Contains(clean.Text, "rerun") {
+		t.Errorf("a cleanly succeeded run must embed only its summary:\n%s", clean.Text)
 	}
 }
 
-func TestFetchPipelineRunsSendsWindowAndOnlyFetchesFailedRunDetails(t *testing.T) {
+// A run that went green after "Rerun failed jobs" keeps attempt 1's failed
+// step and failed test, and a test that passed only on an in-run retry is
+// embedded as a flaky test.
+func TestFetchPipelineRunsKeepsFailuresOfRerunAttempts(t *testing.T) {
+	docs, err := fetchPipeline(t, &pipelineStub{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := docByID(docs, "src-1_run_2")
+	for _, s := range []string{
+		"CI #20261014.2 succeeded", "Attempts: 2", "Passed after rerun",
+		"[error] Build > Linux > Test (attempt 1): connection reset",
+		"- Build > Linux > Test (attempt 1) (document src-1_run_2_step_t1)",
+		"- Api.Tests.Upload [Failed] (document src-1_run_2_test_200_9)",
+		"Flaky tests (passed on retry after failing):\n- Api.Tests.Retry [Passed on retry] (document src-1_run_2_test_201_11)",
+	} {
+		if !strings.Contains(run.Text, s) {
+			t.Errorf("rerun run doc missing %q:\n%s", s, run.Text)
+		}
+	}
+	if strings.Contains(run.Text, "Api.Tests.Download") {
+		t.Error("a test that passed without retries must not be listed")
+	}
+
+	step := docByID(docs, "src-1_run_2_step_t1")
+	if step.Text != "##[error]connection reset" || step.Properties["attempt"] != "1" ||
+		step.Properties["step_path"] != "Build > Linux > Test" || step.Properties["parent_doc_id"] != "src-1_run_2" {
+		t.Errorf("attempt-1 step doc = %q %v", step.Text, step.Properties)
+	}
+	if !strings.HasSuffix(step.Properties["web_url"], "&j=j1&t=t1") {
+		t.Errorf("attempt-1 step web_url = %q", step.Properties["web_url"])
+	}
+
+	flaky := docByID(docs, "src-1_run_2_test_201_11")
+	for _, s := range []string{"Flaky test (failed, then passed on retry): Api.Tests.Retry", "Outcome: Passed",
+		"- Attempt 1: Failed", "timeout waiting for lock", "at Lock.Wait()", "- Attempt 2: Passed"} {
+		if !strings.Contains(flaky.Text, s) {
+			t.Errorf("flaky test doc missing %q:\n%s", s, flaky.Text)
+		}
+	}
+	if flaky.Properties["flaky"] != "true" || flaky.Properties["title"] != "CI #20261014.2 flaky test: Api.Tests.Retry" {
+		t.Errorf("flaky test props = %v", flaky.Properties)
+	}
+}
+
+// A rerun whose latest attempt failed again keeps both attempts' failed
+// steps under distinct document ids.
+func TestFetchPipelineRunsDistinguishesAttemptsOfTheSameStep(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/"); path {
+		case "build/builds":
+			writeJSON(w, map[string]any{"value": []any{build(5, "5", "failed", "refs/heads/main")}})
+		case "build/builds/5/timeline":
+			writeJSON(w, map[string]any{"id": "tl", "records": []any{
+				map[string]any{"id": "j1", "type": "Job", "name": "Linux", "result": "failed", "attempt": 2, "log": map[string]any{"id": 2},
+					"previousAttempts": []any{map[string]any{"attempt": 1, "timelineId": "tl-a1", "recordId": "j1"}}},
+			}})
+		case "build/builds/5/timeline/tl-a1":
+			writeJSON(w, map[string]any{"id": "tl-a1", "records": []any{
+				map[string]any{"id": "j1", "type": "Job", "name": "Linux", "result": "failed", "attempt": 1, "log": map[string]any{"id": 1}},
+			}})
+		case "build/builds/5/logs/1":
+			fmt.Fprint(w, "first try")
+		case "build/builds/5/logs/2":
+			fmt.Fprint(w, "second try")
+		case "test/runs":
+			writeJSON(w, map[string]any{"value": []any{}})
+		default:
+			t.Errorf("unexpected request %s", r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	docs, err := (&APISource{src: pipelineSrc(srv.URL, nil)}).FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a2, a1 := docByID(docs, "src-1_run_5_step_j1_attempt2"), docByID(docs, "src-1_run_5_step_j1")
+	if a2 == nil || a1 == nil || a2.Text != "second try" || a1.Text != "first try" {
+		t.Fatalf("attempt step docs missing or wrong: %v", docs)
+	}
+}
+
+func TestFetchPipelineRunsSendsWindowAndTestQueries(t *testing.T) {
 	stub := &pipelineStub{}
 	before := time.Now().UTC().AddDate(0, 0, -30).Add(-time.Minute)
 	if _, err := fetchPipeline(t, stub, nil); err != nil {
@@ -245,8 +388,17 @@ func TestFetchPipelineRunsSendsWindowAndOnlyFetchesFailedRunDetails(t *testing.T
 	}
 	var listCalls int
 	for _, r := range stub.requests {
-		if strings.Contains(r, "/build/builds/2/") {
-			t.Errorf("fetched details of a succeeded run: %s", r)
+		if strings.Contains(r, "/build/builds/4/") && !strings.HasPrefix(r, "/proj/_apis/build/builds/4/timeline?") {
+			t.Errorf("a green single-attempt run may cost only its timeline call: %s", r)
+		}
+		if strings.Contains(r, "buildUri=vstfs%3A%2F%2F%2FBuild%2FBuild%2F4") || strings.Contains(r, "Build/Build/4") {
+			t.Errorf("checked test runs of a green single-attempt run: %s", r)
+		}
+		if strings.HasPrefix(r, "/proj/_apis/test/runs?") && !strings.Contains(r, "includeRunDetails=true") {
+			t.Errorf("test runs request lacks run statistics: %s", r)
+		}
+		if strings.Contains(r, "/results?") && !strings.Contains(r, "detailsToInclude=SubResults") {
+			t.Errorf("test results request lacks sub-results: %s", r)
 		}
 		if strings.HasPrefix(r, "/proj/_apis/build/builds?") {
 			listCalls++
@@ -260,7 +412,8 @@ func TestFetchPipelineRunsSendsWindowAndOnlyFetchesFailedRunDetails(t *testing.T
 				t.Errorf("minTime = %q, want about 30 days ago", q.Get("minTime"))
 			}
 		}
-		if strings.HasPrefix(r, "/proj/_apis/test/Runs/100/results?") && !strings.Contains(r, "outcomes=Failed,Aborted,Error") {
+		if strings.HasPrefix(r, "/proj/_apis/test/Runs/100/results?") && !strings.Contains(r, "outcomes=Failed,Aborted,Error,Timeout") &&
+			!strings.Contains(r, "outcomes=Passed") {
 			t.Errorf("test results request lacks failed outcomes filter: %s", r)
 		}
 	}
@@ -296,6 +449,10 @@ func TestFetchPipelineRunsPagesThroughTestResults(t *testing.T) {
 		case "test/runs":
 			writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 100, "name": "Unit"}}})
 		case "test/Runs/100/results":
+			if r.URL.Query().Get("outcomes") == "Passed" {
+				writeJSON(w, map[string]any{"value": []any{}})
+				return
+			}
 			skip, _ := strconv.Atoi(r.URL.Query().Get("$skip"))
 			skips = append(skips, r.URL.Query().Get("$skip"))
 			n := adoTestResultsPageSize

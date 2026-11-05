@@ -1,8 +1,9 @@
 // GitHub Actions workflow runs for GitHubSource, mirroring the Azure DevOps
 // pipeline-run documents: every completed run of the workflow created in the
-// last Days days becomes a run document, and each failed run also yields one
-// document per failed job holding its complete log, linked back to the run
-// via the parent_doc_id property. The run document lists the failed jobs'
+// last Days days becomes a run document, and each failed job — of any
+// attempt, so a run re-run to green keeps attempt 1's failures — yields one
+// document holding its complete log, linked back to the run via the
+// parent_doc_id property. The run document lists the failed jobs'
 // annotations (errors and warnings), GitHub's counterpart of ADO's timeline
 // issues.
 //
@@ -56,6 +57,7 @@ type githubJob struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
 	Conclusion  string `json:"conclusion"`
+	RunAttempt  int    `json:"run_attempt"`
 	StartedAt   string `json:"started_at"`
 	CompletedAt string `json:"completed_at"`
 	HTMLURL     string `json:"html_url"`
@@ -126,7 +128,9 @@ func (g *GitHubSource) fetchWorkflowRuns(ctx context.Context, progress ProgressC
 		mu.Unlock()
 	}
 	for i := 0; i < n && workCtx.Err() == nil; i++ {
-		if !githubDetailedConclusions[runs[i].Conclusion] {
+		// A re-run run reports its latest attempt's conclusion; its earlier
+		// attempts may still have failed.
+		if !githubDetailedConclusions[runs[i].Conclusion] && runs[i].RunAttempt <= 1 {
 			report()
 			continue
 		}
@@ -207,11 +211,13 @@ func (g *GitHubSource) listRuns(ctx context.Context, workflow string, since time
 	return all, nil
 }
 
-// fetchRunDetail fetches a failed run's jobs, the complete log of every
-// failed job and the annotations of each failed job.
+// fetchRunDetail fetches the jobs of every attempt of a run, the complete
+// log of every failed job and the annotations of each failed job. It returns
+// nil for a run whose conclusion isn't a failure and none of whose attempts
+// had a failed job.
 func (g *GitHubSource) fetchRunDetail(ctx context.Context, r githubRun) (*githubRunDetail, error) {
 	var jobs []githubJob
-	err := g.pages(ctx, fmt.Sprintf("%s/actions/runs/%d/jobs?filter=latest", g.repoAPI(), r.ID), func(data []byte) (int, bool, error) {
+	err := g.pages(ctx, fmt.Sprintf("%s/actions/runs/%d/jobs?filter=all", g.repoAPI(), r.ID), func(data []byte) (int, bool, error) {
 		var page struct {
 			Jobs []githubJob `json:"jobs"`
 		}
@@ -235,7 +241,7 @@ func (g *GitHubSource) fetchRunDetail(ctx context.Context, r githubRun) (*github
 			return nil, fmt.Errorf("annotations of job %q: %w", j.Name, err)
 		}
 		for _, a := range annotations {
-			line := fmt.Sprintf("[%s] %s: %s", a.AnnotationLevel, j.Name, strings.TrimSpace(a.Message))
+			line := fmt.Sprintf("[%s] %s%s: %s", a.AnnotationLevel, j.Name, attemptLabel(r, j), strings.TrimSpace(a.Message))
 			if a.Path != "" && a.Path != ".github" {
 				line += fmt.Sprintf(" (%s:%d)", a.Path, a.StartLine)
 			}
@@ -253,7 +259,18 @@ func (g *GitHubSource) fetchRunDetail(ctx context.Context, r githubRun) (*github
 		}
 		detail.jobs = append(detail.jobs, githubFailedJob{job: j, log: log})
 	}
+	if len(detail.jobs) == 0 && !githubDetailedConclusions[r.Conclusion] {
+		return nil, nil
+	}
 	return detail, nil
+}
+
+// attemptLabel is " (attempt n)" for a job of a re-run run, else "".
+func attemptLabel(r githubRun, j githubJob) string {
+	if r.RunAttempt <= 1 {
+		return ""
+	}
+	return fmt.Sprintf(" (attempt %d)", max(j.RunAttempt, 1))
 }
 
 func (g *GitHubSource) listAnnotations(ctx context.Context, jobID int64) ([]githubAnnotation, error) {
@@ -326,6 +343,10 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 
 	var children []models.SourceDocument
 	if detail != nil {
+		if !githubDetailedConclusions[r.Conclusion] && len(detail.jobs) > 0 {
+			sb.WriteString("Passed after re-run: the run's final conclusion is " + r.Conclusion +
+				", but jobs of earlier attempts failed (possibly flaky) — listed below.\n")
+		}
 		if len(detail.annotations) > 0 {
 			sb.WriteString("\nAnnotations:\n")
 			for _, a := range detail.annotations {
@@ -338,7 +359,8 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 		for _, fj := range detail.jobs {
 			j := fj.job
 			id := fmt.Sprintf("%s_job_%d", runDocID, j.ID)
-			fmt.Fprintf(&sb, "- %s (document %s)\n", j.Name, id)
+			label := j.Name + attemptLabel(r, j)
+			fmt.Fprintf(&sb, "- %s (document %s)\n", label, id)
 
 			var failedSteps []string
 			for _, st := range j.Steps {
@@ -347,7 +369,7 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 				}
 			}
 			var jb strings.Builder
-			fmt.Fprintf(&jb, "Failed job: %s\n", j.Name)
+			fmt.Fprintf(&jb, "Failed job: %s\n", label)
 			writeField(&jb, "Result", j.Conclusion)
 			writeField(&jb, "Failed steps", strings.Join(failedSteps, ", "))
 			writeField(&jb, "Workflow run", fmt.Sprintf("%s (%s)", runLabel, r.Conclusion))
@@ -361,9 +383,12 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 			if !isWebURL(webURL) {
 				webURL = fmt.Sprintf("%s/actions/runs/%d/job/%d", g.repoWeb(), r.ID, j.ID)
 			}
-			doc := newDoc(id, fmt.Sprintf("%s failed job: %s", runLabel, j.Name), jb.String(), "job", webURL,
-				fmt.Sprintf("Run #%d > %s", r.RunNumber, j.Name))
+			doc := newDoc(id, fmt.Sprintf("%s failed job: %s", runLabel, label), jb.String(), "job", webURL,
+				fmt.Sprintf("Run #%d > %s", r.RunNumber, label))
 			doc.Properties["step_path"] = j.Name
+			if r.RunAttempt > 1 {
+				doc.Properties["attempt"] = strconv.Itoa(max(j.RunAttempt, 1))
+			}
 			children = append(children, doc)
 		}
 	}

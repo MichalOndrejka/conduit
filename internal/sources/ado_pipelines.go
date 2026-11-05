@@ -1,8 +1,15 @@
 // Azure DevOps pipeline-run fetching for APISource. A pipeline-run source
 // covers one build definition: every completed run of the last Days days
-// becomes a run document, and each failed or partially succeeded run also
+// becomes a run document. Verbosity follows failure: a run additionally
 // yields one document per failed step (its complete log) and one per failed
-// test result, both linked back to the run via the parent_doc_id property.
+// test result, both linked back to the run via the parent_doc_id property —
+// and that includes failures of earlier attempts. A run that went green after
+// "Rerun failed jobs" still carries attempt 1's failed steps (from the
+// previous-attempt timelines) and failed tests, and a test that passed only
+// on an in-run retry (VSTest rerunFailedTests and the like, recorded as
+// sub-results) gets a flaky-test document, so flaky failures aren't lost.
+// The one exception: a green build with a single attempt costs only its
+// timeline call — its test runs aren't checked for in-run retries.
 //
 // Fetching is lossless by design: every page of runs, every failed step's
 // whole log and every failed test result is pulled, and anything that can't
@@ -36,12 +43,23 @@ const (
 	adoTestResultsPageSize = 1000
 
 	// adoFailedTestOutcomes are the test outcomes that get a test document.
-	adoFailedTestOutcomes = "Failed,Aborted,Error"
+	adoFailedTestOutcomes = "Failed,Aborted,Error,Timeout"
 )
 
-// adoDetailedResults are the run results whose failed steps and failed
-// tests are fetched in full; any other run gets only its summary document.
+// adoDetailedResults are the run results whose timeline issues are always
+// listed on the run document. Runs with any other result list them only when
+// some attempt had a failed step or a failed test.
 var adoDetailedResults = map[string]bool{"failed": true, "partiallysucceeded": true}
+
+// isFailedTestOutcome reports whether a test (or sub-result) outcome is one
+// of adoFailedTestOutcomes.
+func isFailedTestOutcome(o string) bool {
+	switch strings.ToLower(o) {
+	case "failed", "aborted", "error", "timeout":
+		return true
+	}
+	return false
+}
 
 type adoBuild struct {
 	ID            int    `json:"id"`
@@ -84,6 +102,7 @@ type adoTimelineRecord struct {
 	Name     string `json:"name"`
 	Result   string `json:"result"`
 	Order    int    `json:"order"`
+	Attempt  int    `json:"attempt"`
 	Log      *struct {
 		ID int `json:"id"`
 	} `json:"log"`
@@ -91,22 +110,81 @@ type adoTimelineRecord struct {
 		Type    string `json:"type"`
 		Message string `json:"message"`
 	} `json:"issues"`
+	// PreviousAttempts points at the earlier attempts of a rerun job/stage;
+	// each lives in its own timeline.
+	PreviousAttempts []struct {
+		Attempt    int    `json:"attempt"`
+		TimelineID string `json:"timelineId"`
+		RecordID   string `json:"recordId"`
+	} `json:"previousAttempts"`
 }
+
+// attempt is the record's attempt number (ADO omits it on old servers).
+func (r adoTimelineRecord) attempt() int { return max(r.Attempt, 1) }
 
 type adoTestRun struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
+	// RunStatistics (requested with includeRunDetails) count results by
+	// outcome; ResultMetadata "rerun"/"flaky" flags results that were retried.
+	RunStatistics []struct {
+		Outcome        string `json:"outcome"`
+		Count          int    `json:"count"`
+		ResultMetadata string `json:"resultMetadata"`
+	} `json:"runStatistics"`
+}
+
+// mayHaveRetriedResults reports whether the run may hold results that
+// passed only after a retry. Without statistics it can't tell, so it says
+// yes and the passed results are checked (lossless over cheap).
+func (r adoTestRun) mayHaveRetriedResults() bool {
+	if len(r.RunStatistics) == 0 {
+		return true
+	}
+	for _, s := range r.RunStatistics {
+		switch strings.ToLower(s.ResultMetadata) {
+		case "rerun", "flaky":
+			if s.Count > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type adoTestResult struct {
-	ID                   int     `json:"id"`
-	TestCaseTitle        string  `json:"testCaseTitle"`
-	AutomatedTestName    string  `json:"automatedTestName"`
-	AutomatedTestStorage string  `json:"automatedTestStorage"`
-	Outcome              string  `json:"outcome"`
-	DurationInMs         float64 `json:"durationInMs"`
-	ErrorMessage         string  `json:"errorMessage"`
-	StackTrace           string  `json:"stackTrace"`
+	ID                   int                `json:"id"`
+	TestCaseTitle        string             `json:"testCaseTitle"`
+	AutomatedTestName    string             `json:"automatedTestName"`
+	AutomatedTestStorage string             `json:"automatedTestStorage"`
+	Outcome              string             `json:"outcome"`
+	DurationInMs         float64            `json:"durationInMs"`
+	ErrorMessage         string             `json:"errorMessage"`
+	StackTrace           string             `json:"stackTrace"`
+	ResultGroupType      string             `json:"resultGroupType"`
+	SubResults           []adoTestSubResult `json:"subResults"`
+}
+
+// adoTestSubResult is one attempt of a retried test (resultGroupType
+// "rerun") or one iteration of a data-driven/ordered test.
+type adoTestSubResult struct {
+	ID           int                `json:"id"`
+	DisplayName  string             `json:"displayName"`
+	Outcome      string             `json:"outcome"`
+	DurationInMs float64            `json:"durationInMs"`
+	ErrorMessage string             `json:"errorMessage"`
+	StackTrace   string             `json:"stackTrace"`
+	SubResults   []adoTestSubResult `json:"subResults"`
+}
+
+// hasFailedSubResult reports whether any (nested) sub-result failed.
+func hasFailedSubResult(subs []adoTestSubResult) bool {
+	for _, s := range subs {
+		if isFailedTestOutcome(s.Outcome) || hasFailedSubResult(s.SubResults) {
+			return true
+		}
+	}
+	return false
 }
 
 // pipelineStep is one failed timeline record with its fetched log.
@@ -123,11 +201,13 @@ type pipelineTest struct {
 	result adoTestResult
 }
 
-// pipelineRunDetail is everything fetched for a failed/partial run.
+// pipelineRunDetail is everything fetched for a run that failed, partially
+// succeeded, or had a failure in some attempt.
 type pipelineRunDetail struct {
-	issues []string // "[error] Stage > Job > Task: message"
-	steps  []pipelineStep
-	tests  []pipelineTest
+	attempts int      // highest attempt number in the timeline
+	issues   []string // "[error] Stage > Job > Task: message"
+	steps    []pipelineStep
+	tests    []pipelineTest
 }
 
 // adoPipelineScope holds the resolved configuration of a pipeline-run source.
@@ -221,11 +301,9 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 		mu.Unlock()
 	}
 
+	// Every run is inspected, not only failed ones: a run rerun to green
+	// still holds its earlier attempts' failures.
 	for i := 0; i < n && workCtx.Err() == nil; i++ {
-		if !adoDetailedResults[strings.ToLower(builds[i].Result)] {
-			report()
-			continue
-		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int) {
@@ -298,66 +376,162 @@ func (a *APISource) listAdoBuilds(ctx context.Context, client *http.Client, scop
 	}
 }
 
-// fetchPipelineRunDetail fetches a failed run's timeline issues, the full
-// log of every failed step, and every failed test result.
+// fetchPipelineRunDetail fetches a run's timeline issues, the full log of
+// every failed step of every attempt, every failed test result and every
+// test that passed only on a retry. It returns nil when the run has nothing
+// beyond its summary to embed: no failure in any attempt and a result that
+// isn't failed/partial.
 func (a *APISource) fetchPipelineRunDetail(ctx context.Context, client *http.Client, scope adoPipelineScope, b adoBuild) (*pipelineRunDetail, error) {
-	records, err := a.fetchAdoTimeline(ctx, client, scope, b.ID)
+	current, records, err := a.fetchAdoTimeline(ctx, client, scope, b.ID, "")
 	if err != nil {
 		return nil, err
 	}
-	detail := &pipelineRunDetail{}
-	tl := newTimeline(records)
-	for _, r := range tl.ordered {
-		for _, is := range r.Issues {
-			detail.issues = append(detail.issues, fmt.Sprintf("[%s] %s: %s", is.Type, tl.path(r), is.Message))
+	latest := newTimeline(records)
+
+	// The latest timeline holds each record's newest attempt; earlier
+	// attempts of rerun jobs/stages live in the timelines their
+	// previousAttempts point to. Those may point further back in turn.
+	timelines := []*timeline{latest}
+	seenTimeline := map[string]bool{current: true}
+	for i := 0; i < len(timelines); i++ {
+		for _, r := range timelines[i].ordered {
+			for _, pa := range r.PreviousAttempts {
+				if pa.TimelineID == "" || seenTimeline[pa.TimelineID] {
+					continue
+				}
+				seenTimeline[pa.TimelineID] = true
+				_, recs, err := a.fetchAdoTimeline(ctx, client, scope, b.ID, pa.TimelineID)
+				if err != nil {
+					return nil, fmt.Errorf("attempt %d of %q: %w", pa.Attempt, r.Name, err)
+				}
+				timelines = append(timelines, newTimeline(recs))
+			}
 		}
-	}
-	for _, r := range tl.failedLeaves() {
-		logURL := fmt.Sprintf("%s/build/builds/%d/logs/%d?api-version=%s", scope.apiBase(), b.ID, r.Log.ID, scope.apiVersion)
-		data, err := a.getRaw(ctx, client, logURL)
-		if err != nil {
-			return nil, fmt.Errorf("fetching log %d of step %q: %w", r.Log.ID, tl.path(r), err)
-		}
-		detail.steps = append(detail.steps, pipelineStep{
-			record: r, jobID: tl.jobID(r), path: tl.path(r), log: cleanLogText(string(data)),
-		})
 	}
 
+	detail := &pipelineRunDetail{attempts: 1}
+	for _, tl := range timelines {
+		for _, r := range tl.ordered {
+			detail.attempts = max(detail.attempts, r.attempt())
+		}
+	}
+	// A record id is shared by all attempts of a job/task, so (id, attempt)
+	// identifies one execution; a previous timeline may repeat records that
+	// weren't rerun.
+	type execKey struct {
+		id      string
+		attempt int
+	}
+	seenIssues, seenSteps := map[execKey]bool{}, map[execKey]bool{}
+	for _, tl := range timelines {
+		for _, r := range tl.ordered {
+			k := execKey{r.ID, r.attempt()}
+			if seenIssues[k] {
+				continue
+			}
+			seenIssues[k] = true
+			for _, is := range r.Issues {
+				detail.issues = append(detail.issues, fmt.Sprintf("[%s] %s%s: %s", is.Type, latest.pathIn(tl, r), detail.attemptLabel(r.attempt()), is.Message))
+			}
+		}
+		for _, r := range tl.failedLeaves() {
+			k := execKey{r.ID, r.attempt()}
+			if seenSteps[k] {
+				continue
+			}
+			seenSteps[k] = true
+			path := latest.pathIn(tl, r)
+			logURL := fmt.Sprintf("%s/build/builds/%d/logs/%d?api-version=%s", scope.apiBase(), b.ID, r.Log.ID, scope.apiVersion)
+			data, err := a.getRaw(ctx, client, logURL)
+			if err != nil {
+				return nil, fmt.Errorf("fetching log %d of step %q (attempt %d): %w", r.Log.ID, path, r.attempt(), err)
+			}
+			jobID := latest.jobID(r)
+			if jobID == "" {
+				jobID = tl.jobID(r)
+			}
+			detail.steps = append(detail.steps, pipelineStep{
+				record: r, jobID: jobID, path: path, log: cleanLogText(string(data)),
+			})
+		}
+	}
+
+	// A green build that was never rerun has no failed test to find (short
+	// of an in-run test retry, deliberately not checked — it would cost the
+	// test-run calls on every green build), so it stays summary-only after
+	// this one timeline call.
+	if strings.EqualFold(b.Result, "succeeded") && detail.attempts <= 1 && len(detail.steps) == 0 {
+		return nil, nil
+	}
+
+	// Test runs of every attempt are attached to the build, so this covers
+	// rerun jobs too.
 	runs, err := a.fetchAdoTestRuns(ctx, client, scope, b.ID)
 	if err != nil {
 		return nil, err
 	}
 	for _, run := range runs {
-		results, err := a.fetchAdoFailedTestResults(ctx, client, scope, run.ID)
+		failed, err := a.fetchAdoTestResults(ctx, client, scope, run.ID, adoFailedTestOutcomes)
 		if err != nil {
 			return nil, fmt.Errorf("test run %d: %w", run.ID, err)
 		}
-		for _, res := range results {
+		for _, res := range failed {
 			detail.tests = append(detail.tests, pipelineTest{run: run, result: res})
 		}
+		if !run.mayHaveRetriedResults() {
+			continue
+		}
+		passed, err := a.fetchAdoTestResults(ctx, client, scope, run.ID, "Passed")
+		if err != nil {
+			return nil, fmt.Errorf("test run %d: %w", run.ID, err)
+		}
+		for _, res := range passed {
+			if hasFailedSubResult(res.SubResults) {
+				detail.tests = append(detail.tests, pipelineTest{run: run, result: res})
+			}
+		}
+	}
+
+	if len(detail.steps) == 0 && len(detail.tests) == 0 && !adoDetailedResults[strings.ToLower(b.Result)] {
+		return nil, nil
 	}
 	return detail, nil
 }
 
-func (a *APISource) fetchAdoTimeline(ctx context.Context, client *http.Client, scope adoPipelineScope, buildID int) ([]adoTimelineRecord, error) {
-	data, err := a.getRaw(ctx, client, fmt.Sprintf("%s/build/builds/%d/timeline?api-version=%s", scope.apiBase(), buildID, scope.apiVersion))
+// attemptLabel is " (attempt n)" when the run was rerun, else "".
+func (d *pipelineRunDetail) attemptLabel(n int) string {
+	if d.attempts <= 1 {
+		return ""
+	}
+	return fmt.Sprintf(" (attempt %d)", n)
+}
+
+// fetchAdoTimeline fetches the build's latest timeline (timelineID "") or a
+// specific one, returning its id and records.
+func (a *APISource) fetchAdoTimeline(ctx context.Context, client *http.Client, scope adoPipelineScope, buildID int, timelineID string) (string, []adoTimelineRecord, error) {
+	u := fmt.Sprintf("%s/build/builds/%d/timeline", scope.apiBase(), buildID)
+	if timelineID != "" {
+		u += "/" + url.PathEscape(timelineID)
+	}
+	data, err := a.getRaw(ctx, client, u+"?api-version="+scope.apiVersion)
 	if err != nil {
-		return nil, fmt.Errorf("fetching timeline: %w", err)
+		return "", nil, fmt.Errorf("fetching timeline %s: %w", timelineID, err)
 	}
 	var tl struct {
+		ID      string              `json:"id"`
 		Records []adoTimelineRecord `json:"records"`
 	}
 	if err := json.Unmarshal(data, &tl); err != nil {
-		return nil, fmt.Errorf("timeline response is not valid JSON: %w", err)
+		return "", nil, fmt.Errorf("timeline response is not valid JSON: %w", err)
 	}
-	return tl.Records, nil
+	return tl.ID, tl.Records, nil
 }
 
 func (a *APISource) fetchAdoTestRuns(ctx context.Context, client *http.Client, scope adoPipelineScope, buildID int) ([]adoTestRun, error) {
 	buildURI := url.QueryEscape(fmt.Sprintf("vstfs:///Build/Build/%d", buildID))
 	var all []adoTestRun
 	for skip := 0; ; skip += adoTestRunsPageSize {
-		runsURL := fmt.Sprintf("%s/test/runs?buildUri=%s&$top=%d&$skip=%d&api-version=%s",
+		runsURL := fmt.Sprintf("%s/test/runs?buildUri=%s&includeRunDetails=true&$top=%d&$skip=%d&api-version=%s",
 			scope.apiBase(), buildURI, adoTestRunsPageSize, skip, scope.apiVersion)
 		data, err := a.getRaw(ctx, client, runsURL)
 		if err != nil {
@@ -376,14 +550,16 @@ func (a *APISource) fetchAdoTestRuns(ctx context.Context, client *http.Client, s
 	}
 }
 
-func (a *APISource) fetchAdoFailedTestResults(ctx context.Context, client *http.Client, scope adoPipelineScope, runID int) ([]adoTestResult, error) {
+// fetchAdoTestResults pages through the run's results with the given
+// outcomes, including their sub-results (the attempts of a retried test).
+func (a *APISource) fetchAdoTestResults(ctx context.Context, client *http.Client, scope adoPipelineScope, runID int, outcomes string) ([]adoTestResult, error) {
 	var all []adoTestResult
 	for skip := 0; ; skip += adoTestResultsPageSize {
-		resultsURL := fmt.Sprintf("%s/test/Runs/%d/results?outcomes=%s&$top=%d&$skip=%d&api-version=%s",
-			scope.apiBase(), runID, adoFailedTestOutcomes, adoTestResultsPageSize, skip, scope.apiVersion)
+		resultsURL := fmt.Sprintf("%s/test/Runs/%d/results?outcomes=%s&detailsToInclude=SubResults&$top=%d&$skip=%d&api-version=%s",
+			scope.apiBase(), runID, outcomes, adoTestResultsPageSize, skip, scope.apiVersion)
 		data, err := a.getRaw(ctx, client, resultsURL)
 		if err != nil {
-			return nil, fmt.Errorf("listing failed test results: %w", err)
+			return nil, fmt.Errorf("listing %s test results: %w", outcomes, err)
 		}
 		var page struct {
 			Value []adoTestResult `json:"value"`
@@ -451,6 +627,19 @@ func (tl *timeline) path(r adoTimelineRecord) string {
 		names[i], names[j] = names[j], names[i]
 	}
 	return strings.Join(names, " > ")
+}
+
+// pathIn names r, a record of timeline from, preferring tl's ancestry: a
+// previous-attempt timeline may hold only the rerun job, without the stage
+// above it, while record ids are shared across attempts.
+func (tl *timeline) pathIn(from *timeline, r adoTimelineRecord) string {
+	if _, ok := tl.byID[r.ID]; ok {
+		return tl.path(r)
+	}
+	if _, ok := tl.byID[r.ParentID]; ok {
+		return tl.path(r)
+	}
+	return from.path(r)
 }
 
 // jobID returns the id of r's Job record (r itself if it is one), or "".
@@ -586,6 +775,13 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 
 	var children []models.SourceDocument
 	if detail != nil {
+		if detail.attempts > 1 {
+			writeField(&sb, "Attempts", strconv.Itoa(detail.attempts))
+		}
+		if !adoDetailedResults[strings.ToLower(b.Result)] && (len(detail.steps) > 0 || len(detail.tests) > 0) {
+			sb.WriteString("Passed after rerun: the run's final result is " + b.Result +
+				", but earlier attempts or test retries failed (possibly flaky) — listed below.\n")
+		}
 		if len(detail.issues) > 0 {
 			sb.WriteString("\nIssues:\n")
 			for _, is := range detail.issues {
@@ -596,8 +792,13 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 			sb.WriteString("\nFailed steps:\n")
 		}
 		for _, st := range detail.steps {
+			n := st.record.attempt()
 			id := fmt.Sprintf("%s_step_%s", runDocID, st.record.ID)
-			fmt.Fprintf(&sb, "- %s (document %s)\n", st.path, id)
+			if n > 1 {
+				id += fmt.Sprintf("_attempt%d", n)
+			}
+			label := st.path + detail.attemptLabel(n)
+			fmt.Fprintf(&sb, "- %s (document %s)\n", label, id)
 			webURL := fmt.Sprintf("%s/_build/results?buildId=%d&view=logs", scope.webBase(), b.ID)
 			if st.jobID != "" {
 				webURL += "&j=" + st.jobID
@@ -605,24 +806,58 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 			if st.jobID != st.record.ID {
 				webURL += "&t=" + st.record.ID
 			}
-			doc := newDoc(id, fmt.Sprintf("%s failed step: %s", runLabel, st.path), st.log, "step", webURL,
-				fmt.Sprintf("Run #%s > %s", b.BuildNumber, st.path))
+			doc := newDoc(id, fmt.Sprintf("%s failed step: %s", runLabel, label), st.log, "step", webURL,
+				fmt.Sprintf("Run #%s > %s", b.BuildNumber, label))
 			doc.Properties["step_path"] = st.path
+			if detail.attempts > 1 {
+				doc.Properties["attempt"] = strconv.Itoa(n)
+			}
 			children = append(children, doc)
 		}
-		if len(detail.tests) > 0 {
+		var failedTests, flakyTests []pipelineTest
+		for _, t := range detail.tests {
+			if isFailedTestOutcome(t.result.Outcome) {
+				failedTests = append(failedTests, t)
+			} else {
+				flakyTests = append(flakyTests, t)
+			}
+		}
+		if len(failedTests) > 0 {
 			sb.WriteString("\nFailed tests:\n")
 		}
-		for _, t := range detail.tests {
-			id := fmt.Sprintf("%s_test_%d_%d", runDocID, t.run.ID, t.result.ID)
-			name := t.result.AutomatedTestName
-			if name == "" {
-				name = t.result.TestCaseTitle
+		testName := func(t pipelineTest) string {
+			if t.result.AutomatedTestName != "" {
+				return t.result.AutomatedTestName
 			}
-			fmt.Fprintf(&sb, "- %s [%s] (document %s)\n", name, t.result.Outcome, id)
+			return t.result.TestCaseTitle
+		}
+		testDocID := func(t pipelineTest) string {
+			return fmt.Sprintf("%s_test_%d_%d", runDocID, t.run.ID, t.result.ID)
+		}
+		for _, t := range failedTests {
+			fmt.Fprintf(&sb, "- %s [%s] (document %s)\n", testName(t), t.result.Outcome, testDocID(t))
+		}
+		if len(flakyTests) > 0 {
+			sb.WriteString("\nFlaky tests (passed on retry after failing):\n")
+		}
+		for _, t := range flakyTests {
+			fmt.Fprintf(&sb, "- %s [%s on retry] (document %s)\n", testName(t), t.result.Outcome, testDocID(t))
+		}
+		for _, t := range append(failedTests, flakyTests...) {
+			id := testDocID(t)
+			name := testName(t)
+			flaky := !isFailedTestOutcome(t.result.Outcome)
+			kind := "failed"
+			if flaky {
+				kind = "flaky"
+			}
 
 			var tb strings.Builder
-			fmt.Fprintf(&tb, "Failed test: %s\n", name)
+			if flaky {
+				fmt.Fprintf(&tb, "Flaky test (failed, then passed on retry): %s\n", name)
+			} else {
+				fmt.Fprintf(&tb, "Failed test: %s\n", name)
+			}
 			if t.result.TestCaseTitle != "" && t.result.TestCaseTitle != name {
 				writeField(&tb, "Title", t.result.TestCaseTitle)
 			}
@@ -641,10 +876,15 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 			if t.result.StackTrace != "" {
 				tb.WriteString("\nStack trace:\n" + t.result.StackTrace + "\n")
 			}
+			writeSubResults(&tb, t.result.SubResults, 0)
 			webURL := fmt.Sprintf("%s/_build/results?buildId=%d&view=ms.vss-test-web.build-test-results-tab&runId=%d&resultId=%d",
 				scope.webBase(), b.ID, t.run.ID, t.result.ID)
-			children = append(children, newDoc(id, fmt.Sprintf("%s failed test: %s", runLabel, name), tb.String(), "test", webURL,
-				fmt.Sprintf("Run #%s > test %s", b.BuildNumber, name)))
+			doc := newDoc(id, fmt.Sprintf("%s %s test: %s", runLabel, kind, name), tb.String(), "test", webURL,
+				fmt.Sprintf("Run #%s > test %s", b.BuildNumber, name))
+			if flaky {
+				doc.Properties["flaky"] = "true"
+			}
+			children = append(children, doc)
 		}
 	}
 
@@ -653,6 +893,36 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 		runDoc.Properties["commit_web_url"] = fmt.Sprintf("%s/_git/%s/commit/%s", scope.webBase(), url.PathEscape(b.Repository.Name), b.SourceVersion)
 	}
 	return append([]models.SourceDocument{runDoc}, children...)
+}
+
+// writeSubResults lists every attempt/iteration of a test, with the error
+// and stack trace of each failed one, nested sub-results indented.
+func writeSubResults(sb *strings.Builder, subs []adoTestSubResult, depth int) {
+	if len(subs) == 0 {
+		return
+	}
+	indent := strings.Repeat("  ", depth)
+	if depth == 0 {
+		sb.WriteString("\nAttempts / sub-results:\n")
+	}
+	for i, s := range subs {
+		name := s.DisplayName
+		if name == "" {
+			name = fmt.Sprintf("#%d", i+1)
+		}
+		fmt.Fprintf(sb, "%s- %s: %s", indent, name, s.Outcome)
+		if s.DurationInMs > 0 {
+			fmt.Fprintf(sb, " (%s)", time.Duration(s.DurationInMs)*time.Millisecond)
+		}
+		sb.WriteString("\n")
+		if s.ErrorMessage != "" {
+			sb.WriteString(indent + "  Error message:\n" + s.ErrorMessage + "\n")
+		}
+		if s.StackTrace != "" {
+			sb.WriteString(indent + "  Stack trace:\n" + s.StackTrace + "\n")
+		}
+		writeSubResults(sb, s.SubResults, depth+1)
+	}
 }
 
 func writeField(sb *strings.Builder, label, value string) {

@@ -408,6 +408,55 @@ func TestGitHubFetchWorkflowRuns(t *testing.T) {
 	}
 }
 
+// A run re-run to green reports success for its latest attempt; attempt 1's
+// failed job must still be embedded, and a clean green run stays summary-only.
+func TestGitHubWorkflowRunsKeepFailedAttempts(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.handleJSON("/actions/workflows/ci.yml/runs", map[string]any{"total_count": 2, "workflow_runs": []any{
+		map[string]any{"id": 21, "name": "CI", "run_number": 9, "run_attempt": 2, "conclusion": "success", "head_branch": "main"},
+		map[string]any{"id": 20, "name": "CI", "run_number": 8, "run_attempt": 1, "conclusion": "success", "head_branch": "main"},
+	}})
+	f.HandleFunc("/api/v3/repos/acme/app/actions/runs/21/jobs", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("filter") != "all" {
+			t.Errorf("jobs filter = %q, want all attempts", r.URL.Query().Get("filter"))
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []any{
+			map[string]any{"id": 202, "name": "test", "run_attempt": 2, "conclusion": "success"},
+			map[string]any{"id": 201, "name": "test", "run_attempt": 1, "conclusion": "failure"},
+		}})
+	})
+	f.handleJSON("/check-runs/201/annotations", []any{map[string]any{"path": ".github", "annotation_level": "failure", "message": "Process completed with exit code 1."}})
+	f.HandleFunc("/api/v3/repos/acme/app/actions/jobs/201/logs", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "--- FAIL: TestRace (flaky)\n")
+	})
+	f.HandleFunc("/api/v3/repos/acme/app/actions/runs/20/jobs", func(w http.ResponseWriter, r *http.Request) {
+		t.Error("a single-attempt green run must not be inspected")
+	})
+
+	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "30"}).FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, d := range docs {
+		ids = append(ids, d.ID)
+	}
+	if got := strings.Join(ids, ","); got != "s_run_21,s_run_21_job_201,s_run_20" {
+		t.Fatalf("doc ids = %s", got)
+	}
+	run := docs[0]
+	for _, want := range []string{"CI #9 success", "Passed after re-run", "[failure] test (attempt 1): Process completed with exit code 1.",
+		"- test (attempt 1) (document s_run_21_job_201)"} {
+		if !strings.Contains(run.Text, want) {
+			t.Errorf("run text lacks %q:\n%s", want, run.Text)
+		}
+	}
+	job := docs[1]
+	if !strings.Contains(job.Text, "--- FAIL: TestRace (flaky)") || job.Properties["attempt"] != "1" {
+		t.Errorf("attempt-1 job doc = %q %v", job.Text, job.Properties)
+	}
+}
+
 func TestGitHubWorkflowRunsOverQueryLimit(t *testing.T) {
 	f := newFakeGitHub(t)
 	f.handleJSON("/actions/workflows/7/runs", map[string]any{"total_count": 1500, "workflow_runs": []any{}})
