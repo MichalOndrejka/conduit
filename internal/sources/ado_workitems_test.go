@@ -291,6 +291,8 @@ func TestFetchAdoWorkItemsEmbedsLinksAndDiscussion(t *testing.T) {
 					{"rel": "ArtifactLink", "url": "vstfs:///Build/Build/1011", "attributes": map[string]any{"name": "Found in build"}},
 					{"rel": "ArtifactLink", "url": "vstfs:///Git/Ref/proj%2Frepo%2FGBfeature%2Flogin", "attributes": map[string]any{"name": "Branch"}},
 					{"rel": "Hyperlink", "url": "https://wiki/login"},
+					{"rel": "AttachedFile", "url": "https://ado/_apis/wit/attachments/a1", "attributes": map[string]any{
+						"name": "crashdump.zip", "resourceSize": 9019431321, "resourceCreatedDate": "2026-11-03T10:00:00Z", "comment": "from prod"}},
 				}},
 				{"id": 43, "fields": map[string]any{"System.Title": "No comments", "System.CommentCount": 0}},
 			}})
@@ -329,6 +331,8 @@ func TestFetchAdoWorkItemsEmbedsLinksAndDiscussion(t *testing.T) {
 		"Links:", "- Parent: #7", "- Related: #9 — same root cause", "- Pull Request: !45",
 		"- Fixed in Commit: abc123def4567890", "- Found in build: build 1011", "- Branch: feature/login",
 		"- Hyperlink: https://wiki/login",
+		"Attachments (1), metadata only: the files themselves are not indexed.",
+		"- crashdump.zip (8.4 GB, 2026-11-03T10:00:00Z) — from prod: https://ado/_apis/wit/attachments/a1",
 		"Discussion (3 comments):", "- Al (2026-11-01T10:00:00Z): First look",
 	} {
 		if !strings.Contains(text, want) {

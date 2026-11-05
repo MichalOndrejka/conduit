@@ -605,3 +605,95 @@ func (a *APISource) testHistoryDocuments(scope adoPipelineScope, builds []adoBui
 	}
 	return docs
 }
+
+// adoBuildArtifact is one artifact a build published (listing only).
+type adoBuildArtifact struct {
+	Name     string `json:"name"`
+	Source   string `json:"source"`
+	Resource struct {
+		Type        string         `json:"type"`
+		DownloadURL string         `json:"downloadUrl"`
+		URL         string         `json:"url"`
+		Properties  map[string]any `json:"properties"`
+	} `json:"resource"`
+}
+
+// fetchBuildArtifacts lists the artifacts a build published — names, types,
+// sizes and download links, never their contents. A server without the
+// artifacts API yields a note instead.
+func (a *APISource) fetchBuildArtifacts(ctx context.Context, client *http.Client, scope adoPipelineScope, buildID int) ([]attachmentInfo, []string, error) {
+	u := fmt.Sprintf("%s/build/builds/%d/artifacts?api-version=%s", scope.apiBase(), buildID, scope.apiVersion)
+	data, err := a.getRaw(ctx, client, u)
+	if err != nil {
+		note, err := listUnavailable("artifacts", err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("listing artifacts: %w", err)
+		}
+		return nil, []string{note}, nil
+	}
+	var page struct {
+		Value []adoBuildArtifact `json:"value"`
+	}
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, nil, fmt.Errorf("artifacts response is not valid JSON: %w", err)
+	}
+	out := make([]attachmentInfo, 0, len(page.Value))
+	for _, art := range page.Value {
+		link := art.Resource.DownloadURL
+		if !isWebURL(link) {
+			link = art.Resource.URL
+		}
+		size := int64(-1)
+		if v, ok := art.Resource.Properties["artifactsize"]; ok {
+			size = anyInt64(v)
+		}
+		out = append(out, attachmentInfo{Name: art.Name, Kind: art.Resource.Type, Size: size, URL: link})
+	}
+	return out, nil, nil
+}
+
+// adoTestAttachment is one file attached to a test run or test result.
+type adoTestAttachment struct {
+	FileName       string `json:"fileName"`
+	Comment        string `json:"comment"`
+	AttachmentType string `json:"attachmentType"`
+	CreatedDate    string `json:"createdDate"`
+	Size           *int64 `json:"size"`
+	URL            string `json:"url"`
+}
+
+// fetchTestAttachments lists the attachments of a test run (resultID 0) or
+// of one of its results — metadata only. The API is preview-only on Azure
+// DevOps; a server without it yields a note instead.
+func (a *APISource) fetchTestAttachments(ctx context.Context, client *http.Client, scope adoPipelineScope, runID, resultID int) ([]attachmentInfo, []string, error) {
+	u := fmt.Sprintf("%s/test/Runs/%d", scope.apiBase(), runID)
+	if resultID != 0 {
+		u += fmt.Sprintf("/Results/%d", resultID)
+	}
+	u += "/attachments?api-version=" + previewVersion(scope.apiVersion)
+	data, err := a.getRaw(ctx, client, u)
+	if err != nil {
+		note, err := listUnavailable("attachments", err)
+		if err != nil {
+			return nil, nil, fmt.Errorf("listing attachments: %w", err)
+		}
+		return nil, []string{note}, nil
+	}
+	var page struct {
+		Value []adoTestAttachment `json:"value"`
+	}
+	if err := json.Unmarshal(data, &page); err != nil {
+		return nil, nil, fmt.Errorf("attachments response is not valid JSON: %w", err)
+	}
+	out := make([]attachmentInfo, 0, len(page.Value))
+	for _, t := range page.Value {
+		size := int64(-1)
+		if t.Size != nil {
+			size = *t.Size
+		}
+		out = append(out, attachmentInfo{
+			Name: t.FileName, Kind: t.AttachmentType, Size: size, Created: t.CreatedDate, Comment: t.Comment, URL: t.URL,
+		})
+	}
+	return out, nil, nil
+}

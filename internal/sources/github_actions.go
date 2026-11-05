@@ -107,6 +107,7 @@ func (g *GitHubSource) fetchWorkflowRuns(ctx context.Context, progress ProgressC
 
 	n := len(runs)
 	details := make([]*githubRunDetail, n)
+	artifacts := make([]runArtifacts, n)
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var (
@@ -128,28 +129,35 @@ func (g *GitHubSource) fetchWorkflowRuns(ctx context.Context, progress ProgressC
 		mu.Unlock()
 	}
 	for i := 0; i < n && workCtx.Err() == nil; i++ {
-		// A re-run run reports its latest attempt's conclusion; its earlier
-		// attempts may still have failed.
-		if !githubDetailedConclusions[runs[i].Conclusion] && runs[i].RunAttempt <= 1 {
-			report()
-			continue
-		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			d, err := g.fetchRunDetail(workCtx, runs[i])
-			if err != nil {
+			fail := func(err error) {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = fmt.Errorf("workflow run #%d (id %d): %w", runs[i].RunNumber, runs[i].ID, err)
 				}
 				mu.Unlock()
 				cancel()
+			}
+			// A re-run run reports its latest attempt's conclusion; its
+			// earlier attempts may still have failed.
+			if githubDetailedConclusions[runs[i].Conclusion] || runs[i].RunAttempt > 1 {
+				d, err := g.fetchRunDetail(workCtx, runs[i])
+				if err != nil {
+					fail(err)
+					return
+				}
+				details[i] = d
+			}
+			arts, err := g.listRunArtifacts(workCtx, runs[i].ID)
+			if err != nil {
+				fail(err)
 				return
 			}
-			details[i] = d
+			artifacts[i] = runArtifacts{artifacts: arts}
 			report()
 		}(i)
 	}
@@ -179,10 +187,10 @@ func (g *GitHubSource) fetchWorkflowRuns(ctx context.Context, progress ProgressC
 
 	var docs []models.SourceDocument
 	for i, r := range runs {
-		docs = append(docs, g.runDocuments(r, details[i], changes[i], workflow)...)
+		docs = append(docs, g.runDocuments(r, details[i], changes[i], artifacts[i], workflow)...)
 	}
 	for _, r := range pending {
-		docs = append(docs, g.runDocuments(r, nil, nil, workflow)...)
+		docs = append(docs, g.runDocuments(r, nil, nil, runArtifacts{}, workflow)...)
 	}
 	if g.top() == 0 {
 		bySHA := map[string]githubRun{}
@@ -323,7 +331,7 @@ func (g *GitHubSource) listAnnotations(ctx context.Context, jobID int64) ([]gith
 
 // runDocuments builds a run's document plus, for failed runs (detail !=
 // nil), one document per failed job.
-func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail, changes []githubCompareCommit, workflow string) []models.SourceDocument {
+func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail, changes []githubCompareCommit, arts runArtifacts, workflow string) []models.SourceDocument {
 	sortKeys := githubRunSort(r)
 	runDocID := fmt.Sprintf("%s_run_%d", g.src.ID, r.ID)
 	runLabel := fmt.Sprintf("%s #%d", r.Name, r.RunNumber)
@@ -388,6 +396,7 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail, change
 		sb.WriteString("The run hadn't completed when Conduit last synced; sync again for its result.\n")
 	}
 	writeGitHubChanges(&sb, changes)
+	writeAttachments(&sb, "Artifacts", arts.artifacts, arts.notes...)
 
 	var children []models.SourceDocument
 	if detail != nil {
@@ -447,4 +456,44 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail, change
 		runDoc.Properties["commit_web_url"] = g.repoWeb() + "/commit/" + r.HeadSHA
 	}
 	return append([]models.SourceDocument{runDoc}, children...)
+}
+
+// listRunArtifacts lists the artifacts a workflow run uploaded — names,
+// sizes, expiry and download links, never their contents.
+func (g *GitHubSource) listRunArtifacts(ctx context.Context, runID int64) ([]attachmentInfo, error) {
+	var out []attachmentInfo
+	err := g.pages(ctx, fmt.Sprintf("%s/actions/runs/%d/artifacts", g.repoAPI(), runID), func(data []byte) (int, bool, error) {
+		var page struct {
+			Artifacts []struct {
+				ID          int64  `json:"id"`
+				Name        string `json:"name"`
+				SizeInBytes int64  `json:"size_in_bytes"`
+				Expired     bool   `json:"expired"`
+				CreatedAt   string `json:"created_at"`
+				ExpiresAt   string `json:"expires_at"`
+			} `json:"artifacts"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			return 0, false, err
+		}
+		for _, a := range page.Artifacts {
+			info := attachmentInfo{Name: a.Name, Kind: "zip", Size: a.SizeInBytes, Created: a.CreatedAt}
+			switch {
+			case a.Expired:
+				info.Note = "expired, no longer downloadable"
+			case a.ExpiresAt != "":
+				info.Note = "expires " + a.ExpiresAt
+			}
+			if !a.Expired {
+				// The browser download link; the API's archive_download_url needs a token.
+				info.URL = fmt.Sprintf("%s/actions/runs/%d/artifacts/%d", g.repoWeb(), runID, a.ID)
+			}
+			out = append(out, info)
+		}
+		return len(page.Artifacts), true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing artifacts: %w", err)
+	}
+	return out, nil
 }

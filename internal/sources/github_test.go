@@ -37,6 +37,14 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 		f.mu.Unlock()
 		f.ServeMux.ServeHTTP(w, r)
 	}))
+	// Workflow runs list their artifacts; tests that don't care get none.
+	f.HandleFunc("/api/v3/repos/acme/app/actions/runs/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/artifacts") {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 0, "artifacts": []any{}})
+	})
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -392,6 +400,11 @@ func TestGitHubFetchWorkflowRuns(t *testing.T) {
 		http.Error(w, "gone", http.StatusGone)
 	})
 
+	f.handleJSON("/actions/runs/10/artifacts", map[string]any{"total_count": 2, "artifacts": []any{
+		map[string]any{"id": 5, "name": "app-1.4.2", "size_in_bytes": 52428800, "created_at": "2026-10-01T09:00:00Z",
+			"expires_at": "2026-12-30T09:00:00Z", "archive_download_url": "https://api.github.com/repos/acme/app/actions/artifacts/5/zip"},
+		map[string]any{"id": 4, "name": "old-logs", "size_in_bytes": 10, "expired": true},
+	}})
 	f.handleJSON("/deployments", []any{})
 	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "30"}).FetchDocuments(context.Background(), nil)
 	if err != nil {
@@ -422,6 +435,16 @@ func TestGitHubFetchWorkflowRuns(t *testing.T) {
 	}
 	if docs[3].ID != "s_run_10" {
 		t.Errorf("green run doc id = %q", docs[3].ID)
+	}
+	for _, want := range []string{"Artifacts (2), metadata only",
+		"- app-1.4.2 (50.0 MB, zip, 2026-10-01T09:00:00Z, expires 2026-12-30T09:00:00Z): " + f.srv.URL + "/acme/app/actions/runs/10/artifacts/5",
+		"- old-logs (10 B, zip, expired, no longer downloadable)\n"} {
+		if !strings.Contains(docs[3].Text+"\n", want) {
+			t.Errorf("green run text lacks %q:\n%s", want, docs[3].Text)
+		}
+	}
+	if strings.Contains(run.Text, "Artifacts") {
+		t.Errorf("a run without artifacts must not list any:\n%s", run.Text)
 	}
 }
 

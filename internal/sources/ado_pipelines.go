@@ -226,6 +226,22 @@ type pipelineTest struct {
 	// (0: unknown), job that job's Stage > Job path when known.
 	attempt int
 	job     string
+	// attachments are the result's attached files (metadata only).
+	attachments     []attachmentInfo
+	attachmentNotes []string
+}
+
+// testRunFiles is a test run's own attachments (metadata only).
+type testRunFiles struct {
+	run         adoTestRun
+	attachments []attachmentInfo
+	notes       []string
+}
+
+// runArtifacts is the artifacts a build published (metadata only).
+type runArtifacts struct {
+	artifacts []attachmentInfo
+	notes     []string
 }
 
 // pipelineRunDetail is everything fetched for a run that failed, partially
@@ -235,6 +251,8 @@ type pipelineRunDetail struct {
 	issues   []string // "[error] Stage > Job > Task: message"
 	steps    []pipelineStep
 	tests    []pipelineTest
+	// testRunFiles are the attachments of the build's test runs that have any.
+	testRunFiles []testRunFiles
 	// failedStages/Jobs/Steps name every record that failed in any attempt.
 	failedStages, failedJobs, failedSteps []string
 }
@@ -301,6 +319,7 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 	n := len(builds)
 	details := make([]*pipelineRunDetail, n)
 	changes := make([][]adoBuildChange, n)
+	artifacts := make([]runArtifacts, n)
 
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -349,7 +368,12 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 				fail(fmt.Errorf("pipeline run #%s (build %d): %w", builds[i].BuildNumber, builds[i].ID, err))
 				return
 			}
-			details[i], changes[i] = detail, ch
+			arts, notes, err := a.fetchBuildArtifacts(workCtx, client, scope, builds[i].ID)
+			if err != nil {
+				fail(fmt.Errorf("pipeline run #%s (build %d): %w", builds[i].BuildNumber, builds[i].ID, err))
+				return
+			}
+			details[i], changes[i], artifacts[i] = detail, ch, runArtifacts{arts, notes}
 			report()
 		}(i)
 	}
@@ -361,7 +385,7 @@ func (a *APISource) fetchAdoPipelineRuns(ctx context.Context, client *http.Clien
 	var docs []models.SourceDocument
 	byID := make(map[int]adoBuild, n)
 	for i, b := range builds {
-		docs = append(docs, a.pipelineRunDocuments(scope, b, details[i], changes[i])...)
+		docs = append(docs, a.pipelineRunDocuments(scope, b, details[i], changes[i], artifacts[i])...)
 		byID[b.ID] = b
 	}
 
@@ -542,6 +566,13 @@ func (a *APISource) fetchPipelineRunDetail(ctx context.Context, client *http.Cli
 	jobs := jobExecutions(latest, timelines)
 	for _, run := range runs {
 		attempt, job := detail.testRunAttempt(run, jobs)
+		atts, notes, err := a.fetchTestAttachments(ctx, client, scope, run.ID, 0)
+		if err != nil {
+			return nil, fmt.Errorf("test run %d: %w", run.ID, err)
+		}
+		if len(atts) > 0 || len(notes) > 0 {
+			detail.testRunFiles = append(detail.testRunFiles, testRunFiles{run: run, attachments: atts, notes: notes})
+		}
 		failed, err := a.fetchAdoTestResults(ctx, client, scope, run.ID, adoFailedTestOutcomes)
 		if err != nil {
 			return nil, fmt.Errorf("test run %d: %w", run.ID, err)
@@ -565,6 +596,14 @@ func (a *APISource) fetchPipelineRunDetail(ctx context.Context, client *http.Cli
 
 	if len(detail.steps) == 0 && len(detail.tests) == 0 && !adoDetailedResults[strings.ToLower(b.Result)] {
 		return nil, nil
+	}
+	for i := range detail.tests {
+		t := &detail.tests[i]
+		atts, notes, err := a.fetchTestAttachments(ctx, client, scope, t.run.ID, t.result.ID)
+		if err != nil {
+			return nil, fmt.Errorf("test run %d, result %d: %w", t.run.ID, t.result.ID, err)
+		}
+		t.attachments, t.attachmentNotes = atts, notes
 	}
 	return detail, nil
 }
@@ -774,7 +813,7 @@ func shortBranch(ref string) string {
 
 // pipelineRunDocuments builds a run's document plus, for failed/partial
 // runs (detail != nil), its step and test documents.
-func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, detail *pipelineRunDetail, changes []adoBuildChange) []models.SourceDocument {
+func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, detail *pipelineRunDetail, changes []adoBuildChange, arts runArtifacts) []models.SourceDocument {
 	runDocID := fmt.Sprintf("%s_run_%d", a.src.ID, b.ID)
 	runLabel := fmt.Sprintf("%s #%s", b.Definition.Name, b.BuildNumber)
 	runWebURL := b.Links.Web.Href
@@ -855,6 +894,7 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 
 	writeField(&sb, "Tags", strings.Join(b.Tags, ", "))
 	writeChanges(&sb, changes)
+	writeAttachments(&sb, "Artifacts", arts.artifacts, arts.notes...)
 
 	var children []models.SourceDocument
 	if detail != nil {
@@ -945,6 +985,9 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 		if detail.attempts > 1 && len(detail.tests) > 0 {
 			sb.WriteString(testsByAttempt(detail))
 		}
+		for _, f := range detail.testRunFiles {
+			writeAttachments(&sb, fmt.Sprintf("Attachments of test run %s (id %d)", f.run.Name, f.run.ID), f.attachments, f.notes...)
+		}
 		for _, t := range append(failedTests, flakyTests...) {
 			id := testDocID(t)
 			name := testName(t)
@@ -986,6 +1029,7 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 				tb.WriteString("\nStack trace:\n" + t.result.StackTrace + "\n")
 			}
 			writeSubResults(&tb, t.result.SubResults, 0)
+			writeAttachments(&tb, "Attachments", t.attachments, t.attachmentNotes...)
 			webURL := fmt.Sprintf("%s/_build/results?buildId=%d&view=ms.vss-test-web.build-test-results-tab&runId=%d&resultId=%d",
 				scope.webBase(), b.ID, t.run.ID, t.result.ID)
 			doc := newDoc(id, fmt.Sprintf("%s %s test: %s", runLabel, kind, name), tb.String(), "test", webURL,

@@ -56,6 +56,11 @@ func TestFetchAdoPullRequests(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"changeEntries": []any{map[string]any{"changeType": "edit",
 			"item": map[string]any{"path": "/src/payment.go", "objectId": "n", "originalObjectId": "o"}}}})
 	})
+	mux.HandleFunc(repo+"/pullRequests/9/attachments", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{"displayName": "repro.png",
+			"url": "https://ado/attachments/repro.png", "createdDate": "2026-11-01T09:00:00Z",
+			"author": map[string]any{"displayName": "Ann", "uniqueName": "ann@corp"}}}})
+	})
 	mux.HandleFunc(repo+"/pullRequests/9/threads", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{"id": 1, "status": "fixed",
 			"threadContext": map[string]any{"filePath": "/src/payment.go", "rightFileStart": map[string]any{"line": 12}},
@@ -86,6 +91,8 @@ func TestFetchAdoPullRequests(t *testing.T) {
 		"Bob <bob@corp>: approved (required)", "#77 [Bug] Checkout fails on timeout (Done)",
 		"Retries payment calls.", "Retry payment client", "edit /src/payment.go",
 		"Thread on /src/payment.go:12 [fixed]", "Use exponential backoff here.", "↳ Ann",
+		"Attachments (1), metadata only",
+		"- repro.png (by Ann <ann@corp>, 2026-11-01T09:00:00Z): https://ado/attachments/repro.png",
 	} {
 		if !strings.Contains(d.Text, want) {
 			t.Errorf("text lacks %q:\n%s", want, d.Text)

@@ -53,6 +53,15 @@ type prRecord struct {
 	changes    PRChanges
 	threads    []PRThread
 	incomplete []string
+	// attachments are files uploaded to the pull request (metadata only).
+	attachments     []attachmentInfo
+	attachmentNotes []string
+}
+
+// prAttachmentLister is implemented by providers whose pull requests carry
+// uploaded attachments separate from the comment text (Azure DevOps).
+type prAttachmentLister interface {
+	listAttachments(ctx context.Context, id int) ([]attachmentInfo, []string, error)
 }
 
 // pullRequestDays reads the source's Days window.
@@ -149,7 +158,13 @@ func fetchPullRequestRecord(ctx context.Context, p prIndexer, id int) (*prRecord
 	if err != nil {
 		return nil, fmt.Errorf("reading comment threads: %w", err)
 	}
-	return &prRecord{pr: pr, commits: commits, changes: changes, threads: threads, incomplete: incomplete}, nil
+	rec := &prRecord{pr: pr, commits: commits, changes: changes, threads: threads, incomplete: incomplete}
+	if l, ok := p.(prAttachmentLister); ok {
+		if rec.attachments, rec.attachmentNotes, err = l.listAttachments(ctx, id); err != nil {
+			return nil, fmt.Errorf("listing attachments: %w", err)
+		}
+	}
+	return rec, nil
 }
 
 // pullRequestDocument renders one pull request as a document.
@@ -255,6 +270,8 @@ func pullRequestDocument(src *models.SourceDefinition, scope prScope, rec *prRec
 			}
 		}
 	}
+
+	writeAttachments(&sb, "Attachments", rec.attachments, rec.attachmentNotes...)
 
 	notes := append(append(append([]string{}, pr.Notes...), rec.incomplete...), rec.changes.Incomplete...)
 	if len(notes) > 0 {
@@ -434,4 +451,34 @@ func (c *githubPRClient) indexDetails(ctx context.Context, id int) (*PullRequest
 func (g *GitHubSource) fetchPullRequests(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
 	return fetchPullRequestDocuments(ctx, g.src, &githubPRClient{g: g},
 		prScope{project: g.owner, repository: g.repo, idPrefix: "#"}, g.top(), progress)
+}
+
+// listAttachments lists the files uploaded to the pull request (pasted
+// screenshots and the like) — metadata only. The API is preview-only; a
+// server without it yields a note instead.
+func (c *adoPRClient) listAttachments(ctx context.Context, id int) ([]attachmentInfo, []string, error) {
+	var page struct {
+		Value []struct {
+			DisplayName string         `json:"displayName"`
+			Description string         `json:"description"`
+			URL         string         `json:"url"`
+			CreatedDate string         `json:"createdDate"`
+			Author      adoIdentityRef `json:"author"`
+		} `json:"value"`
+	}
+	q := url.Values{"api-version": {previewVersion(c.version)}}
+	if _, err := c.getJSON(ctx, c.prAPI(id)+"/attachments"+c.query(q), &page); err != nil {
+		note, err := listUnavailable("attachments", err)
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, []string{note}, nil
+	}
+	out := make([]attachmentInfo, 0, len(page.Value))
+	for _, v := range page.Value {
+		out = append(out, attachmentInfo{
+			Name: v.DisplayName, Size: -1, By: v.Author.String(), Created: v.CreatedDate, Comment: v.Description, URL: v.URL,
+		})
+	}
+	return out, nil, nil
 }

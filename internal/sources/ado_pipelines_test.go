@@ -78,6 +78,25 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 			}})
 		case strings.HasPrefix(path, "build/builds/") && strings.HasSuffix(path, "/changes"):
 			writeJSON(w, map[string]any{"value": []any{}})
+		case path == "build/builds/3/artifacts":
+			writeJSON(w, map[string]any{"value": []any{map[string]any{"name": "drop", "resource": map[string]any{
+				"type": "PipelineArtifact", "downloadUrl": "https://ado.example/drop.zip",
+				"properties": map[string]any{"artifactsize": "9019431321"}}}}})
+		case strings.HasSuffix(path, "/artifacts"):
+			writeJSON(w, map[string]any{"value": []any{}})
+		case path == "test/Runs/100/attachments":
+			writeJSON(w, map[string]any{"value": []any{map[string]any{"fileName": "coverage.xml", "attachmentType": "CodeCoverage",
+				"size": 2048, "url": "https://ado.example/_apis/test/Runs/100/Attachments/1"}}})
+		case path == "test/Runs/100/Results/7/attachments":
+			if !strings.HasSuffix(q.Get("api-version"), "-preview.1") {
+				t.Errorf("test attachments api-version = %q, want a preview version", q.Get("api-version"))
+			}
+			writeJSON(w, map[string]any{"value": []any{map[string]any{"fileName": "screenshot.png", "comment": "at failure",
+				"size": 123456, "createdDate": "2026-10-14T08:01:00Z", "url": "https://ado.example/_apis/test/Runs/100/Results/7/Attachments/2"}}})
+		case path == "test/Runs/200/attachments":
+			http.NotFound(w, r) // an older server without the API
+		case strings.HasSuffix(path, "/attachments"):
+			writeJSON(w, map[string]any{"value": []any{}})
 		case path == "distributedtask/environments":
 			writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 1, "name": "prod"}}})
 		case path == "distributedtask/environments/1/environmentdeploymentrecords":
@@ -219,7 +238,8 @@ func servePipelineExtras(w http.ResponseWriter, r *http.Request) bool {
 		writeJSON(w, map[string]any{"value": []any{}})
 	case strings.HasPrefix(path, "build/builds/") && strings.HasSuffix(path, "/changes"):
 		writeJSON(w, map[string]any{"value": []any{}})
-	case strings.HasPrefix(path, "distributedtask/environments"):
+	case strings.HasPrefix(path, "distributedtask/environments"),
+		strings.HasSuffix(path, "/artifacts"), strings.HasSuffix(path, "/attachments"):
 		writeJSON(w, map[string]any{"value": []any{}})
 	default:
 		return false
@@ -281,6 +301,10 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 		"[error] Build > Windows: The job exceeded the maximum time",
 		"- Build > Linux > Compile (document src-1_run_3_step_t1)",
 		"- Parser.Tests.ParsesEmpty [Failed] (document src-1_run_3_test_100_7)",
+		"Artifacts (1), metadata only: the files themselves are not indexed.",
+		"- drop (8.4 GB, PipelineArtifact): https://ado.example/drop.zip",
+		"Attachments of test run Unit tests (id 100) (1), metadata only",
+		"- coverage.xml (2.0 KB, CodeCoverage): https://ado.example/_apis/test/Runs/100/Attachments/1",
 	} {
 		if !strings.Contains(run.Text, s) {
 			t.Errorf("run doc text missing %q:\n%s", s, run.Text)
@@ -320,7 +344,9 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 
 	test := docByID(docs, "src-1_run_3_test_100_7")
 	for _, s := range []string{"Failed test: Parser.Tests.ParsesEmpty", "Outcome: Failed", "Duration: 1.5s",
-		"Expected 0 but was 1", "ParserTests.cs:line 42", "Test run: Unit tests (id 100)"} {
+		"Expected 0 but was 1", "ParserTests.cs:line 42", "Test run: Unit tests (id 100)",
+		"Attachments (1), metadata only", "ask the user to download it from the link and provide it",
+		"- screenshot.png (120.6 KB, 2026-10-14T08:01:00Z) — at failure: https://ado.example/_apis/test/Runs/100/Results/7/Attachments/2"} {
 		if !strings.Contains(test.Text, s) {
 			t.Errorf("test doc text missing %q:\n%s", s, test.Text)
 		}
@@ -368,6 +394,8 @@ func TestFetchPipelineRunsKeepsFailuresOfRerunAttempts(t *testing.T) {
 		"- Build > Linux > Test (attempt 1) (document src-1_run_2_step_t1)",
 		"- Api.Tests.Upload [Failed] (attempt 1, Build > Linux) (document src-1_run_2_test_200_9)",
 		"- Api.Tests.Retry [Passed on retry] (attempt 2, Build > Linux) (document src-1_run_2_test_201_11)",
+		"Attachments of test run VSTest_TestResults_1 (id 200) (0), metadata only",
+		"- (attachments couldn't be listed: the server answered HTTP 404)",
 		"Tests by attempt:\n- attempt 1: Api.Tests.Upload\n- attempt 2: Api.Tests.Retry (passed on in-run retry)",
 	} {
 		if !strings.Contains(run.Text, s) {
@@ -449,8 +477,8 @@ func TestFetchPipelineRunsSendsWindowAndTestQueries(t *testing.T) {
 	var listCalls int
 	for _, r := range stub.requests {
 		if strings.Contains(r, "/build/builds/4/") && !strings.HasPrefix(r, "/proj/_apis/build/builds/4/timeline?") &&
-			!strings.HasPrefix(r, "/proj/_apis/build/builds/4/changes?") {
-			t.Errorf("a green single-attempt run may cost only its timeline and changes calls: %s", r)
+			!strings.HasPrefix(r, "/proj/_apis/build/builds/4/changes?") && !strings.HasPrefix(r, "/proj/_apis/build/builds/4/artifacts?") {
+			t.Errorf("a green single-attempt run may cost only its timeline, changes and artifacts calls: %s", r)
 		}
 		if strings.Contains(r, "buildUri=vstfs%3A%2F%2F%2FBuild%2FBuild%2F4") || strings.Contains(r, "Build/Build/4") {
 			t.Errorf("checked test runs of a green single-attempt run: %s", r)

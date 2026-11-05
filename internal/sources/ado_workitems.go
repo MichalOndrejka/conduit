@@ -276,6 +276,11 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		if links := workItemLinks(item.Relations); len(links) > 0 {
 			parts = append(parts, "\nLinks:\n- "+strings.Join(links, "\n- "))
 		}
+		if atts := workItemAttachments(item.Relations); len(atts) > 0 {
+			var ab strings.Builder
+			writeAttachments(&ab, "Attachments", atts)
+			parts = append(parts, strings.TrimRight(ab.String(), "\n"))
+		}
 		if len(item.comments) > 0 {
 			parts = append(parts, "\n"+discussionText(item.comments))
 		}

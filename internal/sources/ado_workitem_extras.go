@@ -63,10 +63,7 @@ func workItemLinks(rels []adoWorkItemRelation) []string {
 		case strings.EqualFold(r.Rel, "Hyperlink"):
 			line = "Hyperlink: " + r.URL
 		case strings.EqualFold(r.Rel, "AttachedFile"):
-			if name == "" {
-				name = "file"
-			}
-			line = "Attachment: " + name + " (" + r.URL + ")"
+			continue // listed under Attachments (workItemAttachments)
 		default:
 			if name == "" {
 				name = r.Rel
@@ -80,6 +77,28 @@ func workItemLinks(rels []adoWorkItemRelation) []string {
 	}
 	sort.Strings(lines)
 	return lines
+}
+
+// workItemAttachments returns the item's attached files' metadata, from
+// the AttachedFile relations ($expand=all carries name, size, dates and
+// comment as attributes). The files aren't downloaded.
+func workItemAttachments(rels []adoWorkItemRelation) []attachmentInfo {
+	var out []attachmentInfo
+	for _, r := range rels {
+		if !strings.EqualFold(r.Rel, "AttachedFile") {
+			continue
+		}
+		name, _ := r.Attributes["name"].(string)
+		comment, _ := r.Attributes["comment"].(string)
+		created, _ := r.Attributes["resourceCreatedDate"].(string)
+		if created == "" {
+			created, _ = r.Attributes["authorizedDate"].(string)
+		}
+		out = append(out, attachmentInfo{
+			Name: name, Size: anyInt64(r.Attributes["resourceSize"]), Created: created, Comment: comment, URL: r.URL,
+		})
+	}
+	return out
 }
 
 // artifactLink renders a vstfs:/// artifact link (pull request, commit,
