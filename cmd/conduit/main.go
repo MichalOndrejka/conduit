@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -139,18 +138,9 @@ func main() {
 		return
 	}
 
-	// ── Stats history (see internal/stats) ──────────────────────────────────
-	// Recorded per build (commit + uncommitted changes) in the data
-	// directory and kept across restarts, so versions can be compared on
-	// the Stats page. Failing to open it only turns stats off.
-	build := stats.DetectBuild(version)
-	statsRec, err := stats.Open(dataDir, build, statsKeepBuilds())
-	if err != nil {
-		log.Printf("warning: stats disabled: %v", err)
-		statsRec = nil
-	}
-	defer statsRec.Close()
-	log.Printf("build %s", build.Label())
+	// ── Stats (see internal/stats) ──────────────────────────────────────────
+	// Kept in memory for this process only; a restart starts empty.
+	statsRec := stats.New()
 	syncSvc.SetRecorder(statsRec)
 
 	// ── MCP server (streamable HTTP at /mcp) ───────────────────────────────
@@ -302,13 +292,4 @@ func runSearchCLI(searchSvc *rag.SearchService, args []string) {
 		log.Fatal(err)
 	}
 	fmt.Println(string(out))
-}
-
-// statsKeepBuilds is how many builds the stats history keeps:
-// CONDUIT_STATS_KEEP_BUILDS, or stats.DefaultKeepBuilds.
-func statsKeepBuilds() int {
-	if n, err := strconv.Atoi(os.Getenv("CONDUIT_STATS_KEEP_BUILDS")); err == nil && n > 0 {
-		return n
-	}
-	return stats.DefaultKeepBuilds
 }

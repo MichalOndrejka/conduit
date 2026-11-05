@@ -31,11 +31,7 @@ func TestSearchToolCallsAreRecordedInStats(t *testing.T) {
 	vectors := rag.NewVectorStore(cfg)
 	embedding := rag.NewEmbeddingService(cfg)
 
-	rec, err := stats.Open(t.TempDir(), stats.Build{ID: "b1"}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rec.Close()
+	rec := stats.New()
 	s := server.NewMCPServer("test", "0.0.0", server.WithToolHandlerMiddleware(rec.ToolMiddleware))
 	RegisterTools(s, rag.NewSearchService(vectors, embedding, nil), memory.NewService(vectors, embedding))
 	ctx := context.Background()
@@ -49,7 +45,7 @@ func TestSearchToolCallsAreRecordedInStats(t *testing.T) {
 		"mode": "semantic_search", "query": "nothing here", "page": float64(2),
 	}})
 
-	events, _ := rec.Load()
+	events := rec.Events()
 	var calls []*stats.ToolCall
 	for _, e := range events {
 		if e.Tool != nil {

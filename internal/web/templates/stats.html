@@ -1,56 +1,25 @@
 {{define "title"}}Stats — Conduit{{end}}
 
-{{/* A table value with its change against the compared build. */}}
-{{define "cell"}}<div class="text-slate-200 tabular-nums">{{.Value}}</div>{{if .Change}}<div class="text-xs tabular-nums viz-tone-{{if .Tone}}{{.Tone}}{{else}}neutral{{end}}">{{if eq (printf "%.1s" .Change) "+"}}▲ {{else if eq (printf "%.1s" .Change) "−"}}▼ {{end}}{{.Change}} <span class="text-slate-500">was {{.Was}}</span></div>{{end}}{{end}}
-
 {{define "card-title"}}<h3 class="text-sm font-medium text-slate-200 mb-3">{{.}}</h3>{{end}}
 
 {{define "content"}}
 <div class="viz">
 
-<!-- Title and the one filter row that scopes everything below. -->
-<div class="flex items-center justify-between mb-2 flex-wrap gap-3">
-  <h1 class="text-2xl font-semibold text-white">Stats {{template "tip" (printf "What the agent's searches and the source syncs did, recorded per build as they happen and kept across restarts and versions. A build is the git commit plus any uncommitted changes. History file: %s" .Path)}}</h1>
-  {{if .Selected}}
-  <form method="get" action="/stats" class="flex items-center gap-3 text-sm flex-wrap">
-    <label class="flex items-center gap-2 text-slate-400">Build
-      <select name="build" onchange="this.form.submit()" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-slate-200 max-w-xs">
-        {{range .Builds}}<option value="{{.Build.ID}}" {{if eq .Build.ID $.Selected.Build.ID}}selected{{end}}>{{.FirstSeen.Local.Format "Jan 2 15:04"}} · {{.Build.Label}}</option>{{end}}
-      </select>
-    </label>
-    <label class="flex items-center gap-2 text-slate-400">Compared with
-      <select name="compare" onchange="this.form.submit()" class="rounded-lg border border-slate-700 bg-slate-950 px-3 py-1.5 text-slate-200 max-w-xs">
-        <option value="none" {{if $.CompareNone}}selected{{end}}>Nothing</option>
-        {{range .Builds}}{{if ne .Build.ID $.Selected.Build.ID}}<option value="{{.Build.ID}}" {{if and $.Baseline (eq .Build.ID $.Baseline.Build.ID)}}selected{{end}}>{{.FirstSeen.Local.Format "Jan 2 15:04"}} · {{.Build.Label}}</option>{{end}}{{end}}
-      </select>
-    </label>
-  </form>
-  {{end}}
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <h1 class="text-2xl font-semibold text-white">Stats {{if .Enabled}}{{template "tip" (printf "What the agent's searches and the source syncs did since this process started (%s). Kept in memory only: a restart starts empty." .Since)}}{{end}}</h1>
 </div>
 
 {{if not .Enabled}}
 <div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">Stats recording is off for this process.</div>
-{{else if not .Selected}}
-<div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">No stats yet. They appear as the agent searches and sources sync.</div>
 {{else}}
 
-<div class="mb-6 text-sm text-slate-400 flex items-center gap-2 flex-wrap">
-  <span class="text-slate-200 font-medium">{{.Selected.Build.Label}}</span>
-  {{if eq .Selected.Build.ID .Current.ID}}<span class="rounded-full bg-violet-950/30 border border-violet-900 px-2 py-0.5 text-xs text-violet-300">running now</span>{{end}}
-  {{if .Baseline}}<span>compared with <span class="text-slate-300">{{.Baseline.Build.Label}}</span></span>{{end}}
-</div>
-
-<!-- Headline numbers: value, change against the compared build, trend across builds. -->
+<!-- Headline numbers. -->
 <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-8">
   {{range .Tiles}}
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 flex flex-col">
     <div class="text-xs text-slate-400 mb-1">{{.Label}} {{template "tip" .Tip}}</div>
-    <div class="text-2xl font-semibold text-white">{{.Cell.Value}}</div>
-    <div class="text-xs h-4 mt-0.5 tabular-nums">
-      {{if .Cell.Change}}<span class="viz-tone-{{if .Cell.Tone}}{{.Cell.Tone}}{{else}}neutral{{end}}">{{.Arrow}} {{.Cell.Change}}</span> <span class="text-slate-500">vs {{.Cell.Was}}</span>{{end}}
-    </div>
+    <div class="text-2xl font-semibold text-white tabular-nums">{{.Value}}</div>
     {{if .Alert}}<div class="mt-1 text-xs viz-tone-bad">⚠ {{.Alert}}</div>{{end}}
-    <div class="mt-auto pt-2">{{.Spark}}</div>
   </div>
   {{end}}
 </div>
@@ -60,44 +29,24 @@
   <label class="tab"><input type="radio" name="StatsTab" value="search" class="sr-only" checked onchange="showStatsTab('search')">Search Quality</label>
   <label class="tab"><input type="radio" name="StatsTab" value="syncs" class="sr-only" onchange="showStatsTab('syncs')">Syncs</label>
   <label class="tab"><input type="radio" name="StatsTab" value="experience" class="sr-only" onchange="showStatsTab('experience')">Experience</label>
-  <label class="tab"><input type="radio" name="StatsTab" value="builds" class="sr-only" onchange="showStatsTab('builds')">Builds</label>
 </div>
 
 <!-- ── Search quality ─────────────────────────────────────────────── -->
 <div id="stats-tab-search" class="tab-panel p-5 space-y-6">
-  <div class="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
     <div class="rounded-xl border border-slate-800 p-4">
-      {{template "card-title" "Searches that found nothing"}}
-      {{.ChartEmpty}}
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Empty results by tool {{template "tip" "Each search tool's share of searches that found nothing. Lower is better."}}</h3>
+      {{if .ChartToolEmpty}}{{.ChartToolEmpty}}{{else}}<p class="text-sm text-slate-500">No searches yet.</p>{{end}}
     </div>
     <div class="rounded-xl border border-slate-800 p-4">
-      {{template "card-title" "Further pages per search"}}
-      {{.ChartNext}}
-    </div>
-    <div class="rounded-xl border border-slate-800 p-4">
-      {{template "card-title" "Chunk walks per search"}}
-      {{.ChartWalks}}
-    </div>
-    <div class="rounded-xl border border-slate-800 p-4">
-      {{template "card-title" "Search latency (p95)"}}
-      {{.ChartP95}}
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Calls by tool {{template "tip" "How often the agent called each MCP tool."}}</h3>
+      {{if .ChartToolCalls}}{{.ChartToolCalls}}{{else}}<p class="text-sm text-slate-500">No tool calls yet.</p>{{end}}
     </div>
   </div>
 
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Empty results by tool {{template "tip" "Each search tool's share of searches that found nothing, in the compared build (light dot) and the selected build (dark dot). Lower is better."}}</h3>
-      {{if .ChartToolEmpty}}{{.ChartToolEmpty}}{{else}}<p class="text-sm text-slate-500">No searches in this build.</p>{{end}}
-    </div>
-    <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Calls by tool {{template "tip" "How often the agent called each MCP tool in the selected build."}}</h3>
-      {{if .ChartToolCalls}}{{.ChartToolCalls}}{{else}}<p class="text-sm text-slate-500">No tool calls in this build.</p>{{end}}
-    </div>
-  </div>
-
-  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-    <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">What the agent didn't find {{template "tip" "The selected build's first-page searches with no results, newest first."}}</h3>
+      <h3 class="text-sm font-medium text-slate-200 mb-3">What the agent didn't find {{template "tip" "First-page searches with no results, newest first."}}</h3>
       {{if .EmptySearches}}
       <div class="divide-y divide-slate-800 max-h-96 overflow-y-auto -mx-1">
         {{range .EmptySearches}}
@@ -138,67 +87,51 @@
 
 <!-- ── Syncs ──────────────────────────────────────────────────────── -->
 <div id="stats-tab-syncs" class="tab-panel p-5 space-y-6 hidden">
-  <div class="rounded-xl border border-slate-800 p-4">
-    <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time per build {{template "tip" "Sum of each source's latest sync in a build, split by phase. The selected build is labelled; others are dimmed."}}</h3>
-    {{.ChartSyncTime}}
-  </div>
-  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-    <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">API requests {{template "tip" "HTTP requests to source APIs across each source's latest sync."}}</h3>
-      {{.ChartRequests}}
-    </div>
-    <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">⚠ Rate-limit hits {{template "tip" "Requests a source API refused for its rate limit, retries included."}}</h3>
-      {{.ChartRateLimits}}
-    </div>
-    <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">⚠ Failed syncs {{template "tip" "Sources whose latest sync in the build failed."}}</h3>
-      {{.ChartFailed}}
-    </div>
-  </div>
-
   {{if .Sources}}
   <div class="rounded-xl border border-slate-800 p-4">
-    <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time by source {{template "tip" "Each source's latest sync, compared build (light dot) against selected build (dark dot). Lower is better."}}</h3>
+    <h3 class="text-sm font-medium text-slate-200 mb-3">API requests by provider {{template "tip" "HTTP requests every sync since the process started made to each provider's API, retries included, and how many the API refused for its rate limit."}}</h3>
+    {{.ChartProviders}}
+  </div>
+
+  <div class="rounded-xl border border-slate-800 p-4">
+    <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time by source {{template "tip" "Each source's latest sync, longest first."}}</h3>
     {{.ChartSourceTime}}
   </div>
 
   <div class="rounded-xl border border-slate-800 p-4 overflow-x-auto">
-    <h3 class="text-sm font-medium text-slate-200 mb-3">Sources {{template "tip" "The exact figures of each source's latest sync, with the change against the compared build. A drop in documents or chunks is flagged: it usually means a broken token or filter, not a smaller source."}}</h3>
+    <h3 class="text-sm font-medium text-slate-200 mb-3">Sources {{template "tip" "The exact figures of each source's latest sync."}}</h3>
     <table class="w-full text-sm">
       <thead class="text-left text-xs text-slate-500">
         <tr>
           <th class="pb-2 font-normal">Source</th><th class="pb-2 font-normal">Status</th><th class="pb-2 font-normal">Total</th>
           <th class="pb-2 font-normal w-48"><span class="viz-key" style="background: var(--viz-s1)"></span> Fetch · <span class="viz-key" style="background: var(--viz-s3)"></span> Embed</th>
-          <th class="pb-2 font-normal">Documents</th><th class="pb-2 font-normal">Chunks</th><th class="pb-2 font-normal">API requests</th><th class="pb-2 font-normal">Rate-limited</th>
+          <th class="pb-2 font-normal text-right">Documents</th><th class="pb-2 font-normal text-right">Chunks</th><th class="pb-2 font-normal text-right">API requests</th><th class="pb-2 font-normal text-right">Rate-limited</th>
         </tr>
       </thead>
-      <tbody class="divide-y divide-slate-800">
+      <tbody class="divide-y divide-slate-800 tabular-nums">
         {{range .Sources}}
         <tr class="align-top">
-          <td class="py-2 pr-3"><div class="text-slate-200">{{.Name}}</div><div class="text-xs text-slate-500">{{.Type}} · {{.Provider}}{{if gt .Runs 1}} · {{.Runs}} syncs{{end}}{{if .NewHere}} · new{{end}}</div></td>
+          <td class="py-2 pr-3"><div class="text-slate-200">{{.Name}}</div><div class="text-xs text-slate-500">{{.Type}}{{if .Provider}} · {{.Provider}}{{end}}{{if gt .Runs 1}} · {{.Runs}} syncs{{end}}</div></td>
           <td class="py-2 pr-3 whitespace-nowrap">
             <span class="viz-tone-{{if eq .StatusTone "good"}}good{{else if eq .StatusTone "bad"}}bad{{else}}neutral{{end}}">{{if eq .StatusTone "good"}}✓{{else if eq .StatusTone "bad"}}✕{{else}}•{{end}} {{.Status}}</span>
             {{if .Error}}{{template "tip" .Error}}{{end}}
           </td>
-          {{if .OnlyInBaseline}}<td class="py-2 text-slate-500" colspan="6">–</td>{{else}}
-          <td class="py-2 pr-3">{{template "cell" .Duration}}</td>
+          <td class="py-2 pr-3 text-slate-200">{{.Duration}}</td>
           <td class="py-2 pr-3">
-            <div class="viz-split mt-1.5" title="Fetch {{.Fetch.Value}} · Embed {{.Index.Value}}"><span style="width: {{.FetchPct}}%; background: var(--viz-s1)"></span><span style="width: {{.IndexPct}}%; background: var(--viz-s3)"></span></div>
-            <div class="text-xs text-slate-500 mt-1 tabular-nums whitespace-nowrap">{{.Fetch.Value}} · {{.Index.Value}}</div>
+            <div class="viz-split mt-1.5" title="Fetch {{.Fetch}} · Embed {{.Index}}"><span style="width: {{.FetchPct}}%; background: var(--viz-s1)"></span><span style="width: {{.IndexPct}}%; background: var(--viz-s3)"></span></div>
+            <div class="text-xs text-slate-500 mt-1 whitespace-nowrap">{{.Fetch}} · {{.Index}}</div>
           </td>
-          <td class="py-2 pr-3">{{template "cell" .Documents}}</td>
-          <td class="py-2 pr-3">{{template "cell" .Chunks}}</td>
-          <td class="py-2 pr-3">{{template "cell" .Requests}}</td>
-          <td class="py-2">{{template "cell" .RateLimited}}</td>
-          {{end}}
+          <td class="py-2 pr-3 text-right text-slate-200">{{.Documents}}</td>
+          <td class="py-2 pr-3 text-right text-slate-200">{{.Chunks}}</td>
+          <td class="py-2 pr-3 text-right text-slate-200">{{.Requests}}</td>
+          <td class="py-2 text-right {{if gt .RateLimited 0}}viz-tone-bad{{else}}text-slate-200{{end}}">{{.RateLimited}}</td>
         </tr>
         {{end}}
       </tbody>
     </table>
   </div>
   {{else}}
-  <p class="text-sm text-slate-500">No syncs in this build.</p>
+  <p class="text-sm text-slate-500">No syncs yet.</p>
   {{end}}
 </div>
 
@@ -211,54 +144,17 @@
   </div>
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Most recalled {{template "tip" "Experience entries returned most often in the selected build."}}</h3>
-      {{if .ChartRecalled}}{{.ChartRecalled}}{{else}}<p class="text-sm text-slate-500">No recalls in this build.</p>{{end}}
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Most recalled {{template "tip" "Experience entries returned most often."}}</h3>
+      {{if .ChartRecalled}}{{.ChartRecalled}}{{else}}<p class="text-sm text-slate-500">No recalls yet.</p>{{end}}
     </div>
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Never recalled {{template "tip" "Entries no kept build has recalled. They may be worded so they never match a real task."}}</h3>
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Never recalled {{template "tip" "Entries not recalled since the process started. They may be worded so they never match a real task."}}</h3>
       {{if .NeverRetrieved}}
       <div class="divide-y divide-slate-800 max-h-80 overflow-y-auto">
         {{range .NeverRetrieved}}<div class="py-2 text-sm text-slate-300 break-words">{{.}}</div>{{end}}
       </div>
       {{else}}<p class="text-sm text-slate-500">Every entry has been recalled.</p>{{end}}
     </div>
-  </div>
-</div>
-
-<!-- ── Builds: the exact numbers behind every chart ────────────────── -->
-<div id="stats-tab-builds" class="tab-panel p-5 hidden">
-  <div class="overflow-x-auto">
-    <table class="w-full text-sm">
-      <thead class="text-left text-xs text-slate-500">
-        <tr>
-          <th class="pb-2 font-normal">Build</th><th class="pb-2 font-normal text-right">Searches</th><th class="pb-2 font-normal text-right">Empty</th>
-          <th class="pb-2 font-normal text-right">Further pages</th><th class="pb-2 font-normal text-right">Chunk walks</th><th class="pb-2 font-normal text-right">p95</th>
-          <th class="pb-2 font-normal text-right">Synced</th><th class="pb-2 font-normal text-right">Sync time</th><th class="pb-2 font-normal text-right">Fetch</th>
-          <th class="pb-2 font-normal text-right">Embed</th><th class="pb-2 font-normal text-right">Requests</th><th class="pb-2 font-normal text-right">Rate-limited</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-800 tabular-nums">
-        {{range .BuildRows}}
-        <tr class="{{if .Selected}}bg-violet-950/30{{end}}">
-          <td class="py-2 pr-3">
-            <a href="/stats?build={{.ID}}" class="text-slate-200 hover:text-violet-300">{{.Label}}</a>
-            <div class="text-xs text-slate-500">{{.When}} · {{.Starts}} start{{if ne .Starts 1}}s{{end}}{{if .Selected}} · selected{{end}}{{if .Baseline}} · compared{{end}}</div>
-          </td>
-          <td class="py-2 text-right">{{.Searches}}</td>
-          <td class="py-2 text-right">{{.EmptyRate}}</td>
-          <td class="py-2 text-right">{{.NextPage}}</td>
-          <td class="py-2 text-right">{{.ChunkWalks}}</td>
-          <td class="py-2 text-right">{{.P95}}</td>
-          <td class="py-2 text-right">{{.Sources}}{{if gt .Failed 0}} <span class="viz-tone-bad">(✕ {{.Failed}})</span>{{end}}</td>
-          <td class="py-2 text-right">{{.SyncDuration}}</td>
-          <td class="py-2 text-right">{{.Fetch}}</td>
-          <td class="py-2 text-right">{{.Index}}</td>
-          <td class="py-2 text-right">{{.Requests}}</td>
-          <td class="py-2 text-right {{if gt .RateLimited 0}}viz-tone-bad{{end}}">{{.RateLimited}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
   </div>
 </div>
 
@@ -269,7 +165,7 @@
 <script>
 // Tabs: one panel at a time; the choice survives reloads via the URL hash.
 function showStatsTab(name) {
-  ['search', 'syncs', 'experience', 'builds'].forEach(function (t) {
+  ['search', 'syncs', 'experience'].forEach(function (t) {
     var el = document.getElementById('stats-tab-' + t);
     if (el) el.classList.toggle('hidden', t !== name);
   });

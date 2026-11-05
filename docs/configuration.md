@@ -156,7 +156,6 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
 | `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`, or `0.0.0.0` in a container so the port mapping works. Requests must be addressed to `localhost`, `127.0.0.1`, `::1` or this value, and cross-site browser POSTs are rejected (DNS-rebinding/CSRF protection). |
 | `PORT` | HTTP listen port. Default: `8000`. |
-| `CONDUIT_STATS_KEEP_BUILDS` | How many builds of history `conduit-stats.jsonl` keeps for the [Stats](stats.md) page; older builds are dropped whole at startup. Default: `30`. |
 
 Every variable above always overrides the matching `config.json` value on process
 start, including on a container restart — if it's set in the environment, a value

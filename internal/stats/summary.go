@@ -78,7 +78,7 @@ func isSearch(tc *ToolCall) bool {
 		(tc.Mode == "semantic_search" || tc.Mode == "pattern_search" || tc.Mode == "retrieve_chunk")
 }
 
-// SyncTotals sum each source's latest sync of a build.
+// SyncTotals sum each source's latest sync.
 type SyncTotals struct {
 	Sources    int   `json:"sources"`
 	Failed     int   `json:"failed"`
@@ -93,43 +93,27 @@ type SyncTotals struct {
 	RateLimited  int   `json:"rate_limited"`
 }
 
-// BuildSummary is one build's history.
-type BuildSummary struct {
-	Build      Build       `json:"build"`
-	FirstSeen  time.Time   `json:"first_seen"`
-	LastSeen   time.Time   `json:"last_seen"`
-	Starts     int         `json:"starts"`
-	ToolCalls  int         `json:"tool_calls"`
-	ToolErrors int         `json:"tool_errors"`
-	Search     SearchStats `json:"search"`
-	Sync       SyncTotals  `json:"sync"`
-
-	latestSync map[string]*SyncRun // source ID → latest run
-	syncRuns   map[string]int
-	tools      map[string]*ToolRow
-	events     []Event
-}
-
-// ToolRow is one tool's calls in a build.
+// ToolRow is one tool's calls.
 type ToolRow struct {
 	Name   string      `json:"name"`
 	Calls  int         `json:"calls"`
 	Errors int         `json:"errors"`
 	Search SearchStats `json:"search"`
-	// Baseline is the same tool in the baseline build (nil if unused there).
-	Baseline *ToolRow `json:"baseline,omitempty"`
 }
 
-// SourceRow compares a source's latest sync in the selected and baseline
-// builds.
+// SourceRow is a source's latest sync.
 type SourceRow struct {
-	SourceID   string   `json:"source_id"`
-	SourceName string   `json:"source_name"`
-	SourceType string   `json:"source_type"`
-	Provider   string   `json:"provider,omitempty"`
-	Runs       int      `json:"runs"` // syncs of the source in the selected build
-	Current    *SyncRun `json:"current,omitempty"`
-	Baseline   *SyncRun `json:"baseline,omitempty"`
+	Runs   int      `json:"runs"` // syncs of the source so far
+	Latest *SyncRun `json:"latest"`
+}
+
+// ProviderRow is the load every sync since the start put on one provider's
+// API (all runs, not only each source's latest).
+type ProviderRow struct {
+	Provider    string `json:"provider"`
+	Syncs       int    `json:"syncs"`
+	Requests    int    `json:"requests"`
+	RateLimited int    `json:"rate_limited"`
 }
 
 // EmptySearch is a first-page search that found nothing.
@@ -150,7 +134,7 @@ type FilterRow struct {
 	Empty int    `json:"empty"`
 }
 
-// ExperienceStats summarize the experience tools in a build.
+// ExperienceStats summarize the experience tools.
 type ExperienceStats struct {
 	Retrieves      int        `json:"retrieves"`
 	EmptyRetrieves int        `json:"empty_retrieves"`
@@ -166,133 +150,69 @@ type HitCount struct {
 
 // Dashboard is everything the Stats page shows.
 type Dashboard struct {
-	// Builds are every kept build, newest first.
-	Builds        []*BuildSummary `json:"builds"`
-	Selected      *BuildSummary   `json:"selected,omitempty"`
-	Baseline      *BuildSummary   `json:"baseline,omitempty"`
+	ToolCalls     int             `json:"tool_calls"`
+	ToolErrors    int             `json:"tool_errors"`
+	Search        SearchStats     `json:"search"`
+	Sync          SyncTotals      `json:"sync"`
 	Tools         []*ToolRow      `json:"tools"`
 	Sources       []SourceRow     `json:"sources"`
+	Providers     []ProviderRow   `json:"providers"`
 	EmptySearches []EmptySearch   `json:"empty_searches"`
 	Filters       []FilterRow     `json:"filters"`
 	Experience    ExperienceStats `json:"experience"`
-	// RetrievedSituations are the experience situations returned in any kept
-	// build, for spotting entries that are never used.
+	// RetrievedSituations are the experience situations returned so far,
+	// for spotting entries that are never used.
 	RetrievedSituations map[string]bool `json:"-"`
 }
 
 // maxEmptySearches caps the empty-search list.
 const maxEmptySearches = 100
 
-// Summarize builds the dashboard for the selected build (default: newest)
-// against baseline (default: the next older build with activity).
-func Summarize(events []Event, selected, baseline string) *Dashboard {
-	byID := map[string]*BuildSummary{}
-	var order []*BuildSummary
+// Summarize builds the dashboard from events.
+func Summarize(events []Event) *Dashboard {
 	d := &Dashboard{RetrievedSituations: map[string]bool{}}
+	tools := map[string]*ToolRow{}
+	latest := map[string]*SyncRun{} // source ID → latest run
+	runs := map[string]int{}
+	providers := map[string]*ProviderRow{}
 	for _, e := range events {
-		b := byID[e.Build]
-		if b == nil {
-			b = &BuildSummary{Build: Build{ID: e.Build}, FirstSeen: e.Time,
-				latestSync: map[string]*SyncRun{}, syncRuns: map[string]int{}, tools: map[string]*ToolRow{}}
-			byID[e.Build] = b
-			order = append(order, b)
-		}
-		if e.Time.After(b.LastSeen) {
-			b.LastSeen = e.Time
-		}
-		b.events = append(b.events, e)
 		switch {
-		case e.Start != nil:
-			b.Starts++
-			b.Build = *e.Start
 		case e.Tool != nil:
 			tc := e.Tool
-			b.ToolCalls++
-			row := b.tools[tc.Name]
+			d.ToolCalls++
+			row := tools[tc.Name]
 			if row == nil {
 				row = &ToolRow{Name: tc.Name}
-				b.tools[tc.Name] = row
+				tools[tc.Name] = row
 			}
 			row.Calls++
 			if tc.Error != "" {
-				b.ToolErrors++
+				d.ToolErrors++
 				row.Errors++
 			}
 			if isSearch(tc) {
-				b.Search.add(tc)
+				d.Search.add(tc)
 				row.Search.add(tc)
 			}
 			for _, h := range tc.Hits {
 				d.RetrievedSituations[h] = true
 			}
 		case e.Sync != nil:
-			b.syncRuns[e.Sync.SourceID]++
-			b.latestSync[e.Sync.SourceID] = e.Sync
-		}
-	}
-	for _, b := range order {
-		b.Search.finish()
-		for _, row := range b.tools {
-			row.Search.finish()
-		}
-		for _, s := range b.latestSync {
-			b.Sync.Sources++
-			if s.Status == "failed" {
-				b.Sync.Failed++
+			runs[e.Sync.SourceID]++
+			p := providers[e.Sync.Provider]
+			if p == nil {
+				p = &ProviderRow{Provider: e.Sync.Provider}
+				providers[e.Sync.Provider] = p
 			}
-			b.Sync.DurationMs += s.DurationMs
-			b.Sync.FetchMs += s.FetchMs
-			b.Sync.PreprocessMs += s.PreprocessMs
-			b.Sync.IndexMs += s.IndexMs
-			b.Sync.Documents += s.Documents
-			b.Sync.Chunks += s.Chunks
-			b.Sync.Requests += s.Requests
-			b.Sync.RateLimited += s.RateLimited
+			p.Syncs++
+			p.Requests += e.Sync.Requests
+			p.RateLimited += e.Sync.RateLimited
+			latest[e.Sync.SourceID] = e.Sync
 		}
 	}
-	sort.SliceStable(order, func(i, j int) bool { return order[i].FirstSeen.After(order[j].FirstSeen) })
-	d.Builds = order
-	if len(order) == 0 {
-		return d
-	}
-
-	d.Selected = byID[selected]
-	if d.Selected == nil {
-		// The newest build that did something: a freshly started new build
-		// has no activity yet and would show an empty page.
-		d.Selected = order[0]
-		for _, b := range order {
-			if b.ToolCalls > 0 || len(b.latestSync) > 0 {
-				d.Selected = b
-				break
-			}
-		}
-	}
-	d.Baseline = byID[baseline]
-	if d.Baseline == nil && baseline == "" {
-		// The next older build that did something comparable.
-		i := slices.Index(order, d.Selected)
-		for _, b := range order[i+1:] {
-			if b.ToolCalls > 0 || b.Sync.Sources > 0 {
-				d.Baseline = b
-				break
-			}
-		}
-	}
-	if d.Baseline == d.Selected {
-		d.Baseline = nil
-	}
-	d.fill()
-	return d
-}
-
-// fill derives the selected build's tables.
-func (d *Dashboard) fill() {
-	sel, base := d.Selected, d.Baseline
-	for _, row := range sel.tools {
-		if base != nil {
-			row.Baseline = base.tools[row.Name]
-		}
+	d.Search.finish()
+	for _, row := range tools {
+		row.Search.finish()
 		d.Tools = append(d.Tools, row)
 	}
 	sort.Slice(d.Tools, func(i, j int) bool {
@@ -301,35 +221,42 @@ func (d *Dashboard) fill() {
 		}
 		return d.Tools[i].Name < d.Tools[j].Name
 	})
-
-	ids := map[string]bool{}
-	for id := range sel.latestSync {
-		ids[id] = true
-	}
-	if base != nil {
-		for id := range base.latestSync {
-			ids[id] = true
+	for id, s := range latest {
+		d.Sync.Sources++
+		if s.Status == "failed" {
+			d.Sync.Failed++
 		}
-	}
-	for id := range ids {
-		row := SourceRow{SourceID: id, Runs: sel.syncRuns[id], Current: sel.latestSync[id]}
-		if base != nil {
-			row.Baseline = base.latestSync[id]
-		}
-		ref := row.Current
-		if ref == nil {
-			ref = row.Baseline
-		}
-		row.SourceName, row.SourceType, row.Provider = ref.SourceName, ref.SourceType, ref.Provider
-		d.Sources = append(d.Sources, row)
+		d.Sync.DurationMs += s.DurationMs
+		d.Sync.FetchMs += s.FetchMs
+		d.Sync.PreprocessMs += s.PreprocessMs
+		d.Sync.IndexMs += s.IndexMs
+		d.Sync.Documents += s.Documents
+		d.Sync.Chunks += s.Chunks
+		d.Sync.Requests += s.Requests
+		d.Sync.RateLimited += s.RateLimited
+		d.Sources = append(d.Sources, SourceRow{Runs: runs[id], Latest: s})
 	}
 	sort.Slice(d.Sources, func(i, j int) bool {
-		return strings.ToLower(d.Sources[i].SourceName) < strings.ToLower(d.Sources[j].SourceName)
+		return strings.ToLower(d.Sources[i].Latest.SourceName) < strings.ToLower(d.Sources[j].Latest.SourceName)
 	})
+	for _, p := range providers {
+		d.Providers = append(d.Providers, *p)
+	}
+	sort.Slice(d.Providers, func(i, j int) bool {
+		if d.Providers[i].Requests != d.Providers[j].Requests {
+			return d.Providers[i].Requests > d.Providers[j].Requests
+		}
+		return d.Providers[i].Provider < d.Providers[j].Provider
+	})
+	d.fill(events)
+	return d
+}
 
+// fill derives the search and experience tables.
+func (d *Dashboard) fill(events []Event) {
 	filters := map[[3]string]*FilterRow{}
 	hits := map[string]int{}
-	for _, e := range sel.events {
+	for _, e := range events {
 		tc := e.Tool
 		if tc == nil {
 			continue

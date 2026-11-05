@@ -7,8 +7,6 @@
 conduit-sources.json
 conduit-settings.json
 conduit-embedding.json
-conduit-stats.jsonl
-conduit-stats.jsonl.tmp
 *.local.json
 .secret_key
 credentials.enc.json

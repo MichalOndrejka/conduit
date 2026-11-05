@@ -12,10 +12,7 @@ import (
 
 func syncRuns(t *testing.T, rec *stats.Recorder) []*stats.SyncRun {
 	t.Helper()
-	events, err := rec.Load()
-	if err != nil {
-		t.Fatal(err)
-	}
+	events := rec.Events()
 	var runs []*stats.SyncRun
 	for _, e := range events {
 		if e.Sync != nil {
@@ -34,11 +31,7 @@ func TestSyncRecordsRunInStats(t *testing.T) {
 	defer apiSrv.Close()
 
 	svc, _, _, src := setupPipeline(t, apiSrv.URL)
-	rec, err := stats.Open(t.TempDir(), stats.Build{ID: "b1"}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer rec.Close()
+	rec := stats.New()
 	svc.SetRecorder(rec)
 	svc.Sync(context.Background(), src.ID)
 
@@ -65,8 +58,7 @@ func TestSyncRecordsFailureAndRateLimits(t *testing.T) {
 	defer apiSrv.Close()
 
 	svc, _, _, src := setupPipeline(t, apiSrv.URL)
-	rec, _ := stats.Open(t.TempDir(), stats.Build{ID: "b1"}, 0)
-	defer rec.Close()
+	rec := stats.New()
 	svc.SetRecorder(rec)
 	svc.Sync(context.Background(), src.ID)
 
