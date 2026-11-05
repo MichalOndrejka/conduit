@@ -50,3 +50,8 @@ coverage/
 # Eval reports and private eval datasets (exported from real sources)
 eval-results/
 eval-private/
+
+# Local-only eval harness (code, datasets, docs)
+internal/eval/
+cmd/conduit/eval_local.go
+docs/evals.md

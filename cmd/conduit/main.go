@@ -20,7 +20,6 @@ import (
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/embedstate"
-	"github.com/MichalOndrejka/conduit/internal/eval"
 	"github.com/MichalOndrejka/conduit/internal/health"
 	"github.com/MichalOndrejka/conduit/internal/mcptools"
 	"github.com/MichalOndrejka/conduit/internal/memory"
@@ -64,13 +63,12 @@ func main() {
 		}
 		return
 	}
-	// Accuracy evals of source layouts (see internal/eval). Needs Qdrant and
-	// the embedding model; the agent run also the Claude API.
+	// Local-only accuracy evals; evalCmd is set by an untracked eval_local.go.
 	//   conduit eval <retrieval|agent|export|find> [flags]
-	if len(os.Args) > 1 && os.Args[1] == "eval" {
+	if len(os.Args) > 1 && os.Args[1] == "eval" && evalCmd != nil {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
-		if err := eval.Run(ctx, cfg, os.Args[2:], os.Stdout, os.Stderr); err != nil {
+		if err := evalCmd(ctx, cfg, os.Args[2:], os.Stdout, os.Stderr); err != nil {
 			fmt.Fprintln(os.Stderr, "eval:", err)
 			os.Exit(1)
 		}
