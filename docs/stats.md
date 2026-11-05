@@ -28,8 +28,7 @@ The process's first search embeds a query while the model is still loading, so i
   - the filter values used and how often each came back empty. A value that always comes back empty usually doesn't exist in the data.
 - **Syncs:**
   - API requests per provider (GitHub, Azure DevOps) across every sync since the process started, retries included, with rate-limit hits, to show how much load Conduit puts on each service;
-  - sync time per source;
-  - the per-source table with each source's latest sync: status, fetch/embed split, documents, chunks, API requests and rate-limit hits.
+  - sync time per source.
 - **Experience:** recalls, recalls that found nothing, the most-recalled entries, and entries not recalled since the process started.
 
 Every chart mark shows its values on hover and keyboard focus.

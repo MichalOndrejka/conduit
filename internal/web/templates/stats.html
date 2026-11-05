@@ -58,17 +58,18 @@
       </div>
       {{else}}<p class="text-sm text-slate-500">Every search found something.</p>{{end}}
     </div>
-    <div class="rounded-xl border border-slate-800 p-4">
+    <div class="rounded-xl border border-slate-800 p-4 min-w-0">
       <h3 class="text-sm font-medium text-slate-200 mb-3">Filter values {{template "tip" "Each filter value the agent used and the share of those searches that found nothing. A value that always comes back empty usually doesn't exist in the data: check the facets or the source's real vocabulary."}}</h3>
       {{if .Filters}}
-      <table class="w-full text-sm">
+      <div class="max-h-96 overflow-y-auto -mx-1 px-1">
+      <table class="w-full text-sm table-fixed">
         <thead class="text-left text-xs text-slate-500">
-          <tr><th class="pb-2 font-normal">Filter</th><th class="pb-2 font-normal text-right">Uses</th><th class="pb-2 font-normal pl-4 w-40">Found nothing</th></tr>
+          <tr><th class="pb-2 font-normal">Filter</th><th class="pb-2 font-normal text-right w-14">Uses</th><th class="pb-2 font-normal pl-4 w-40">Found nothing</th></tr>
         </thead>
         <tbody class="divide-y divide-slate-800">
           {{range .Filters}}
           <tr>
-            <td class="py-2 pr-2"><div class="text-slate-200">{{.Field}} = {{.Value}}</div><div class="text-xs text-slate-500 font-mono">{{.Tool}}</div></td>
+            <td class="py-2 pr-2 min-w-0"><div class="text-slate-200 break-all">{{.Field}} = {{.Value}}</div><div class="text-xs text-slate-500 font-mono truncate" title="{{.Tool}}">{{.Tool}}</div></td>
             <td class="py-2 text-right tabular-nums text-slate-300">{{.Uses}}</td>
             <td class="py-2 pl-4">
               <div class="flex items-center gap-2">
@@ -80,6 +81,7 @@
           {{end}}
         </tbody>
       </table>
+      </div>
       {{else}}<p class="text-sm text-slate-500">No filtered searches.</p>{{end}}
     </div>
   </div>
@@ -96,39 +98,6 @@
   <div class="rounded-xl border border-slate-800 p-4">
     <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time by source {{template "tip" "Each source's latest sync, longest first."}}</h3>
     {{.ChartSourceTime}}
-  </div>
-
-  <div class="rounded-xl border border-slate-800 p-4 overflow-x-auto">
-    <h3 class="text-sm font-medium text-slate-200 mb-3">Sources {{template "tip" "The exact figures of each source's latest sync."}}</h3>
-    <table class="w-full text-sm">
-      <thead class="text-left text-xs text-slate-500">
-        <tr>
-          <th class="pb-2 font-normal">Source</th><th class="pb-2 font-normal">Status</th><th class="pb-2 font-normal">Total</th>
-          <th class="pb-2 font-normal w-48"><span class="viz-key" style="background: var(--viz-s1)"></span> Fetch · <span class="viz-key" style="background: var(--viz-s3)"></span> Embed</th>
-          <th class="pb-2 font-normal text-right">Documents</th><th class="pb-2 font-normal text-right">Chunks</th><th class="pb-2 font-normal text-right">API requests</th><th class="pb-2 font-normal text-right">Rate-limited</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-slate-800 tabular-nums">
-        {{range .Sources}}
-        <tr class="align-top">
-          <td class="py-2 pr-3"><div class="text-slate-200">{{.Name}}</div><div class="text-xs text-slate-500">{{.Type}}{{if .Provider}} · {{.Provider}}{{end}}{{if gt .Runs 1}} · {{.Runs}} syncs{{end}}</div></td>
-          <td class="py-2 pr-3 whitespace-nowrap">
-            <span class="viz-tone-{{if eq .StatusTone "good"}}good{{else if eq .StatusTone "bad"}}bad{{else}}neutral{{end}}">{{if eq .StatusTone "good"}}✓{{else if eq .StatusTone "bad"}}✕{{else}}•{{end}} {{.Status}}</span>
-            {{if .Error}}{{template "tip" .Error}}{{end}}
-          </td>
-          <td class="py-2 pr-3 text-slate-200">{{.Duration}}</td>
-          <td class="py-2 pr-3">
-            <div class="viz-split mt-1.5" title="Fetch {{.Fetch}} · Embed {{.Index}}"><span style="width: {{.FetchPct}}%; background: var(--viz-s1)"></span><span style="width: {{.IndexPct}}%; background: var(--viz-s3)"></span></div>
-            <div class="text-xs text-slate-500 mt-1 whitespace-nowrap">{{.Fetch}} · {{.Index}}</div>
-          </td>
-          <td class="py-2 pr-3 text-right text-slate-200">{{.Documents}}</td>
-          <td class="py-2 pr-3 text-right text-slate-200">{{.Chunks}}</td>
-          <td class="py-2 pr-3 text-right text-slate-200">{{.Requests}}</td>
-          <td class="py-2 text-right {{if gt .RateLimited 0}}viz-tone-bad{{else}}text-slate-200{{end}}">{{.RateLimited}}</td>
-        </tr>
-        {{end}}
-      </tbody>
-    </table>
   </div>
   {{else}}
   <p class="text-sm text-slate-500">No syncs yet.</p>
