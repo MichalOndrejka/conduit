@@ -1,6 +1,6 @@
 # Accuracy evals
 
-`conduit eval` measures how accurately documents are found under different ways of organizing sources into collections ("layouts"). It was built to decide, with numbers, whether merging the source types (Requirements and Test Cases into Work Items and Documentation, Test Code into Code) loses accuracy. Conduit now uses the merged layout (`merged_fields`). `current` is kept as the baseline it was measured against.
+`conduit eval` measures how accurately documents are found under different ways of organizing sources into collections ("layouts"). It exists to decide, with numbers, whether merging source types (e.g. Requirements and Test Cases into Work Items and Documentation, Test Code into Code) loses accuracy.
 
 It needs the same Qdrant and embedding model Conduit uses. The agent level also needs Claude API credentials (`ANTHROPIC_API_KEY`, or an `ant auth login` profile). Eval collections are named `eval_*` and never touch Conduit's own `conduit_*` collections.
 
@@ -8,9 +8,9 @@ It needs the same Qdrant and embedding model Conduit uses. The agent level also 
 
 | Layout | Collections | How a question is narrowed |
 |---|---|---|
-| `current` (baseline) | One per source type, as before the merge | By picking the type's search tool |
+| `current` (baseline) | One per source type, as today | By picking the type's search tool |
 | `merged_nofilter` | One per shape: work items, code, documentation | Not at all: the cost of merging when the agent doesn't filter |
-| `merged_fields` (what Conduit ships) | Merged | By the company's own fields: work item types, tags, folders, and `code_kind` (test or production, derived from the file path) |
+| `merged_fields` | Merged | By the company's own fields: work item types, tags, folders, and `code_kind` (test or production, derived from the file path) |
 | `merged_category` | Merged | By a per-source category label |
 
 ## Two levels
@@ -22,11 +22,8 @@ It needs the same Qdrant and embedding model Conduit uses. The agent level also 
 With perfect filters a merged layout should match `current`, so a gap there points to a filter problem, not a layout problem.
 
 **Agent level** (`conduit eval agent`, costs API money): Claude answers every question with each layout's tools.
-- **`current`** gets the six type-specific tools from before the merge.
-- **The merged layouts** get Conduit's real search tools: `search_workitem`, `search_code` and `search_documentation`.
-  - **Same code as production:** their descriptions, request schema, filters, `facets` mode and empty-result facets all come from `internal/mcptools`, run over the eval index (`mcptools.RunSearchTool`).
-  - **Shared facet counting:** facets are counted by the same `rag.Facets` the server uses.
-  - **Kept in sync:** a change to the tools is measured without touching the eval. `merged_category` adds its `category` filter on top.
+- **`current`** gets today's six type-specific tools.
+- **The merged layouts** get three shape tools, each with a `facets` mode for discovering the company's work item types, tags and folders.
 
 Claude ends with the IDs of the documents that answer the question. Each answer is scored on recall, precision, rank and tool calls. This is the level that shows whether an agent actually finds the filters the merged design relies on. Without `-yes` the command only prints how many agent runs it would make.
 
@@ -51,7 +48,7 @@ conduit eval find -dataset eval-private/dataset.json -q "password reset expiry" 
 conduit eval retrieval -dataset eval-private/dataset.json -queries eval-private/queries.json
 ```
 
-A queries file adds labelled questions and, for `merged_fields`, the scopes describing how your company's data is narrowed: the work item types or folders of its requirements and test cases. `export` writes the filters a sync would (`source`, `provider`, `code_kind`), so a Code source's tests are `test_code` documents; requirements and test cases are only told apart by your scopes and labels.
+A queries file adds labelled questions and, for `merged_fields`, the scopes describing how your company's data is narrowed. `export` derives work item type scopes itself; add folder scopes for requirements or test cases kept as files.
 
 ```json
 {

@@ -8,13 +8,12 @@ const DocumentPlaceholder = "__DOCUMENT_REQUIRED__"
 
 // ── Collection names ────────────────────────────────────────────────────────
 
-// Collections are organized by shape — where the data lives — not by any
-// company's vocabulary: whatever a team calls its requirements or test cases,
-// they are either work items or files, and are narrowed by the team's own
-// field values (work item type, path, code_kind).
 const (
 	CollectionWorkItems     = "conduit_workitems"
-	CollectionCode          = "conduit_code" // production code and tests, narrowed by code_kind
+	CollectionRequirements  = "conduit_requirements"
+	CollectionSourceCode    = "conduit_code"
+	CollectionTestCode      = "conduit_testcode"
+	CollectionTestCases     = "conduit_testcases"
 	CollectionDocumentation = "conduit_documentation"
 	CollectionCommits       = "conduit_commits"
 	CollectionPipelineRuns  = "conduit_pipeline_runs"
@@ -23,23 +22,20 @@ const (
 
 // AllCollections mirrors CollectionNames.ALL in app/models.py.
 var AllCollections = []string{
-	CollectionWorkItems, CollectionCode, CollectionDocumentation,
-	CollectionCommits, CollectionPipelineRuns, CollectionExperience,
-}
-
-// LegacyCollections held the company-specific source types merged into the
-// shape collections (see MigrateSourceType). A source's points are removed
-// from them once it has re-synced into its new collection, and an emptied
-// legacy collection is dropped.
-var LegacyCollections = []string{
-	"conduit_requirements", "conduit_testcases", "conduit_testcode",
+	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
+	CollectionTestCode, CollectionTestCases,
+	CollectionDocumentation, CollectionCommits, CollectionPipelineRuns,
+	CollectionExperience,
 }
 
 // ── Source types ─────────────────────────────────────────────────────────────
 
 const (
 	SourceWorkItemQuery = "work-item"
+	SourceRequirements  = "requirements"
+	SourceTestCase      = "test-case"
 	SourceCodeRepo      = "code"
+	SourceTestCodeRepo  = "test-code"
 	SourceDocumentation = "documentation"
 	SourceGitCommits    = "commit-history"
 	SourcePipelineRun   = "pipeline-run"

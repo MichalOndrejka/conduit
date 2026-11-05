@@ -7,7 +7,6 @@ package store
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"os"
 	"sync"
 
@@ -159,7 +158,6 @@ func (s *SourceConfigStore) Import(data []byte) (int, error) {
 			src.ID = uuid.NewString()
 		}
 		existing[src.ID] = true
-		models.MigrateSourceType(&src) // a file exported before the types were merged
 		src.SyncStatus = "idle"
 		src.SyncError = nil
 		sources = append(sources, src)
@@ -249,23 +247,9 @@ func (s *SourceConfigStore) read() ([]models.SourceDefinition, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Sources of the merged legacy types are re-typed once and saved, so
-	// every reader sees the shape types (see models.MigrateSourceType).
-	migrated := false
-	for i := range sources {
-		if models.MigrateSourceType(&sources[i]) {
-			log.Printf("source %q re-typed as %s (source types were merged) — re-sync it to move its data", sources[i].Name, sources[i].Type)
-			migrated = true
-		}
-	}
-	if migrated {
-		if err := s.write(sources); err != nil {
-			log.Printf("warning: could not save re-typed sources: %v", err)
-		}
-	}
 	s.cache = cloneSources(sources)
 	s.loaded = true
-	return cloneSources(sources), nil
+	return sources, nil
 }
 
 func (s *SourceConfigStore) readFile() ([]models.SourceDefinition, error) {

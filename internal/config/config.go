@@ -86,8 +86,9 @@ func defaults() AppConfig {
 			BaseURL:     "http://" + host + ":11434/v1",
 			Concurrency: 4,
 			SourceTypes: map[string]bool{
-				"work-item": true, "documentation": true, "code": false,
-				"commit-history": false, "pipeline-run": false,
+				"work-item": true, "requirements": true, "test-case": true,
+				"commit-history": false, "pipeline-run": false, "code": false,
+				"test-code": false, "documentation": true,
 			},
 		},
 		SourcesFilePath: "conduit-sources.json",
@@ -112,11 +113,6 @@ func Load() (*AppConfig, error) {
 		if err := json.Unmarshal(data, &cfg); err != nil {
 			return nil, err
 		}
-	}
-	// Toggles of the source types merged into Work Items, Code and
-	// Documentation no longer match any source.
-	for _, legacy := range []string{"requirements", "test-case", "test-code"} {
-		delete(cfg.Preprocessing.SourceTypes, legacy)
 	}
 
 	if v := os.Getenv("QDRANT_URL"); v != "" {

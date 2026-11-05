@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
@@ -73,7 +72,7 @@ func DropAll(ctx context.Context, vectors *rag.VectorStore, sources *store.Sourc
 	}
 	var errs []error
 	for _, name := range existing {
-		for _, col := range append(slices.Clone(models.AllCollections), models.LegacyCollections...) {
+		for _, col := range models.AllCollections {
 			if name == col {
 				errs = append(errs, vectors.DeleteCollection(ctx, col))
 			}

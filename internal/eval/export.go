@@ -15,19 +15,19 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
 
-// intentOf is the intent an exported document carries: its source type's,
-// with Code split into code and test code by its code_kind. Requirements and
-// test cases are whatever the team keeps them as (work items or files), so
-// only labelled questions say which documents are which.
-func intentOf(sourceType string, d models.SourceDocument) string {
+// intentOf maps a source type to the intent its documents carry.
+func intentOf(sourceType string) string {
 	switch sourceType {
 	case models.SourceWorkItemQuery:
 		return IntentWorkItem
+	case models.SourceRequirements:
+		return IntentRequirement
+	case models.SourceTestCase:
+		return IntentTestCase
 	case models.SourceCodeRepo:
-		if slices.Contains(d.Filters.Fields[models.FilterCodeKind], models.CodeKindTest) {
-			return IntentTestCode
-		}
 		return IntentCode
+	case models.SourceTestCodeRepo:
+		return IntentTestCode
 	case models.SourceGitCommits:
 		return IntentCommit
 	case models.SourcePipelineRun:
@@ -42,6 +42,11 @@ func shapeOf(src models.SourceDefinition) string {
 	switch src.Type {
 	case models.SourceWorkItemQuery:
 		return ShapeWorkItem
+	case models.SourceRequirements, models.SourceTestCase:
+		if src.GetConfig("FetchMode") == "workitems" {
+			return ShapeWorkItem
+		}
+		return ShapeFile
 	case models.SourceGitCommits:
 		return ShapeCommit
 	case models.SourcePipelineRun:
@@ -62,9 +67,10 @@ type ExportOptions struct {
 // into a single-company dataset without questions. Label questions against
 // it in a separate queries file (see QueriesFile); keep both out of git.
 //
-// Documents carry the filters a sync would write (source, provider,
-// code_kind). Scopes saying how the company's requirements or test cases are
-// narrowed (a work item type, a folder) go in the queries file.
+// It also writes the scopes it can derive from the source configs: work
+// item sources with ticked types give a work_item_type filter. Scopes for
+// file-based requirements or test cases need a folder, which a glob
+// PathFilter doesn't give, so add those in the queries file.
 func Export(ctx context.Context, all []models.SourceDefinition, store secrets.Reader, opts ExportOptions) (*Dataset, error) {
 	if opts.Company == "" {
 		opts.Company = "real"
@@ -82,7 +88,6 @@ func Export(ctx context.Context, all []models.SourceDefinition, store secrets.Re
 		if len(opts.SourceIDs) == 0 && src.Disabled {
 			continue
 		}
-		models.MigrateSourceType(&src) // a legacy type, as the store would re-type it
 		s, err := sources.New(&src, store)
 		if err != nil {
 			return nil, fmt.Errorf("source %s: %w", src.Name, err)
@@ -92,10 +97,8 @@ func Export(ctx context.Context, all []models.SourceDefinition, store secrets.Re
 		if err != nil {
 			return nil, fmt.Errorf("fetching %s: %w", src.Name, err)
 		}
-		sources.AddSourceFilters(&src, docs)
-		shape := shapeOf(src)
+		intent, shape := intentOf(src.Type), shapeOf(src)
 		for _, d := range docs {
-			intent := intentOf(src.Type, d)
 			if seen[d.ID] {
 				logf("skipping duplicate document %s", d.ID)
 				continue
@@ -108,6 +111,11 @@ func Export(ctx context.Context, all []models.SourceDefinition, store secrets.Re
 			c.Documents = append(c.Documents, Document{ID: d.ID, Intent: intent, Shape: shape, Title: title, Text: d.Text, Fields: d.Filters.Fields})
 		}
 		logf("  %d documents", len(docs))
+		if shape == ShapeWorkItem && intent != IntentWorkItem {
+			if types := splitList(src.GetConfig("WorkItemTypes")); len(types) > 0 {
+				c.Scopes[intent] = append(c.Scopes[intent], Scope{Collection: CollWorkItems, Filters: map[string][]string{"work_item_type": types}})
+			}
+		}
 	}
 	sort.Slice(c.Documents, func(i, j int) bool { return c.Documents[i].ID < c.Documents[j].ID })
 	return &Dataset{Name: opts.Company, Description: "Private dataset exported from configured sources; do not commit.", Companies: []Company{c}}, nil

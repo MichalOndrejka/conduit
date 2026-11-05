@@ -50,34 +50,3 @@ func TestDocumentFiltersAddDedupesAndSkipsEmpty(t *testing.T) {
 		t.Errorf("tags = %v, want %v", got, want)
 	}
 }
-
-func TestFilterLevelsGroupHierarchicalValuesByDepth(t *testing.T) {
-	var f DocumentFilters
-	f.Add(FilterPath, "src/app/main.go", "docs/a.md")
-	got := FilterLevels(FilterPath, f.Fields[FilterPath])
-	want := map[int][]string{1: {"src", "docs"}, 2: {"src/app", "docs/a.md"}, 3: {"src/app/main.go"}}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("FilterLevels = %v, want %v", got, want)
-	}
-	if FilterLevelKey(FilterPath, 2) != "f_path__2" {
-		t.Errorf("FilterLevelKey = %s", FilterLevelKey(FilterPath, 2))
-	}
-	if d := FilterDepth(FilterAreaPath, `proj\team a`); d != 2 || !IsHierarchical(FilterAreaPath) {
-		t.Errorf("area_path depth = %d", d)
-	}
-	if IsHierarchical(FilterCodeKind) {
-		t.Error("code_kind is not hierarchical")
-	}
-}
-
-func TestBasePayloadIndexesCoverEveryFilter(t *testing.T) {
-	idx := BasePayloadIndexes()
-	for _, f := range AllFilterFields {
-		if idx[FilterKey(f)] != IndexKeyword {
-			t.Errorf("%s has no keyword index", f)
-		}
-	}
-	if idx[FilterDateKey] != IndexInteger || idx[PayloadChunkIndex] != IndexKeyword || idx[TagKey("source_id")] != IndexKeyword {
-		t.Errorf("indexes = %v", idx)
-	}
-}

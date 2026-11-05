@@ -336,22 +336,3 @@ func TestSaveOverwritesExistingFile(t *testing.T) {
 		t.Errorf("expected .tmp file to be renamed away, got stat err = %v", err)
 	}
 }
-
-func TestLoadDropsPreprocessingTogglesOfMergedSourceTypes(t *testing.T) {
-	path := useConfigFile(t)
-	if err := os.WriteFile(path, []byte(`{"preprocessing":{"source_types":{"requirements":true,"test-case":false,"test-code":true,"code":false}}}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, legacy := range []string{"requirements", "test-case", "test-code"} {
-		if _, ok := cfg.Preprocessing.SourceTypes[legacy]; ok {
-			t.Errorf("legacy toggle %q kept", legacy)
-		}
-	}
-	if v, ok := cfg.Preprocessing.SourceTypes["code"]; !ok || v {
-		t.Errorf("code toggle = %v, %v", v, ok)
-	}
-}

@@ -1,7 +1,6 @@
 package models
 
 import (
-	"strconv"
 	"strings"
 	"time"
 )
@@ -25,18 +24,7 @@ const (
 	FilterTag           = "tags"           // work item tags
 	FilterResult        = "result"         // pipeline run result
 	FilterBranch        = "branch"         // pipeline run source branch
-	FilterAreaPath      = "area_path"      // hierarchical ("\")
-	FilterSource        = "source"         // Conduit source name, on every document
-	FilterProvider      = "provider"       // azure-devops or github, on every document
-	FilterCodeKind      = "code_kind"      // Code only: test or production
 )
-
-// AllFilterFields lists every filter field, for creating payload indexes.
-var AllFilterFields = []string{
-	FilterProject, FilterRepository, FilterPath, FilterExtension, FilterAuthor,
-	FilterWorkItemType, FilterState, FilterIterationPath, FilterAssignedTo, FilterTag,
-	FilterResult, FilterBranch, FilterAreaPath, FilterSource, FilterProvider, FilterCodeKind,
-}
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
 // holds the document's primary date (commit author date) as Unix seconds,
@@ -53,44 +41,6 @@ func FilterKey(field string) string { return FilterPrefix + field }
 var filterSeparators = map[string]string{
 	FilterPath:          "/",
 	FilterIterationPath: `\`,
-	FilterAreaPath:      `\`,
-}
-
-// IsHierarchical reports whether field is a path-like field whose values
-// store every ancestor (path, iteration_path, area_path).
-func IsHierarchical(field string) bool {
-	_, ok := filterSeparators[field]
-	return ok
-}
-
-// FilterSeparator is a hierarchical field's separator ("" otherwise).
-func FilterSeparator(field string) string { return filterSeparators[field] }
-
-// FilterDepth is the level of a normalized hierarchical value: 1 for a
-// top-level folder ("src"), 2 for "src/app", …; 0 for "".
-func FilterDepth(field, normalized string) int {
-	if normalized == "" {
-		return 0
-	}
-	return strings.Count(normalized, filterSeparators[field]) + 1
-}
-
-// FilterLevelKey is the payload key holding a hierarchical field's values
-// at one level ("f_path__2" holds "src/app"), so facets can count the
-// children of a folder exactly.
-func FilterLevelKey(field string, level int) string {
-	return FilterKey(field) + "__" + strconv.Itoa(level)
-}
-
-// FilterLevels groups a hierarchical field's stored values by level.
-func FilterLevels(field string, values []string) map[int][]string {
-	out := map[int][]string{}
-	for _, v := range values {
-		if d := FilterDepth(field, v); d > 0 {
-			out[d] = append(out[d], v)
-		}
-	}
-	return out
 }
 
 // NormalizeFilterValue canonicalizes one value of field for storage or
@@ -155,29 +105,4 @@ func containsString(list []string, s string) bool {
 		}
 	}
 	return false
-}
-
-// Payload index types (Qdrant field_schema).
-const (
-	IndexKeyword = "keyword"
-	IndexInteger = "integer"
-)
-
-// BasePayloadIndexes are the payload indexes every search collection gets
-// when it is created (and existing ones at startup): every filter field,
-// the date range field, the chunk index (facets count documents by their
-// first chunk) and the source ID (disabled sources are excluded from every
-// search). Without them Qdrant plans selective filters poorly and can return
-// fewer than the requested top results. The per-level keys of hierarchical
-// fields (FilterLevelKey) are indexed by the indexer as it writes them.
-func BasePayloadIndexes() map[string]string {
-	out := map[string]string{
-		FilterDateKey:       IndexInteger,
-		PayloadChunkIndex:   IndexKeyword,
-		TagKey("source_id"): IndexKeyword,
-	}
-	for _, f := range AllFilterFields {
-		out[FilterKey(f)] = IndexKeyword
-	}
-	return out
 }

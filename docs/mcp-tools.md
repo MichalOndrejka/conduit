@@ -26,13 +26,12 @@ A `.vscode/mcp.json` is already included in the repo for VS Code users.
 Every search tool takes one `request` argument, shaped by `mode`:
 
 ```
-tool_name(request: { mode: "semantic_search", query: str, page: int, filters?: {...} })
+tool_name(request: { mode: "semantic_search", query: str, page: int, source_name?: str })
 tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int })
-tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, filters?: {...} })
-tool_name(request: { mode: "facets", fields: [str], filters?: {...}, prefix?: {field: str}, level?: {field: int} })
+tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, source_name?: str })
 ```
 
-`semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached). A filtered search that finds nothing also returns `facets` for the filters it used (see [Facets](#facets)).
+`semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
 
 Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If a match looks cut off mid-thought, use `retrieve_chunk` with the same `source_doc_id` and `chunk_index ± 1` to fetch the adjacent text deterministically — no new search needed.
 
@@ -64,7 +63,7 @@ Every result carries `chunk_index`/`total_chunks`/`has_previous`/`has_next`. If 
 
 - **`query`** (required) — natural-language query, embedded and matched by similarity.
 - **`page`** (required) — batch of ranked results to return, starting at `1` (most relevant).
-- **`filters`** (optional) — narrow by the tool's filter fields (see [Filters](#filters)).
+- **`source_name`** (optional) — restrict results to one source.
 
 ### `mode: "retrieve_chunk"` — deterministic fetch by ID
 
@@ -81,62 +80,22 @@ No embedding call is made — it's a direct point lookup, so it always returns t
 - **`pattern`** (required) — literal substring, or (with `regex: true`) a Go RE2 regular expression.
 - **`page`** (required) — batch of matches to return, starting at `1`, in storage order (not ranked).
 - **`regex`** (optional, default `false`).
-- **`filters`** (optional) — as for `semantic_search`.
+- **`source_name`** (optional) — restrict results to one source.
 
 Use this instead of `semantic_search` when you need an exact match rather than a similarity ranking — e.g. finding every usage of a method or identifier. It's a client-side scan of chunk text, not a Qdrant full-text index, so `score` is always `0`.
 
-### Filters
-
-`filters` narrows a search by real fields from the source system. Different fields combine with AND; an array of values for one field matches any of them. Matching ignores case. Path-like fields (`path`, `iteration_path`, `area_path`) match a folder and everything beneath it.
-
-| Field | Tools |
-|---|---|
-| `source`, `provider` (`azure-devops` or `github`) | all |
-| `project` (Azure DevOps project or GitHub owner) | all |
-| `repository` | `search_code`, `search_documentation`, `search_commit`, `search_pipeline_run` |
-| `path`, `extension` | `search_code`, `search_documentation` (`path` also on `search_commit`: a changed file) |
-| `code_kind` (`test` or `production`) | `search_code` |
-| `work_item_type`, `state`, `area_path`, `iteration_path`, `assigned_to`, `tags` | `search_workitem` |
-| `author`, `since`, `until` | `search_commit` |
-| `result`, `branch` | `search_pipeline_run` |
-
-### Facets
-
-Filter values are each team's own: one process has a `Product Requirement` work item type, another keeps requirements as Markdown under `docs/requirements`. `mode: "facets"` lists the values a field takes, so an agent can narrow step by step to exactly the documents it wants:
-
-- **`fields`** (required) — filter fields to list (any of the tool's, except `since`/`until`).
-- **`filters`** (optional) — count only within these.
-- **`prefix`** (optional, path-like fields) — list only what is inside one folder, e.g. `{"path": "docs"}`. With a single path-like field it can be a plain string.
-- **`level`** (optional, path-like fields) — the depth to list; `1` is the top-level folders. It defaults to the level just inside `prefix` (`1` without one).
-
-Each value comes with its number of **documents** (not chunks), most frequent first, at most 25 per field. `more: true` says there are further values, which `filters` or `prefix` can narrow down. `documents` is the number of documents matching the filters.
-
-```
-search_workitem(request={"mode": "facets", "fields": ["work_item_type"]})
-→ {"documents": 412, "facets": {"work_item_type": {"values": [{"value": "bug", "count": 180}, {"value": "product requirement", "count": 96}, …]}}}
-
-search_documentation(request={"mode": "facets", "fields": ["path"], "prefix": {"path": "docs"}})
-→ {"documents": 230, "facets": {"path": {"level": 2, "prefix": "docs", "values": [{"value": "docs/requirements", "count": 41}, {"value": "docs/test-cases", "count": 38}, …]}}}
-```
-
-When a search with filters finds nothing, the response includes `facets` for each filter used. Each one is counted with the other filters only, and a path value among its siblings. This makes a wrong value correctable in one step:
-
-```
-search_workitem(request={"mode": "semantic_search", "query": "reset link expiry", "page": 1, "filters": {"work_item_type": "Requirement"}})
-→ {"results": [], "note": "Nothing matched these filters. …", "facets": {"work_item_type": {"documents": 412, "values": [{"value": "product requirement", "count": 96}, …]}}}
-```
-
 ## Which tool to use
-
-Tools are organized by where the data lives, not by what a company calls it. Requirements and test cases are found in whichever collection the team keeps them in, narrowed by its own values.
 
 | Tool | Searches | Best for |
 |---|---|---|
-| `search_workitem` | Every tracked item: bugs, tasks, stories, features, and requirements or test cases kept as work items or issues | Related issues, whether a bug is filed, requirements and test cases of a work item process (filter `work_item_type`) |
-| `search_code` | Source files, production code and tests together | Implementations (`code_kind: production`), tests and coverage (`code_kind: test`) |
-| `search_documentation` | Repository and wiki documents, including requirements or test cases kept as files | Architecture notes, runbooks, file-based requirements and test cases (filter `path`) |
-| `search_commit` | Git commit history: messages, authors, file changes | When a change was made, which commit introduced a behaviour |
-| `search_pipeline_run` | Build pipeline runs: run summaries, failed-step logs, failed tests | Why a run failed, whether an error or test failed before, which commit a run built |
+| `search_workitem` | Work items — bugs, tasks, user stories, features, epics | Finding related issues, checking if a bug's been filed, sprint scope |
+| `search_requirement` | Requirements — features, user stories, epics | Finding relevant requirements, acceptance criteria |
+| `search_source_code` | Production source code (classes, methods, functions) — no tests | Finding implementations, locating where a concept is defined |
+| `search_test_code` | Test code — unit, integration, specs | Finding test coverage, patterns, and examples |
+| `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
+| `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
+| `search_commit` | Git commit history — messages, authors, file changes | When a change was made, which commit introduced a behaviour |
+| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`) | Why a run failed, whether an error or test failed before, which commit a run built |
 
 ---
 
@@ -240,7 +199,7 @@ search_pull_request(request: { mode: "iterations", url: str })
 search_pull_request(request: { mode: "commits", url: str, page?: int })
 ```
 
-**Credentials.** `url` is the pull request's web link: `…/{project}/_git/{repo}/pullrequest/{id}` (Azure DevOps Services or Server) or `…/{owner}/{repo}/pull/{number}` (github.com or GitHub Enterprise Server). Conduit uses the credentials of a configured source on the same organization or server. It prefers a source of the same repository, then of the same project or owner, then any source there. Between equally close sources, an enabled one wins. Every response says which source was used in `credentials_from`. A URL that no source matches is an error, so add a source for that organization first. `list` has no URL, so it takes the `source_id` of a source of the repository instead. For Azure DevOps that must be a code, documentation or commit-history source.
+**Credentials.** `url` is the pull request's web link: `…/{project}/_git/{repo}/pullrequest/{id}` (Azure DevOps Services or Server) or `…/{owner}/{repo}/pull/{number}` (github.com or GitHub Enterprise Server). Conduit uses the credentials of a configured source on the same organization or server. It prefers a source of the same repository, then of the same project or owner, then any source there. Between equally close sources, an enabled one wins. Every response says which source was used in `credentials_from`. A URL that no source matches is an error, so add a source for that organization first. `list` has no URL, so it takes the `source_id` of a source of the repository instead. For Azure DevOps that must be a code, test code, documentation or commit-history source.
 
 - **`list`**: pull requests, newest first, 20 per page with `has_more`. `status` defaults to `active`. `author` and `reviewer` take `me` (the token's owner), an email (Azure DevOps) or a login (GitHub). On GitHub, `reviewer` matches pull requests whose review is still requested from that user.
 - **`get`**: title, description, branches, merge status, head and base commits, reviewers with their votes, linked work items (on GitHub, the issues the description closes with `fixes #12`-style keywords), and checks (Azure DevOps statuses and branch policies; GitHub check runs and commit statuses). If work items or checks can't be read, `notes` says so and the rest is still returned.
@@ -267,15 +226,7 @@ search_pull_request(request: { mode: "commits", url: str, page?: int })
 
 **Scoping to one source** (e.g. two ADO repos):
 ```
-search_code(request={"mode": "semantic_search", "query": "authentication middleware", "page": 1, "filters": {"source": "Backend API"}})
-```
-
-**Finding a company's requirements without knowing how it keeps them:**
-```
-1. search_workitem(request={"mode": "facets", "fields": ["work_item_type"]})       → "product requirement" exists
-2. search_workitem(request={"mode": "semantic_search", "query": "password reset link expiry", "page": 1,
-                            "filters": {"work_item_type": "Product Requirement"}})
-   — or, with no such type: search_documentation facets on path → docs/requirements, then filter "path"
+search_source_code(request={"mode": "semantic_search", "query": "authentication middleware", "page": 1, "source_name": "Backend API"})
 ```
 
 **Following a cut-off match to its neighboring chunk:**
@@ -288,12 +239,12 @@ search_code(request={"mode": "semantic_search", "query": "authentication middlew
 
 **Finding all usages of a method or identifier:**
 ```
-1. search_code(request={"mode": "pattern_search", "pattern": "CalculateTotal", "page": 1, "filters": {"code_kind": "production"}})
-2. search_code(request={"mode": "pattern_search", "pattern": "CalculateTotal", "page": 2, "filters": {"code_kind": "production"}})
+1. search_source_code(request={"mode": "pattern_search", "pattern": "CalculateTotal", "page": 1})
+2. search_source_code(request={"mode": "pattern_search", "pattern": "CalculateTotal", "page": 2})
    ... keep incrementing page until has_more is false
 ```
-Use `"code_kind": "test"` the same way to find where a method is tested.
+Use `search_test_code` the same way to find where a method is tested.
 
-**Combining tools for a code change:** `experience_retrieve` → `search_code` with `code_kind: production` (find the implementation) → `search_code` with `code_kind: test` (find its tests) → `search_workitem` (related requirements or bugs).
+**Combining tools for a code change:** `experience_retrieve` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_workitem` (related requirements or bugs).
 
-**Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `get` → `files` → `diff` per file → `threads` → `search_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.
+**Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.

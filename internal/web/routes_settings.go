@@ -17,7 +17,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,10 +32,13 @@ import (
 // form, matching source_type_labels in app/templates/settings.html.
 var preprocSourceTypes = []struct{ Key, Label string }{
 	{"work-item", "Work Items"},
-	{"code", "Code"},
-	{"documentation", "Documentation"},
+	{"requirements", "Requirements"},
+	{"test-case", "Test Cases"},
 	{"commit-history", "Commit History"},
 	{"pipeline-run", "Pipeline Runs"},
+	{"code", "Source Code"},
+	{"test-code", "Test Code"},
+	{"documentation", "Documentation"},
 }
 
 // ── Page ────────────────────────────────────────────────────────────────────
@@ -207,7 +209,6 @@ func (s *Server) handleDeleteAllSources(w http.ResponseWriter, r *http.Request) 
 			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
 		}}}
 		_ = s.vectors.DeleteByFilter(r.Context(), collection, filter)
-		s.vectors.RemoveFromLegacyCollections(r.Context(), src.ID)
 		_ = s.sources.Delete(src.ID)
 	}
 	http.Redirect(w, r, "/settings?notice=sources_deleted", http.StatusSeeOther)
@@ -219,7 +220,7 @@ func (s *Server) handleDeleteAllExperiences(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleCleanSourceEmbeddings(w http.ResponseWriter, r *http.Request) {
-	for _, col := range append(slices.Clone(models.AllCollections), models.LegacyCollections...) {
+	for _, col := range models.AllCollections {
 		if col == models.CollectionExperience {
 			continue
 		}

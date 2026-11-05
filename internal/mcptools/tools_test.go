@@ -45,11 +45,6 @@ type fakeQdrant struct {
 	scrollNeverExhausts bool // always returns a non-nil next_page_offset, for scan-cap tests
 	scrollCalls         int
 	lastScrollBody      map[string]any
-
-	facetHits   map[string][]map[string]any // payload key → hits returned by the facet endpoint
-	facetBodies []map[string]any
-	countResult int // documents the count endpoint reports
-	countBodies []map[string]any
 }
 
 func (q *fakeQdrant) handler() http.HandlerFunc {
@@ -87,21 +82,6 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			q.deleteCalls = append(q.deleteCalls, body.Points)
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/facet"):
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			q.facetBodies = append(q.facetBodies, body)
-			key, _ := body["key"].(string)
-			hits := q.facetHits[key]
-			if hits == nil {
-				hits = []map[string]any{}
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"hits": hits}})
-		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points/count"):
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			q.countBodies = append(q.countBodies, body)
-			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"count": q.countResult}})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/points/scroll"):
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
@@ -234,7 +214,8 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 		got[tool.Name] = true
 	}
 	want := []string{
-		"search_workitem", "search_code", "search_documentation",
+		"search_workitem", "search_requirement", "search_source_code",
+		"search_test_code", "search_testcase", "search_documentation",
 		"search_commit", "search_pipeline_run", "experience_retrieve", "experience_remember",
 	}
 	for _, name := range want {
@@ -465,7 +446,7 @@ func TestSearchToolRejectsFilterNotSupportedByCollection(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
 	// "state" is a work item field — source code has no such thing.
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "semantic_search", "query": "x", "page": float64(1),
 		"filters": map[string]any{"state": "Active"},
 	}})
@@ -492,10 +473,10 @@ func TestSearchToolRejectsBadFilterDate(t *testing.T) {
 
 // Work item sources are already scoped to their area paths, and work items
 // aren't searched by date — neither is a work item filter.
-func TestWorkItemSearchAcceptsAreaPathButNotDateFilters(t *testing.T) {
+func TestWorkItemSearchRejectsAreaPathAndDateFilters(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	for _, f := range []string{"since", "until"} {
+	for _, f := range []string{"area_path", "since", "until"} {
 		result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(1),
 			"filters": map[string]any{f: "2024-01-01"},
@@ -503,13 +484,6 @@ func TestWorkItemSearchAcceptsAreaPathButNotDateFilters(t *testing.T) {
 		if !result.IsError || !strings.Contains(resultText(t, result), "unknown filter") {
 			t.Errorf("filter %q: expected an unknown filter error, got %s", f, resultText(t, result))
 		}
-	}
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
-		"mode": "semantic_search", "query": "x", "page": float64(1),
-		"filters": map[string]any{"area_path": `Payments\Team A`},
-	}})
-	if result.IsError {
-		t.Errorf("area_path must be accepted: %s", resultText(t, result))
 	}
 }
 
@@ -581,31 +555,14 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 		t.Error("search_commit must not offer the work item filter \"state\"")
 	}
 	// Only one branch is ever embedded per source, so branch isn't a filter.
-	for _, tool := range []string{"search_commit", "search_code", "search_documentation"} {
+	for _, tool := range []string{"search_commit", "search_source_code", "search_requirement"} {
 		if _, ok := filterProps(tool)["branch"]; ok {
 			t.Errorf("%s must not offer a branch filter", tool)
 		}
 	}
 	pipeline := filterProps("search_pipeline_run")
-	for _, f := range []string{"result", "branch", "project", "repository"} {
-		if pipeline[f] == nil {
-			t.Errorf("search_pipeline_run missing filter %q", f)
-		}
-	}
-	// Every collection can be narrowed to one source or provider.
-	for _, tool := range []string{"search_workitem", "search_code", "search_documentation", "search_commit", "search_pipeline_run"} {
-		if p := filterProps(tool); p["source"] == nil || p["provider"] == nil {
-			t.Errorf("%s must offer the source and provider filters", tool)
-		}
-	}
-	if filterProps("search_code")["code_kind"] == nil {
-		t.Error("search_code must offer code_kind")
-	}
-	if _, ok := filterProps("search_documentation")["code_kind"]; ok {
-		t.Error("code_kind is for code only")
-	}
-	if filterProps("search_workitem")["area_path"] == nil {
-		t.Error("search_workitem must offer area_path")
+	if len(pipeline) != 2 || pipeline["result"] == nil || pipeline["branch"] == nil {
+		t.Errorf("search_pipeline_run filters = %v, want exactly result and branch", pipeline)
 	}
 	workItem := filterProps("search_workitem")
 	if _, ok := workItem["repository"]; ok {
@@ -826,7 +783,7 @@ func TestSearchToolPatternSearchReturnsResult(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
 	}})
 	if result.IsError {
@@ -856,7 +813,7 @@ func TestSearchToolPatternSearchRegexMode(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": `^FooBar\d+$`, "regex": true, "page": float64(1),
 	}})
 	if result.IsError {
@@ -877,7 +834,7 @@ func TestSearchToolPatternSearchRegexMode(t *testing.T) {
 func TestSearchToolPatternSearchNoMatchReturnsNote(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
 	}})
 	if result.IsError {
@@ -905,7 +862,7 @@ func TestSearchToolPatternSearchDoesNotCallEmbedding(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
 	}})
 	if result.IsError {
@@ -916,7 +873,7 @@ func TestSearchToolPatternSearchDoesNotCallEmbedding(t *testing.T) {
 func TestSearchToolPatternSearchInvalidRegexErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "(unclosed", "regex": true, "page": float64(1),
 	}})
 	if !result.IsError {
@@ -930,7 +887,7 @@ func TestSearchToolPatternSearchInvalidRegexErrors(t *testing.T) {
 func TestSearchToolPatternSearchMissingPatternArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{
 		"request": map[string]any{"mode": "pattern_search", "page": float64(1)},
 	})
 	if !result.IsError {
@@ -944,7 +901,7 @@ func TestSearchToolPatternSearchMissingPatternArgErrors(t *testing.T) {
 func TestSearchToolPatternSearchMissingPageArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{
 		"request": map[string]any{"mode": "pattern_search", "pattern": "FooBar"},
 	})
 	if !result.IsError {
@@ -961,7 +918,7 @@ func TestSearchToolPatternSearchClampsNonPositivePageToOne(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(0),
 	}})
 	if result.IsError {
@@ -984,7 +941,7 @@ func TestSearchToolPatternSearchLastPageReturnsNote(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(2),
 	}})
 	if result.IsError {
@@ -1021,7 +978,7 @@ func TestSearchToolPatternSearchBackendErrorPropagatesAsToolError(t *testing.T) 
 	mcpServer := server.NewMCPServer("test", "0.0.0")
 	RegisterTools(mcpServer, search, mem)
 
-	result := callTool(t, mcpServer, context.Background(), "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, mcpServer, context.Background(), "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
 	}})
 	if !result.IsError {
@@ -1039,7 +996,7 @@ func TestSearchToolPatternSearchTruncatedScanReturnsNote(t *testing.T) {
 	}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_code", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
 	}})
 	if result.IsError {

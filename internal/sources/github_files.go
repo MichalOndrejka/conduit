@@ -129,7 +129,7 @@ func (g *GitHubSource) fetchFiles(ctx context.Context, progress ProgressCallback
 			"branch":  branch,
 		}
 		filters := g.scopeFilters(props)
-		addFileFilters(&filters, props, f.path)
+		addFileFilters(&filters, f.path)
 		docs = append(docs, models.SourceDocument{
 			ID:         fmt.Sprintf("%s_gh_file_%s", g.src.ID, f.path),
 			Text:       strings.TrimSpace(f.path + "\n\n" + body),

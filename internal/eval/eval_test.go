@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -90,25 +89,10 @@ func (f *fakeBackend) Embed(_ context.Context, text string) ([]float32, error) {
 	return fakeEmbed(text), nil
 }
 
-// payloadValues are a document's values of a payload key as the indexer
-// writes them: a filter field's, or one level of a hierarchical field's.
-func payloadValues(d models.SourceDocument, key string) []string {
-	field := strings.TrimPrefix(key, models.FilterPrefix)
-	if base, lvl, ok := strings.Cut(field, "__"); ok {
-		n, _ := strconv.Atoi(lvl)
-		return models.FilterLevels(base, d.Filters.Fields[base])[n]
-	}
-	return d.Filters.Fields[field]
-}
-
 func matches(d models.SourceDocument, conds []rag.FieldCondition) bool {
 	for _, c := range conds {
-		want := c.Match.Any
-		if v, ok := c.Match.Value.(string); ok {
-			want = append(slices.Clone(want), v)
-		}
-		have := payloadValues(d, c.Key)
-		if !slices.ContainsFunc(want, func(v string) bool { return slices.Contains(have, v) }) {
+		field := strings.TrimPrefix(c.Key, models.FilterPrefix)
+		if !slices.ContainsFunc(c.Match.Any, func(v string) bool { return slices.Contains(d.Filters.Fields[field], v) }) {
 			return false
 		}
 	}
@@ -136,44 +120,16 @@ func (f *fakeBackend) Search(_ context.Context, coll string, vector []float32, l
 	return out, nil
 }
 
-// FacetValues counts documents (one point each here) per value of key.
-func (f *fakeBackend) FacetValues(_ context.Context, coll, key string, conds []rag.FieldCondition, limit int) ([]rag.FacetValue, error) {
+func (f *fakeBackend) Points(_ context.Context, coll string, conds []rag.FieldCondition) ([]PointFields, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	counts := map[string]int{}
+	var out []PointFields
 	for _, p := range f.colls[coll] {
 		if matches(p.doc, conds) {
-			for _, v := range payloadValues(p.doc, key) {
-				counts[v]++
-			}
+			out = append(out, PointFields{DocID: p.doc.ID, Fields: p.doc.Filters.Fields})
 		}
-	}
-	out := make([]rag.FacetValue, 0, len(counts))
-	for v, n := range counts {
-		out = append(out, rag.FacetValue{Value: v, Count: n})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Count != out[j].Count {
-			return out[i].Count > out[j].Count
-		}
-		return out[i].Value < out[j].Value
-	})
-	if len(out) > limit {
-		out = out[:limit]
 	}
 	return out, nil
-}
-
-func (f *fakeBackend) CountDocuments(_ context.Context, coll string, conds []rag.FieldCondition) (int, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	n := 0
-	for _, p := range f.colls[coll] {
-		if matches(p.doc, conds) {
-			n++
-		}
-	}
-	return n, nil
 }
 
 func loadSynthetic(t *testing.T) *Dataset {
@@ -276,6 +232,30 @@ func TestScopesNarrowTheMergedCollections(t *testing.T) {
 	}
 }
 
+func TestIsTestPath(t *testing.T) {
+	cases := map[string]bool{
+		"tests/Storefront.Tests/Identity/PasswordResetServiceTests.cs": true,
+		"internal/refunds/service_test.go":                             true,
+		"src/sync/offlineQueue.spec.ts":                                true,
+		"src/components/Button.test.tsx":                               true,
+		"src/test/java/com/acme/OrderServiceTest.java":                 true,
+		"app/__tests__/cart.js":                                        true,
+		"tests/test_orders.py":                                         true,
+		`src\Storefront.Tests\CartTests.cs`:                            true,
+		"src/Storefront/Identity/PasswordResetService.cs":              false,
+		"internal/refunds/service.go":                                  false,
+		"src/sync/offlineQueue.ts":                                     false,
+		"docs/test-cases/TC-031-partial-refunds.md":                    false,
+		"src/testing/helpers.go":                                       false,
+		"src/attestation/verify.ts":                                    false,
+	}
+	for p, want := range cases {
+		if got := IsTestPath(p); got != want {
+			t.Errorf("IsTestPath(%q) = %v, want %v", p, got, want)
+		}
+	}
+}
+
 func TestScoreRanking(t *testing.T) {
 	rank, s := scoreRanking([]string{"a", "b", "r1", "c", "d", "e", "r2"}, []string{"r1", "r2"}, 10)
 	if rank != 3 || s.Hit1 != 0 || s.RR != 1.0/3 || s.RecallAt5 != 0.5 || s.RecallAtK != 1 || s.Empty != 0 {
@@ -372,124 +352,48 @@ func TestChangesListsRegressionsFirst(t *testing.T) {
 	}
 }
 
-// facetsOut is a facets response, as the real search tools return it.
-type facetsOut struct {
-	Documents int `json:"documents"`
-	Facets    map[string]struct {
-		Prefix    string `json:"prefix"`
-		Documents *int   `json:"documents"`
-		Values    []struct {
-			Value string `json:"value"`
-			Count int    `json:"count"`
-		} `json:"values"`
-	} `json:"facets"`
-	Note string `json:"note"`
-}
-
-func (f facetsOut) counts(field string) map[string]int {
-	out := map[string]int{}
-	for _, v := range f.Facets[field].Values {
-		out[v.Value] = v.Count
-	}
-	return out
-}
-
-func toolByName(t *testing.T, layout, name string) agentTool {
-	t.Helper()
-	tools, err := agentToolsFor(layout)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, tl := range tools {
-		if tl.name == name {
-			return tl
-		}
-	}
-	t.Fatalf("layout %s has no tool %s", layout, name)
-	return agentTool{}
-}
-
-// The merged layouts offer the real MCP search tools, run through the real
-// request handling: facets, filtered search, and the facets a filtered
-// search that finds nothing returns.
-func TestAgentToolsAreTheRealSearchTools(t *testing.T) {
+func TestAgentToolsSearchAndFacets(t *testing.T) {
 	_, r := runSynthetic(t)
 	ctx := context.Background()
 	tools, err := agentToolsFor("merged_fields")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
-	for _, tl := range tools {
-		names = append(names, tl.name)
-		if tl.real == nil || !strings.Contains(tl.description, `"mode":"facets"`) {
-			t.Errorf("%s is not the real tool with its facets note", tl.name)
-		}
-	}
-	if strings.Join(names, ",") != "search_workitem,search_code,search_documentation" {
-		t.Errorf("tools = %v", names)
-	}
-	run := func(tl agentTool, company, input string) (string, []string) {
-		t.Helper()
-		out, ids, err := r.runTool(ctx, company, IndexMerged, tl, json.RawMessage(input))
-		if err != nil {
-			t.Fatalf("%s %s: %v", tl.name, input, err)
-		}
-		return out, ids
-	}
-	workItems := toolByName(t, "merged_fields", "search_workitem")
+	workItems := tools[0]
 
-	out, _ := run(workItems, "northwind", `{"request":{"mode":"facets","fields":["work_item_type"]}}`)
-	var f facetsOut
-	if err := json.Unmarshal([]byte(out), &f); err != nil {
+	out, _, err := r.runTool(ctx, "northwind", IndexMerged, workItems, json.RawMessage(`{"mode":"facets","fields":["work_item_type"]}`))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := f.counts("work_item_type"); f.Documents != 15 || got["product requirement"] != 5 || got["test case"] != 5 {
+	var facets struct {
+		Documents int `json:"documents"`
+		Facets    map[string][]struct {
+			Value string `json:"value"`
+			Count int    `json:"count"`
+		} `json:"facets"`
+	}
+	if err := json.Unmarshal([]byte(out), &facets); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]int{}
+	for _, v := range facets.Facets["work_item_type"] {
+		got[v.Value] = v.Count
+	}
+	if facets.Documents != 15 || got["product requirement"] != 5 || got["test case"] != 5 {
 		t.Errorf("facets = %s", out)
 	}
 
-	_, ids := run(workItems, "northwind", `{"request":{"mode":"semantic_search","query":"password reset link expiry","page":1,"filters":{"work_item_type":"Product Requirement"}}}`)
+	_, ids, err := r.runTool(ctx, "northwind", IndexMerged, workItems,
+		json.RawMessage(`{"mode":"semantic_search","query":"password reset link expiry","filters":{"work_item_type":"Product Requirement"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(ids) == 0 || ids[0] != "nw-req-reset" {
 		t.Errorf("ids = %v, want nw-req-reset first", ids)
 	}
 
-	// A wrong value finds nothing, and the response lists the real ones.
-	out, ids = run(workItems, "northwind", `{"request":{"mode":"semantic_search","query":"password reset","page":1,"filters":{"work_item_type":"Requirement"}}}`)
-	f = facetsOut{}
-	_ = json.Unmarshal([]byte(out), &f)
-	if len(ids) != 0 || f.counts("work_item_type")["product requirement"] != 5 || !strings.Contains(f.Note, "Nothing matched") {
-		t.Errorf("empty filtered search = %s", out)
-	}
-
-	// Code: code_kind splits tests from production; path facets list folders.
-	code := toolByName(t, "merged_fields", "search_code")
-	out, _ = run(code, "contoso", `{"request":{"mode":"facets","fields":["code_kind"]}}`)
-	f = facetsOut{}
-	_ = json.Unmarshal([]byte(out), &f)
-	if got := f.counts("code_kind"); got["test"] == 0 || got["production"] == 0 || got["test"]+got["production"] != f.Documents {
-		t.Errorf("code_kind facets = %s", out)
-	}
-	docs := toolByName(t, "merged_fields", "search_documentation")
-	out, _ = run(docs, "contoso", `{"request":{"mode":"facets","fields":["path"],"prefix":{"path":"docs"}}}`)
-	f = facetsOut{}
-	_ = json.Unmarshal([]byte(out), &f)
-	if f.Facets["path"].Prefix != "docs" || len(f.Facets["path"].Values) == 0 {
-		t.Errorf("path facets = %s", out)
-	}
-	for v := range f.counts("path") {
-		if !strings.HasPrefix(v, "docs/") || strings.Count(v, "/") != 1 {
-			t.Errorf("path facet %q is not directly inside docs/", v)
-		}
-	}
-
-	if _, _, err := r.runTool(ctx, "northwind", IndexMerged, workItems,
-		json.RawMessage(`{"request":{"mode":"semantic_search","query":"x","page":1,"filters":{"category":"requirement"}}}`)); err == nil {
+	if _, _, err := r.runTool(ctx, "northwind", IndexMerged, workItems, json.RawMessage(`{"mode":"semantic_search","query":"x","filters":{"category":"requirement"}}`)); err == nil {
 		t.Error("merged_fields must not accept the category filter")
-	}
-	cat := toolByName(t, "merged_category", "search_workitem")
-	if _, _, err := r.runTool(ctx, "northwind", IndexMerged, cat,
-		json.RawMessage(`{"request":{"mode":"semantic_search","query":"x","page":1,"filters":{"category":"requirement"}}}`)); err != nil {
-		t.Errorf("merged_category must accept the category filter: %v", err)
 	}
 	current, _ := agentToolsFor("current")
 	if _, _, err := r.runTool(ctx, "northwind", IndexCurrent, current[0], json.RawMessage(`{"mode":"facets","fields":["state"]}`)); err == nil {
@@ -570,27 +474,19 @@ func TestExportMapsSourceTypes(t *testing.T) {
 		src           models.SourceDefinition
 		intent, shape string
 	}{
+		{models.SourceDefinition{Type: models.SourceRequirements, Config: map[string]string{"FetchMode": "workitems"}}, IntentRequirement, ShapeWorkItem},
+		{models.SourceDefinition{Type: models.SourceRequirements}, IntentRequirement, ShapeFile},
+		{models.SourceDefinition{Type: models.SourceTestCodeRepo}, IntentTestCode, ShapeFile},
 		{models.SourceDefinition{Type: models.SourceWorkItemQuery}, IntentWorkItem, ShapeWorkItem},
-		{models.SourceDefinition{Type: models.SourceDocumentation}, IntentDocumentation, ShapeFile},
-		{models.SourceDefinition{Type: models.SourceCodeRepo}, IntentCode, ShapeFile},
 		{models.SourceDefinition{Type: models.SourceGitCommits}, IntentCommit, ShapeCommit},
-		{models.SourceDefinition{Type: models.SourcePipelineRun}, IntentPipelineRun, ShapePipelineRun},
 	}
 	for _, c := range cases {
-		if got := intentOf(c.src.Type, models.SourceDocument{}); got != c.intent {
+		if got := intentOf(c.src.Type); got != c.intent {
 			t.Errorf("intentOf(%s) = %s", c.src.Type, got)
 		}
 		if got := shapeOf(c.src); got != c.shape {
 			t.Errorf("shapeOf(%s) = %s", c.src.Type, got)
 		}
-	}
-}
-
-func TestExportSplitsCodeByCodeKind(t *testing.T) {
-	var d models.SourceDocument
-	d.Filters.Add(models.FilterCodeKind, models.CodeKindTest)
-	if got := intentOf(models.SourceCodeRepo, d); got != IntentTestCode {
-		t.Errorf("a test file of a Code source = %s, want %s", got, IntentTestCode)
 	}
 }
 

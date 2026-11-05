@@ -175,12 +175,10 @@ func TestCollectionLifecycle(t *testing.T) {
 func TestEnsureCollectionsCreatesOnlyMissing(t *testing.T) {
 	var created []string
 	var sizes []float64
-	srv := httptest.NewServer(skipIndexRequests(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/collections":
 			_, _ = w.Write([]byte(`{"result": {"collections": [{"name": "existing"}]}}`))
-		case r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"result": {"payload_schema": {}}}`))
 		case r.Method == http.MethodPut:
 			var body struct {
 				Vectors struct {

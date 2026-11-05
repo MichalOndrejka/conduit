@@ -36,17 +36,6 @@
 </div>
 {{end}}
 
-<!-- Code sources: which files are tests (the code_kind filter). -->
-{{define "test-patterns"}}
-{{if eq .Source.Type "code"}}
-<div>
-  <label class="block text-sm font-medium text-slate-300 mb-1">Test file patterns {{template "tip" "Which files are tests, for the code_kind filter (test or production) agents narrow code searches by. Comma-separated wildcards, e.g. *_test.go, tests/**; a pattern without a folder matches the file name anywhere. Empty = common conventions: test, tests, __tests__ and spec folders, .Tests projects, src/test, *_test.go, test_*.py, *.test.ts, *.spec.ts and *Tests.cs / *Test.java."}}</label>
-  <input name="TestFilePatterns" value="{{.Source.GetConfig `TestFilePatterns`}}" placeholder="*_test.go, tests/**"
-         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-</div>
-{{end}}
-{{end}}
-
 <!-- GitHub tab: repository file fields and the issue label filter. -->
 {{define "gh-files"}}
 {{$s := .Source}}
@@ -58,7 +47,6 @@
            class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
   </div>
 </div>
-{{template "test-patterns" .}}
 {{end}}
 
 {{define "gh-labels"}}
@@ -122,6 +110,8 @@
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
     <div id="ado-block" class="tab-panel p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
+      {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
+      {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -154,6 +144,42 @@
 
       {{if $isWorkItemType}}
       {{template "worktype-picker" .}}
+
+      {{else if $isDualMode}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as {{template "tip" "Files: embed matching files from a repository. Work items: query work items directly and pick which types to embed."}}</label>
+        <input type="hidden" name="FetchMode" class="fetch-mode-value" value="{{$fetchMode}}">
+        <div class="tabs" role="tablist">
+          <label class="tab">
+            <input type="radio" name="AdoFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Files
+          </label>
+          <label class="tab">
+            <input type="radio" name="AdoFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Work Items
+          </label>
+        </div>
+
+        <div id="fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">Repository name</label>
+              <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
+                     class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+            </div>
+            {{template "branch" .}}
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
+            <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
+                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+          </div>
+        </div>
+
+        <div id="fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          {{template "worktype-picker" .}}
+        </div>
+      </div>
 
       {{else if eq $s.Type "commit-history"}}
       <div>
@@ -196,7 +222,6 @@
         <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.cs, *.ts"
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
-      {{template "test-patterns" .}}
       {{end}}
 
       <!-- hidden generic fields composed on submit (last, so space-y
@@ -209,6 +234,8 @@
     <!-- ── GitHub ───────────────────────────────────────────────────── -->
     <div id="github-block" class="hidden tab-panel p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
+      {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
+      {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -241,6 +268,30 @@
 
       {{if $isWorkItemType}}
       {{template "gh-labels" .}}
+
+      {{else if $isDualMode}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Fetch as {{template "tip" "Files: embed matching files from the repository. Issues: embed the repository's issues with their comments."}}</label>
+        <input type="hidden" name="FetchMode" class="fetch-mode-value" value="{{$fetchMode}}">
+        <div class="tabs" role="tablist">
+          <label class="tab">
+            <input type="radio" name="GitHubFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Files
+          </label>
+          <label class="tab">
+            <input type="radio" name="GitHubFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            Issues
+          </label>
+        </div>
+
+        <div id="github-fetch-files-fields" class="{{if eq $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          {{template "gh-files" .}}
+        </div>
+
+        <div id="github-fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
+          {{template "gh-labels" .}}
+        </div>
+      </div>
 
       {{else if eq $s.Type "commit-history"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -326,7 +377,29 @@ function setTab(name) {
   toggleBlock('github-block', isGitHub);
   document.getElementById('f-provider').value = isGitHub ? 'github' : 'api';
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
+  updateFetchMode();
   loadTypes();
+}
+
+// Each provider tab has its own "Fetch as" radio group (one shared name
+// would let a tick on one tab clear the other); the active tab's choice is
+// submitted through its hidden FetchMode input.
+function currentFetchMode() {
+  var el = document.querySelector('#' + currentTab + '-block input.fetch-mode:checked');
+  return el ? el.value : 'files';
+}
+
+// Dual-mode sources (Requirements, Test Cases) render both the file-glob and
+// work-item field sets in the DOM (see fetch-files-fields /
+// fetch-workitems-fields) and toggle between them client-side, instead of
+// reloading the page like the tab switch above.
+function updateFetchMode() {
+  var prefix = currentTab === 'github' ? 'github-' : '';
+  if (!document.getElementById(prefix + 'fetch-files-fields')) return;
+  var mode = currentFetchMode();
+  document.querySelector('#' + currentTab + '-block .fetch-mode-value').value = mode;
+  toggleBlock(prefix + 'fetch-files-fields', mode !== 'workitems');
+  toggleBlock(prefix + 'fetch-workitems-fields', mode === 'workitems');
 }
 
 function adoVal(name) {
@@ -341,7 +414,8 @@ function prepareSubmit() {
   if (currentTab === 'ado') {
     var org = adoVal('AdoOrg').replace(/\/+$/, '');
     var proj = encodeURIComponent(adoVal('AdoProject'));
-    var isWorkItemMode = SOURCE_TYPE === 'work-item';
+    var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
+      ((SOURCE_TYPE === 'requirements' || SOURCE_TYPE === 'test-case') && currentFetchMode() === 'workitems');
     if (SOURCE_TYPE === 'pipeline-run') {
       // Pipeline runs are fetched from AdoOrg/AdoProject/DefinitionId (see
       // fetchAdoPipelineRuns) — this URL is only stored, like work items'.
@@ -358,7 +432,8 @@ function prepareSubmit() {
       }
     } else {
       var ver = adoVal('AdoApiVersion') || '7.1';
-      // "Files" types (Code, Documentation) hit the items endpoint of a
+      // "Files" types (Source Code, Test Code, Documentation, and
+      // Requirements/Test Cases in file mode) hit the items endpoint of a
       // single named repo, and Commit History hits the commits endpoint of
       // one — the repo name is all the user needs to give, the rest of the
       // path is fixed.

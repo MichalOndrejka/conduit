@@ -12,6 +12,8 @@
 //	             repository's default branch)
 //	PathFilter   files: comma-separated wildcards, as for Azure DevOps
 //	Top          commits and issues: max items, most recent first
+//	FetchMode    requirements / test cases: "files" (default) or "workitems"
+//	             (issues)
 //	Labels       issues: comma-separated labels; an issue matching any of
 //	             them is fetched (default: every issue)
 //	WorkItemTypes issues: comma-separated organization issue types (Bug,

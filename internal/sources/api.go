@@ -27,7 +27,7 @@
 //	               every item the source has is fetched)
 //	VerifySSL      "false" to skip TLS verification (self-hosted instances)
 //	PathFilter     comma-separated wildcards (e.g. "*.cs,*.ts") narrowing which
-//	               repo files get their content fetched — code and
+//	               repo files get their content fetched — code/test-code/
 //	               documentation sources only
 //
 //	For sources of type commit-history only, each item is automatically enriched
@@ -46,7 +46,7 @@
 //	                   endpoint walks every branch, duplicating shared commits
 //	                   and pulling in stray feature-branch work.
 //
-//	For sources of type code, each item is automatically enriched
+//	For sources of type code or test-code, each item is automatically enriched
 //	with its real file content (in place of the raw JSON metadata), fetched
 //	from Azure DevOps' Git REST API. Requires Url to be an ADO
 //	".../_apis/git/repositories/{repo}/items" endpoint. Branch selects the
@@ -63,6 +63,13 @@
 //	left blank, every type in the project is fetched. AreaPaths restricts to
 //	one or more team area paths (comma-separated, e.g. "Proj\\Team A") and
 //	their sub-areas; left blank, every area in the project is fetched.
+//
+//	Sources of type requirements or test-case are dual-mode, chosen by the
+//	FetchMode config field: "files" (default) treats it like a Documentation
+//	source — real file content fetched from a repo, best-effort if Url isn't
+//	an ADO repo-items endpoint; "workitems" treats it like a work-item
+//	source — a WIQL query + batch fetch, with the same WorkItemTypes/AreaPaths
+//	fields.
 package sources
 
 import (
@@ -101,17 +108,29 @@ type APISource struct {
 }
 
 // isWorkItemQuery reports whether cfg should be fetched via the WIQL
-// query-then-batch path rather than a single URL GET: Work Items sources.
+// query-then-batch path rather than a single URL GET: work-item sources
+// always are; requirements and test-case sources are when explicitly set to
+// "workitems" mode (they default to "files", the Documentation-style
+// file-content path).
 func isWorkItemQuery(cfg *models.SourceDefinition) bool {
-	return cfg.Type == models.SourceWorkItemQuery
+	switch cfg.Type {
+	case models.SourceWorkItemQuery:
+		return true
+	case models.SourceRequirements, models.SourceTestCase:
+		return cfg.GetConfig("FetchMode") == "workitems"
+	default:
+		return false
+	}
 }
 
 // isFileContentType reports whether cfg's items should be enriched with real
 // file content fetched from an ADO repo, in place of raw JSON metadata.
 func isFileContentType(cfg *models.SourceDefinition) bool {
 	switch cfg.Type {
-	case models.SourceCodeRepo, models.SourceDocumentation:
+	case models.SourceCodeRepo, models.SourceTestCodeRepo, models.SourceDocumentation:
 		return true
+	case models.SourceRequirements, models.SourceTestCase:
+		return !isWorkItemQuery(cfg)
 	default:
 		return false
 	}
@@ -121,7 +140,12 @@ func isFileContentType(cfg *models.SourceDefinition) bool {
 // silently fall back to plain metadata when Url isn't an ADO repo-items
 // endpoint (e.g. a wiki), rather than failing the sync outright.
 func isFileContentBestEffort(cfg *models.SourceDefinition) bool {
-	return cfg.Type == models.SourceDocumentation
+	switch cfg.Type {
+	case models.SourceDocumentation, models.SourceRequirements, models.SourceTestCase:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
@@ -577,7 +601,7 @@ func (a *APISource) itemsToDocuments(items []any, url string) []models.SourceDoc
 		filters := a.scopeFilters(url, props)
 		if isFileContentType(cfg) {
 			p := fieldString(item, "path")
-			addFileFilters(&filters, props, p)
+			addFileFilters(&filters, p)
 		}
 		docs = append(docs, models.SourceDocument{
 			Filters: filters,

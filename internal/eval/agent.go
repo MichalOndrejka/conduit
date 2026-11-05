@@ -7,12 +7,12 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/anthropics/anthropic-sdk-go/v2"
 
-	"github.com/MichalOndrejka/conduit/internal/mcptools"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 )
@@ -65,32 +65,17 @@ type TokenUsage struct {
 	CacheWrite int64 `json:"cache_write"`
 }
 
-// agentTool is one search tool offered to the agent in a layout. The
-// baseline's tools (today's type-specific ones) are described here; the
-// merged layouts offer the real MCP search tools (real), run through the
-// same request handling as in production.
+// agentTool is one search tool offered to the agent in a layout.
 type agentTool struct {
 	name        string
 	description string
 	collections []string // collections it searches (merged across them)
-	filters     []string // filter fields it accepts (baseline tools)
-
-	real   *mcptools.SearchToolSpec // merged layouts: the real tool
-	kind   string                   // the eval collection kind real searches
-	fields []mcptools.FilterField   // real's filters, plus any the layout adds
-}
-
-// realKinds maps the real search tools' collections to eval collection
-// kinds; tools of collections the eval datasets don't cover are left out.
-var realKinds = map[string]string{
-	models.CollectionWorkItems:     CollWorkItems,
-	models.CollectionCode:          CollCode,
-	models.CollectionDocumentation: CollDocumentation,
+	filters     []string // filter fields it accepts
+	facets      bool     // offers the facets mode
 }
 
 // agentToolsFor returns a layout's tools: today's six type-specific tools,
-// or the real shape tools (search_workitem, search_code,
-// search_documentation) with their facets mode.
+// or the merged layout's three shape tools with facets.
 func agentToolsFor(layout string) ([]agentTool, error) {
 	repoFile := []string{"project", "repository", "path", "extension"}
 	workItem := []string{"project", "work_item_type", "state", "tags", "assigned_to", "iteration_path"}
@@ -111,23 +96,20 @@ func agentToolsFor(layout string) ([]agentTool, error) {
 				description: "Semantic search over wiki pages and repository documentation."},
 		}, nil
 	case "merged_fields", "merged_category":
-		var tools []agentTool
-		for _, spec := range mcptools.SearchTools() {
-			kind, ok := realKinds[spec.Collection]
-			if !ok {
-				continue
-			}
-			t := agentTool{name: spec.Name, description: mcptools.SearchToolDescription(spec), collections: []string{kind},
-				real: &spec, kind: kind, fields: slices.Clone(spec.Fields)}
-			if layout == "merged_category" {
-				t.fields = append(t.fields, mcptools.FilterField{Name: FieldCategory,
-					Desc: "Category set by the team that configured the item's source, e.g. requirement, test_case, work_item, documentation"})
-				t.description += " Every item also has a category set by the team that configured its source (e.g. requirement, " +
-					"test_case, work_item, documentation); use facets to see the categories in use."
-			}
-			tools = append(tools, t)
+		extra := []string{}
+		catNote := ""
+		if layout == "merged_category" {
+			extra = []string{FieldCategory}
+			catNote = " Every item also has a category set by the team that configured its source (e.g. requirement, test_case, work_item, documentation); use facets to see the categories in use."
 		}
-		return tools, nil
+		return []agentTool{
+			{name: "search_workitem", collections: []string{CollWorkItems}, filters: append(slices.Clone(workItem), extra...), facets: true,
+				description: "Semantic search over everything tracked in the work tracking system (Azure DevOps work items or GitHub issues): bugs, tasks, stories, requirements, test cases, whatever types the team uses. Work item types and tags are the team's own; use facets to see which exist." + catNote},
+			{name: "search_code", collections: []string{CollCode}, filters: append(append(slices.Clone(repoFile), FieldCodeKind), extra...), facets: true,
+				description: "Semantic search over source code files, production code and tests alike. Filter code_kind to \"test\" or \"production\" to get only one of them." + catNote},
+			{name: "search_documentation", collections: []string{CollDocumentation}, filters: append(slices.Clone(repoFile), extra...), facets: true,
+				description: "Semantic search over documents kept in repositories or wikis: guides, architecture notes, runbooks, and any requirements or test cases a team keeps as files. Folder layouts are the team's own; use facets on path to see them." + catNote},
+		}, nil
 	}
 	return nil, fmt.Errorf("layout %q has no agent tools (agent layouts: current, merged_fields, merged_category)", layout)
 }
@@ -143,15 +125,8 @@ When you are done, give a one-sentence answer, then list the source_doc_id of ev
 ANSWER: <source_doc_id>
 List only items that answer the question, most relevant first. If nothing answers it, write ANSWER: none.`
 
-// toolSchema is the input schema of an agent tool: a real tool's MCP input
-// schema, or the baseline's own.
+// toolSchema is the input schema of an agent tool.
 func toolSchema(t agentTool) anthropic.ToolInputSchemaParam {
-	if t.real != nil {
-		return anthropic.ToolInputSchemaParam{
-			Properties: map[string]any{"request": mcptools.RequestSchema(t.fields)},
-			Required:   []string{"request"},
-		}
-	}
 	filterProps := map[string]any{}
 	for _, f := range t.filters {
 		filterProps[f] = map[string]any{
@@ -164,11 +139,18 @@ func toolSchema(t agentTool) anthropic.ToolInputSchemaParam {
 	}
 	modes := []string{"semantic_search"}
 	modeDesc := `"semantic_search": ranked search for query, 5 results per page.`
+	if t.facets {
+		modes = append(modes, "facets")
+		modeDesc += ` "facets": counts the distinct values of the given fields among the items matching filters (no query needed) - use it to learn the exact work item types, tags, folders or categories before filtering.`
+	}
 	props := map[string]any{
 		"mode":    map[string]any{"type": "string", "enum": modes, "description": modeDesc},
 		"query":   map[string]any{"type": "string", "description": "Natural-language search query (semantic_search)."},
 		"page":    map[string]any{"type": "integer", "description": "Result page, starting at 1 (semantic_search)."},
 		"filters": map[string]any{"type": "object", "properties": filterProps, "additionalProperties": false, "description": "Optional filters; different fields combine with AND."},
+	}
+	if t.facets {
+		props["fields"] = map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": t.filters}, "description": "Fields to count (facets)."}
 	}
 	return anthropic.ToolInputSchemaParam{Properties: props, Required: []string{"mode"}}
 }
@@ -178,6 +160,7 @@ type toolInput struct {
 	Query   string         `json:"query"`
 	Page    int            `json:"page"`
 	Filters map[string]any `json:"filters"`
+	Fields  []string       `json:"fields"`
 }
 
 // filterValues normalizes a tool's filters object to field → values,
@@ -204,12 +187,8 @@ func filterValues(raw map[string]any, allowed []string) (map[string][]string, er
 	return out, nil
 }
 
-// runTool executes one tool call for company under the layout's index,
-// returning the tool's result text and the documents it returned.
+// runTool executes one tool call for company under the layout's index.
 func (r *Runner) runTool(ctx context.Context, company, index string, t agentTool, raw json.RawMessage) (string, []string, error) {
-	if t.real != nil {
-		return r.runRealTool(ctx, company, index, t, raw)
-	}
 	var in toolInput
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return "", nil, fmt.Errorf("invalid input: %w", err)
@@ -223,6 +202,11 @@ func (r *Runner) runTool(ctx context.Context, company, index string, t agentTool
 		targets[i] = Target{Index: index, Collection: c, Filters: filters}
 	}
 	switch in.Mode {
+	case "facets":
+		if !t.facets {
+			return "", nil, fmt.Errorf("this tool has no facets mode")
+		}
+		return r.facets(ctx, company, targets, in.Fields, t.filters)
 	case "semantic_search", "":
 		if strings.TrimSpace(in.Query) == "" {
 			return "", nil, fmt.Errorf("semantic_search needs a query")
@@ -256,67 +240,62 @@ func (r *Runner) runTool(ctx context.Context, company, index string, t agentTool
 	return "", nil, fmt.Errorf("unknown mode %q", in.Mode)
 }
 
-// runRealTool runs a real search tool's request handling
-// (mcptools.RunSearchTool) over the eval index, and returns its response as
-// the MCP tool would.
-func (r *Runner) runRealTool(ctx context.Context, company, index string, t agentTool, raw json.RawMessage) (string, []string, error) {
-	var args map[string]any
-	if err := json.Unmarshal(raw, &args); err != nil {
-		return "", nil, fmt.Errorf("invalid input: %w", err)
+// facets counts distinct values of fields across the targets' matching
+// documents (each document once), most frequent first, at most 25 per field.
+func (r *Runner) facets(ctx context.Context, company string, targets []Target, fields, allowed []string) (string, []string, error) {
+	if len(fields) == 0 {
+		return "", nil, fmt.Errorf("facets needs fields")
 	}
-	payload, err := mcptools.RunSearchTool(ctx, evalSearcher{r: r, company: company, index: index}, t.kind, t.fields, args)
-	if err != nil {
-		return "", nil, err
-	}
-	var ids []string
-	if results, ok := payload["results"].([]models.SearchResult); ok {
-		for _, res := range results {
-			ids = append(ids, res.SourceDocID)
+	for _, f := range fields {
+		if !slices.Contains(allowed, f) {
+			return "", nil, fmt.Errorf("unknown field %q; this tool supports: %s", f, strings.Join(allowed, ", "))
 		}
 	}
-	out, err := json.Marshal(payload)
-	if err != nil {
-		return "", nil, err
+	counts := map[string]map[string]int{}
+	seen := map[string]bool{}
+	for _, t := range targets {
+		points, err := r.Backend.Points(ctx, r.collection(company, t.Index, t.Collection), conditions(t.Filters))
+		if err != nil {
+			return "", nil, err
+		}
+		for _, p := range points {
+			if seen[p.DocID] {
+				continue
+			}
+			seen[p.DocID] = true
+			for _, f := range fields {
+				if counts[f] == nil {
+					counts[f] = map[string]int{}
+				}
+				for _, v := range p.Fields[f] {
+					counts[f][v]++
+				}
+			}
+		}
 	}
-	return string(out), ids, nil
-}
-
-// evalSearcher is mcptools.Searcher over one company's eval index: a
-// collection argument is an eval collection kind.
-type evalSearcher struct {
-	r       *Runner
-	company string
-	index   string
-}
-
-func (e evalSearcher) name(kind string) string { return e.r.collection(e.company, e.index, kind) }
-
-// Search pages chunks like rag.SearchService: pageSize per page, ranked.
-func (e evalSearcher) Search(ctx context.Context, kind, query string, page int, must []rag.FieldCondition) ([]models.SearchResult, bool, error) {
-	vector, err := e.r.embed(ctx, query)
-	if err != nil {
-		return nil, false, fmt.Errorf("embedding query: %w", err)
+	type valueCount struct {
+		Value string `json:"value"`
+		Count int    `json:"count"`
 	}
-	page = max(page, 1)
-	hits, err := e.r.Backend.Search(ctx, e.name(kind), vector, page*pageSize+1, must)
-	if err != nil {
-		return nil, false, err
+	out := map[string][]valueCount{}
+	for _, f := range fields {
+		var vcs []valueCount
+		for v, n := range counts[f] {
+			vcs = append(vcs, valueCount{v, n})
+		}
+		sort.Slice(vcs, func(i, j int) bool {
+			if vcs[i].Count != vcs[j].Count {
+				return vcs[i].Count > vcs[j].Count
+			}
+			return vcs[i].Value < vcs[j].Value
+		})
+		if len(vcs) > 25 {
+			vcs = vcs[:25]
+		}
+		out[f] = vcs
 	}
-	start := min((page-1)*pageSize, len(hits))
-	end := min(start+pageSize, len(hits))
-	return hits[start:end], len(hits) > end, nil
-}
-
-func (e evalSearcher) GetChunk(context.Context, string, string, int) (models.SearchResult, bool, error) {
-	return models.SearchResult{}, false, errors.New("retrieve_chunk is not available in the eval; eval documents are single chunks")
-}
-
-func (e evalSearcher) PatternSearch(context.Context, string, func(string) bool, int, []rag.FieldCondition) ([]models.SearchResult, bool, bool, error) {
-	return nil, false, false, errors.New("pattern_search is not available in the eval; use semantic_search")
-}
-
-func (e evalSearcher) Facets(ctx context.Context, kind string, req rag.FacetRequest) (rag.FacetResult, error) {
-	return rag.Facets(ctx, e.r.Backend, e.name(kind), req)
+	data, _ := json.Marshal(map[string]any{"documents": len(seen), "facets": out})
+	return string(data), nil, nil
 }
 
 var answerLine = regexp.MustCompile(`(?m)^\s*ANSWER:\s*(\S+)`)
@@ -508,4 +487,28 @@ func (r *Runner) answer(ctx context.Context, client anthropic.Client, layout Lay
 	}
 	res.Ranked = outcome.Answer
 	return res
+}
+
+// pointFields extracts a chunk's filter fields from its payload.
+func pointFields(payload map[string]any) map[string][]string {
+	out := map[string][]string{}
+	for k, v := range payload {
+		if !strings.HasPrefix(k, models.FilterPrefix) || k == models.FilterDateKey {
+			continue
+		}
+		field := strings.TrimPrefix(k, models.FilterPrefix)
+		switch t := v.(type) {
+		case []any:
+			for _, x := range t {
+				if s, ok := x.(string); ok {
+					out[field] = append(out[field], s)
+				}
+			}
+		case []string:
+			out[field] = append(out[field], t...)
+		case string:
+			out[field] = append(out[field], t)
+		}
+	}
+	return out
 }

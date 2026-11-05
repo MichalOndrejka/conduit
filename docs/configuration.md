@@ -29,8 +29,9 @@ The `localhost` URL defaults below become `host.docker.internal` when Conduit ru
     "model": "",
     "system_prompt": "",
     "source_types": {
-      "work-item": true, "documentation": true, "code": false,
-      "commit-history": false, "pipeline-run": false
+      "work-item": true, "requirements": true, "test-case": true,
+      "commit-history": false, "code": false,
+      "test-code": false, "documentation": true
     },
     "concurrency": 4
   },
@@ -124,7 +125,7 @@ Verifying a local, CPU-only model can be slow — the first request has to load 
 
 ### `source_types`
 
-Map of source type key (`work-item`, `code`, `documentation`, `commit-history`, `pipeline-run`) → whether preprocessing runs for that type. A type absent from the map defaults to enabled. Keys of the merged types (`requirements`, `test-case`, `test-code`) are dropped when the config is loaded, since no source has them any more. Chunks shorter than 200 characters are always passed through unsummarized.
+Map of source type key (`work-item`, `requirements`, `test-case`, `commit-history`, `code`, `test-code`, `documentation`) → whether preprocessing runs for that type. A type absent from the map defaults to enabled. Chunks shorter than 200 characters are always passed through unsummarized.
 
 Like embedding, preprocessing talks to any OpenAI-compatible chat endpoint (e.g. Ollama) — there's no separate cloud provider option.
 

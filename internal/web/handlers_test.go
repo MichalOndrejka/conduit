@@ -959,37 +959,3 @@ func TestGitHubIssueTypesEndpoint(t *testing.T) {
 		t.Errorf("personal account: ok=%v available=%v types=%v, want ok and unavailable", ok, available, types)
 	}
 }
-
-// The type picker offers the shape types only, and Code forms ask which
-// files are tests (in a tooltip-explained field); no form has a "Fetch as"
-// switch any more.
-func TestSourceTypesAreShapesAndCodeAsksForTestPatterns(t *testing.T) {
-	h := newHarness(t)
-	picker := bodyString(t, h.get("/sources/create"))
-	for _, gone := range []string{"Requirements", "Test Cases", "Test Code", "Source Code"} {
-		if strings.Contains(picker, ">"+gone+" ") {
-			t.Errorf("type picker still offers %s", gone)
-		}
-	}
-	for _, st := range sourcemgmt.Types {
-		body := bodyString(t, h.get("/sources/create?type=" + st.Value))
-		if strings.Contains(body, "Fetch as") || strings.Contains(body, "FetchMode") {
-			t.Errorf("%s form still has the Fetch as switch", st.Value)
-		}
-		hasPatterns := strings.Contains(body, `name="TestFilePatterns"`)
-		if hasPatterns != (st.Value == models.SourceCodeRepo) {
-			t.Errorf("%s form: Test file patterns field shown = %v", st.Value, hasPatterns)
-		}
-	}
-	resp := h.postForm("/sources/create", url.Values{
-		"name": {"App"}, "type": {"code"}, "provider": {"github"},
-		"GitHubOwner": {"acme"}, "GitHubRepo": {"app"}, "TestFilePatterns": {"qa/**"},
-	})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d: %s", resp.StatusCode, bodyString(t, resp))
-	}
-	all, _ := h.sources.ListAll()
-	if len(all) != 1 || all[0].Config[models.ConfigTestFilePatterns] != "qa/**" {
-		t.Errorf("saved = %+v", all)
-	}
-}
