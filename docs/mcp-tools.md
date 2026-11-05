@@ -26,9 +26,9 @@ A `.vscode/mcp.json` is already included in the repo for VS Code users.
 Every search tool takes one `request` argument, shaped by `mode`:
 
 ```
-tool_name(request: { mode: "semantic_search", query: str, page: int, source_name?: str })
+tool_name(request: { mode: "semantic_search", query: str, page: int, filters?: {...} })
 tool_name(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int })
-tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, source_name?: str })
+tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bool, filters?: {...} })
 tool_name(request: { mode: "list", filters?: {...}, order_by?: str, direction?: "desc"|"asc", page?: int })
 ```
 
@@ -90,7 +90,7 @@ search_commit(request={"mode":"list","filters":{"author":"me","since":"2026-11-0
 
 - **`query`** (required) — natural-language query, embedded and matched by similarity.
 - **`page`** (required) — batch of ranked results to return, starting at `1` (most relevant).
-- **`source_name`** (optional) — restrict results to one source.
+- **`filters`** (optional) — narrow by source-system fields (`project`, `repository`, `state`, …); each tool's schema lists its own.
 
 ### `mode: "retrieve_chunk"` — deterministic fetch by ID
 
@@ -107,7 +107,7 @@ No embedding call is made — it's a direct point lookup, so it always returns t
 - **`pattern`** (required) — literal substring, or (with `regex: true`) a Go RE2 regular expression.
 - **`page`** (required) — batch of matches to return, starting at `1`, in storage order (not ranked).
 - **`regex`** (optional, default `false`).
-- **`source_name`** (optional) — restrict results to one source.
+- **`filters`** (optional) — the same filters as `semantic_search`.
 
 Use this instead of `semantic_search` when you need an exact match rather than a similarity ranking — e.g. finding every usage of a method or identifier. It's a client-side scan of chunk text, not a Qdrant full-text index, so `score` is always `0`.
 
@@ -263,9 +263,9 @@ search_pull_request(request: { mode: "commits", url: str, page?: int })
 
 **Start of every task:** `experience_retrieve` → search tools for context → do the work → `experience_remember` anything learned.
 
-**Scoping to one source** (e.g. two ADO repos):
+**Scoping to one repository** (e.g. two ADO repos):
 ```
-search_source_code(request={"mode": "semantic_search", "query": "authentication middleware", "page": 1, "source_name": "Backend API"})
+search_source_code(request={"mode": "semantic_search", "query": "authentication middleware", "page": 1, "filters": {"repository": "backend-api"}})
 ```
 
 **Following a cut-off match to its neighboring chunk:**

@@ -110,9 +110,9 @@ The type picker shows the project's own work item types, loaded from Azure DevOp
 
 ### Azure DevOps Pipeline Runs
 
-Pipeline Runs sources (`pipeline-run`) are Azure DevOps-only and fetched entirely server-side — one source covers one build definition (YAML or classic). Config keys: `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), **Pipeline definition ID** (`DefinitionId`, the `definitionId` in the pipeline's URL, required) and **Days** (`Days`, required, form default `30`). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
+Pipeline Runs sources (`pipeline-run`) on Azure DevOps are fetched entirely server-side. One source covers one build definition (YAML or classic). GitHub Actions workflows are covered in the GitHub section above. Config keys: `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), **Pipeline definition ID** (`DefinitionId`, the `definitionId` in the pipeline's URL, required) and **Days** (`Days`, required, form default `30`). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
 
-Each sync lists every **completed** run of the definition that finished in the last `Days` days — all branches, including PR validation runs — following ADO's `x-ms-continuationtoken` paging, and fully replaces the source's previous documents. The index is a snapshot of the last successful sync: runs, logs and test results deleted from Azure DevOps afterwards stay searchable (their `web_url` may then be stale) until the next successful sync.
+Each sync lists every **completed** run of the definition that finished in the last `Days` days, plus runs still queued or running (see below), on all branches including PR validation runs. It follows ADO's `x-ms-continuationtoken` paging and fully replaces the source's previous documents. The index is a snapshot of the last successful sync: runs, logs and test results deleted from Azure DevOps afterwards stay searchable (their `web_url` may then be stale) until the next successful sync.
 
 Documents (all in `conduit_pipeline_runs`):
 
