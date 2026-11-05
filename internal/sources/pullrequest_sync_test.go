@@ -100,7 +100,7 @@ func TestFetchAdoPullRequests(t *testing.T) {
 	f := d.Filters.Fields
 	for field, want := range map[string]string{
 		models.FilterRepository: "web", models.FilterState: "completed", models.FilterBranch: "main",
-		models.FilterAuthor: "ann@corp", models.FilterReviewer: "bob@corp",
+		models.FilterAuthor: "ann@corp", models.FilterReviewer: "bob@corp", models.FilterID: "9",
 	} {
 		if !slices.Contains(f[field], want) {
 			t.Errorf("filter %s = %v, want %q", field, f[field], want)

@@ -34,6 +34,18 @@ var (
 	fResult    = filterField{name: models.FilterResult, desc: "Pipeline run result: succeeded, partiallySucceeded, failed or canceled"}
 	fBranch    = filterField{name: models.FilterBranch, desc: "Pipeline run source branch, as a full ref (refs/heads/main, " +
 		"refs/pull/42/merge) or short name (main, pull/42/merge)"}
+	fWorkItemID = filterField{name: models.FilterID, desc: "Work item ID (Azure DevOps) or issue number (GitHub), e.g. 1234 " +
+		"(AB#1234 and #1234 work too): opens the item another result refers to — a Links entry, a commit message, " +
+		"a pull request's linked work items"}
+	fPRID = filterField{name: models.FilterID, desc: "Pull request ID (Azure DevOps) or number (GitHub), e.g. 45 " +
+		"(!45 and #45 work too)"}
+	fCommit = filterField{name: models.FilterCommit, desc: "Commit SHA, full or abbreviated (7 or more characters): " +
+		"opens the commit another result refers to"}
+	fRunCommit = filterField{name: models.FilterCommit, desc: "SHA of the commit the run built, full or abbreviated " +
+		"(7 or more characters)"}
+	fBuildID = filterField{name: models.FilterBuildID, desc: "Pipeline run id (Azure DevOps buildId, e.g. from a " +
+		"_build/results?buildId=1234 link, or GitHub Actions run id): returns that run's summary and every failed-step " +
+		"log and test document of it"}
 )
 
 func dateFields(what string) []filterField {
@@ -47,7 +59,7 @@ var (
 	repoFileFilters = []filterField{fProject, fRepository, fPath, fExtension}
 	// Area path and date aren't offered: a work item source is already scoped
 	// to its area paths, and work items are searched by content, not age.
-	workItemFilters = []filterField{fProject, fWIType, fState, fIteration, fAssigned, fTag}
+	workItemFilters = []filterField{fProject, fWIType, fState, fIteration, fAssigned, fTag, fWorkItemID}
 )
 
 // collectionFilters lists the filters each search tool's collection
@@ -60,11 +72,11 @@ var collectionFilters = map[string][]filterField{
 	models.CollectionSourceCode:    repoFileFilters,
 	models.CollectionTestCode:      repoFileFilters,
 	models.CollectionDocumentation: repoFileFilters,
-	models.CollectionCommits: append([]filterField{fProject, fRepository, fAuthor,
+	models.CollectionCommits: append([]filterField{fProject, fRepository, fCommit, fAuthor,
 		{name: models.FilterPath, desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}},
 		dateFields("author date")...),
-	models.CollectionPipelineRuns: {fResult, fBranch},
-	models.CollectionPullRequests: append([]filterField{fProject, fRepository,
+	models.CollectionPipelineRuns: {fResult, fBranch, fBuildID, fRunCommit},
+	models.CollectionPullRequests: append([]filterField{fPRID, fProject, fRepository,
 		{name: models.FilterAuthor, desc: "Pull request author's name, email (Azure DevOps) or login (GitHub)"},
 		{name: models.FilterReviewer, desc: "A reviewer's name, email (Azure DevOps) or login (GitHub)"},
 		{name: models.FilterState, desc: "Pull request status: active (open), completed (merged) or abandoned (closed unmerged)"},

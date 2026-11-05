@@ -262,7 +262,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		`same way as semantic_search. Both search modes accept an optional "filters" object to narrow results by ` +
 		`source-system fields — e.g. "filters":{"project":"Payments","repository":"api"} — see the schema for ` +
 		`the fields this tool supports; result properties (project, repository, state, …) show the values ` +
-		`available. When a result has properties.web_url, it is the browser link to the ` +
+		`available. When a result refers to another item by its id — a work item #1234, a commit SHA, a pull ` +
+		`request !45, a build id — open it with the matching tool's id, commit or build_id filter rather than ` +
+		`a semantic search, which may not surface it. When a result has properties.web_url, it is the browser link to the ` +
 		`source item (work item, file, commit, wiki page, pipeline run) — cite it as a markdown link, e.g. [title](web_url), ` +
 		`whenever you reference that result in an answer.`
 	makeSearchTool := func(collection, name, description string) {
@@ -290,8 +292,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	}
 
 	makeSearchTool(models.CollectionWorkItems, "search_workitem",
-		"Semantic search over work items (bugs, tasks, defects). "+
-			"Filter by project, type, state, iteration path, assignee or tags.")
+		"Semantic search over work items (bugs, tasks, defects). Each holds every field, a Links section (parent, "+
+			"children, related items as #id; pull requests as !id; commits by SHA; builds by id) and the whole discussion. "+
+			"Filter by id, project, type, state, iteration path, assignee or tags.")
 	makeSearchTool(models.CollectionRequirements, "search_requirement",
 		"Semantic search over requirements (features, user stories, epics).")
 	makeSearchTool(models.CollectionSourceCode, "search_source_code",
@@ -306,14 +309,17 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		"Semantic search over wiki pages, repo documentation and uploaded documents.")
 	makeSearchTool(models.CollectionCommits, "search_commit",
 		"Semantic search over git commit history — each commit's message, author and complete code diff. "+
-			"Filter by project, repository, author, changed path or author date.")
+			"Filter by commit SHA, project, repository, author, changed path or author date.")
 	makeSearchTool(models.CollectionPipelineRuns, "search_pipeline_run",
-		"Semantic search over completed Azure DevOps build pipeline runs. Every run has a summary document "+
-			"(result, reason, branch, triggering commit, requester, timing). Failed and partially succeeded runs "+
-			"also list their timeline errors/warnings and have separate documents for each failed step (its complete "+
-			"log) and each failed test (error message and stack trace); properties.type is run, step or test, and "+
-			"step/test documents carry properties.parent_doc_id, the source_doc_id of their run document. "+
-			"Filter by run result or branch.")
+		"Semantic search over completed pipeline runs (Azure DevOps builds, GitHub Actions). Every run has a summary document "+
+			"(result, reason, branch, triggering commit, requester, timing, attempts). Failed and partially succeeded runs, "+
+			"and runs that passed only after a rerun, also list their timeline errors/warnings and have separate documents "+
+			"for each failed step of every attempt (its complete log) and each failed or flaky test (error message and "+
+			"stack trace); properties.type is run, step or test, and step/test documents carry properties.parent_doc_id, "+
+			"the source_doc_id of their run document. The run summary alone never says why a step failed: to explain a "+
+			"specific run (a link with buildId=…, a run number, a run found by an earlier search), search with "+
+			`"filters":{"build_id":"<properties.build_id>"} to get the run together with all its step logs and test `+
+			"documents, then page or retrieve_chunk through the logs. Filter by run result, branch, build_id or commit.")
 
 	// ── Experience tools ───────────────────────────────────────────────────
 

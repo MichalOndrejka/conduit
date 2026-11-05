@@ -71,7 +71,7 @@ func RegisterPullRequestTool(s *server.MCPServer, search *rag.SearchService, src
 			`author or reviewer — use request={"mode":"semantic_search","query":...,"page":1} (or "pattern_search" for `+
 			`exact text) over the pull requests embedded by pull-request sources: each result holds one pull request's `+
 			`title, description, status, branches, reviewers and votes, linked work items, commit messages, changed-file `+
-			`list and comment threads (no diffs), and is a snapshot from the last sync. Narrow with "filters" (project, `+
+			`list and comment threads (no diffs), and is a snapshot from the last sync. Narrow with "filters" (id, project, `+
 			`repository, author, reviewer, state, branch = target branch, since/until on the creation date). Pass a `+
 			`result's properties.web_url as "url" to the live modes below for current details and diffs; if a match `+
 			`looks cut off, {"mode":"retrieve_chunk","source_doc_id":...,"chunk_index":...} fetches the adjacent chunk. `+

@@ -267,3 +267,107 @@ func TestNonAdoWorkItemSourceUsesGenericFetch(t *testing.T) {
 		t.Errorf("docs = %+v", docs)
 	}
 }
+
+// A work item's links and whole discussion are embedded, so the agent can
+// follow a parent, a pull request, a commit or a build by id, and sees every
+// comment rather than System.History's latest one. Discussions are fetched
+// only for items that have comments, across continuation pages.
+func TestFetchAdoWorkItemsEmbedsLinksAndDiscussion(t *testing.T) {
+	var commentCalls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/wit/wiql"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"workItems": []map[string]any{{"id": 42}, {"id": 43}}})
+		case strings.HasSuffix(r.URL.Path, "/wit/workitemsbatch"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
+				{"id": 42, "fields": map[string]any{
+					"System.Title": "Login fails", "System.WorkItemType": "Bug", "System.TeamProject": "Payments",
+					"System.CommentCount": 3, "System.History": "<div>only the latest</div>",
+				}, "relations": []map[string]any{
+					{"rel": "System.LinkTypes.Hierarchy-Reverse", "url": "https://ado/_apis/wit/workItems/7", "attributes": map[string]any{"name": "Parent"}},
+					{"rel": "System.LinkTypes.Related", "url": "https://ado/_apis/wit/workItems/9", "attributes": map[string]any{"name": "Related", "comment": "same root cause"}},
+					{"rel": "ArtifactLink", "url": "vstfs:///Git/PullRequestId/proj%2Frepo%2F45", "attributes": map[string]any{"name": "Pull Request"}},
+					{"rel": "ArtifactLink", "url": "vstfs:///Git/Commit/proj%2Frepo%2Fabc123def4567890", "attributes": map[string]any{"name": "Fixed in Commit"}},
+					{"rel": "ArtifactLink", "url": "vstfs:///Build/Build/1011", "attributes": map[string]any{"name": "Found in build"}},
+					{"rel": "ArtifactLink", "url": "vstfs:///Git/Ref/proj%2Frepo%2FGBfeature%2Flogin", "attributes": map[string]any{"name": "Branch"}},
+					{"rel": "Hyperlink", "url": "https://wiki/login"},
+				}},
+				{"id": 43, "fields": map[string]any{"System.Title": "No comments", "System.CommentCount": 0}},
+			}})
+		case strings.Contains(r.URL.Path, "/wit/workItems/") && strings.HasSuffix(r.URL.Path, "/comments"):
+			commentCalls = append(commentCalls, r.URL.Path)
+			if !strings.Contains(r.URL.Path, "/Payments/") || !strings.HasSuffix(r.URL.Query().Get("api-version"), "-preview") {
+				http.Error(w, "bad comments request "+r.URL.String(), http.StatusBadRequest)
+				return
+			}
+			if r.URL.Query().Get("continuationToken") == "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{"continuationToken": "p2", "comments": []map[string]any{
+					{"id": 2, "text": "<p>Repro on Safari</p>", "createdBy": map[string]any{"displayName": "Bo"}, "createdDate": "2026-11-02T10:00:00Z"},
+					{"id": 1, "text": "First look", "createdBy": map[string]any{"displayName": "Al"}, "createdDate": "2026-11-01T10:00:00Z"},
+				}})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"comments": []map[string]any{
+				{"id": 3, "text": "Fixed by !45", "createdBy": map[string]any{"displayName": "Cy"}, "createdDate": "2026-11-03T10:00:00Z"},
+			}})
+		default:
+			http.Error(w, "unexpected request: "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	s := &APISource{src: workitemAdoSrc(srv.URL, nil)}
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(commentCalls) != 2 {
+		t.Errorf("comment requests = %v, want two pages for item 42 only", commentCalls)
+	}
+	text := docs[0].Text
+	for _, want := range []string{
+		"Links:", "- Parent: #7", "- Related: #9 — same root cause", "- Pull Request: !45",
+		"- Fixed in Commit: abc123def4567890", "- Found in build: build 1011", "- Branch: feature/login",
+		"- Hyperlink: https://wiki/login",
+		"Discussion (3 comments):", "- Al (2026-11-01T10:00:00Z): First look",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("work item text lacks %q:\n%s", want, text)
+		}
+	}
+	// Oldest first, across pages.
+	if a, b, c := strings.Index(text, "First look"), strings.Index(text, "Repro on Safari"), strings.Index(text, "Fixed by !45"); !(a < b && b < c) {
+		t.Errorf("discussion out of order:\n%s", text)
+	}
+	if strings.Contains(text, "only the latest") {
+		t.Error("System.History is superseded by the discussion")
+	}
+	if got := docs[0].Filters.Fields[models.FilterID]; len(got) != 1 || got[0] != "42" {
+		t.Errorf("id filter = %v", got)
+	}
+	if strings.Contains(docs[1].Text, "Discussion") || strings.Contains(docs[1].Text, "Links:") {
+		t.Errorf("item without comments or links:\n%s", docs[1].Text)
+	}
+}
+
+// A discussion that can't be fetched fails the sync rather than embedding
+// the item without it.
+func TestFetchAdoWorkItemsFailsWhenDiscussionUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/wit/wiql"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"workItems": []map[string]any{{"id": 42}}})
+		case strings.HasSuffix(r.URL.Path, "/wit/workitemsbatch"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
+				{"id": 42, "fields": map[string]any{"System.Title": "T", "System.CommentCount": 1}},
+			}})
+		default:
+			http.Error(w, "nope", http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	s := &APISource{src: workitemAdoSrc(srv.URL, nil)}
+	if _, err := s.FetchDocuments(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "work item 42: fetching discussion") {
+		t.Fatalf("err = %v, want the discussion failure", err)
+	}
+}

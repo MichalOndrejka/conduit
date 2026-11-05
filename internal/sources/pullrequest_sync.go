@@ -278,6 +278,7 @@ func pullRequestDocument(src *models.SourceDefinition, scope prScope, rec *prRec
 		"repository":    scope.repository,
 	}
 	var f models.DocumentFilters
+	f.Add(models.FilterID, strconv.Itoa(pr.ID))
 	f.Add(models.FilterProject, scope.project)
 	f.Add(models.FilterRepository, scope.repository)
 	f.Add(models.FilterState, pr.Status)

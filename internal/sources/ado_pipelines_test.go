@@ -285,6 +285,12 @@ func TestFetchPipelineRunsBuildsRunStepAndTestDocuments(t *testing.T) {
 	if got := step.Filters.Fields[models.FilterResult]; len(got) != 1 || got[0] != "failed" {
 		t.Errorf("step result filter = %v", got)
 	}
+	// build_id ties a run to its step and test documents for one filtered search.
+	for _, d := range []*models.SourceDocument{docByID(docs, "src-1_run_3"), step, test} {
+		if got := d.Filters.Fields[models.FilterBuildID]; len(got) != 1 || got[0] != "3" {
+			t.Errorf("%s build_id filter = %v", d.ID, got)
+		}
+	}
 	pr := docByID(docs, "src-1_run_1")
 	if got := strings.Join(pr.Filters.Fields[models.FilterBranch], ","); got != "refs/pull/42/merge,pull/42/merge" {
 		t.Errorf("PR branch filter = %q", got)

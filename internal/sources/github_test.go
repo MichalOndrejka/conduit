@@ -274,6 +274,9 @@ func TestGitHubFetchCommits(t *testing.T) {
 	if d.Filters.Date.IsZero() {
 		t.Error("commit date filter not set")
 	}
+	if got := d.Filters.Fields[models.FilterCommit]; len(got) != 1 || got[0] != "c000" {
+		t.Errorf("commit filter = %v", got)
+	}
 }
 
 func TestGitHubCommitNotesFileLimit(t *testing.T) {
@@ -349,6 +352,9 @@ func TestGitHubFetchIssues(t *testing.T) {
 	if d.Properties["web_url"] != "https://ghe/acme/app/issues/2" || d.Properties["type"] != "Issue" {
 		t.Errorf("props = %v", d.Properties)
 	}
+	if got := d.Filters.Fields[models.FilterID]; len(got) != 1 || got[0] != "2" {
+		t.Errorf("issue id filter = %v", got)
+	}
 }
 
 func TestGitHubFetchWorkflowRuns(t *testing.T) {
@@ -399,6 +405,11 @@ func TestGitHubFetchWorkflowRuns(t *testing.T) {
 	}
 	if build.Properties["parent_doc_id"] != "s_run_11" {
 		t.Errorf("parent_doc_id = %q", build.Properties["parent_doc_id"])
+	}
+	for _, d := range []models.SourceDocument{run, build} {
+		if got := d.Filters.Fields[models.FilterBuildID]; len(got) != 1 || got[0] != "11" {
+			t.Errorf("%s build_id filter = %v", d.ID, got)
+		}
 	}
 	if !strings.Contains(lint.Text, "log no longer available on GitHub: HTTP 410") {
 		t.Errorf("lint job text:\n%s", lint.Text)

@@ -251,6 +251,7 @@ func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, branch
 		"files_changed": strconv.Itoa(d.filesChanged),
 	}
 	filters := g.scopeFilters(props)
+	filters.Add(models.FilterCommit, c.SHA)
 	filters.Add(models.FilterPath, d.paths...)
 	filters.Add(models.FilterAuthor, a.Name, a.Email)
 	if c.Author != nil {

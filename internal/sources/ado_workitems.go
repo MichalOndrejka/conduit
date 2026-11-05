@@ -18,6 +18,7 @@ import (
 	"net/url"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
@@ -72,6 +73,11 @@ type workItemBatchItem struct {
 	Links map[string]struct {
 		Href string `json:"href"`
 	} `json:"_links"`
+	// Relations are the item's links to other work items, pull requests,
+	// commits, builds, hyperlinks and attachments.
+	Relations []adoWorkItemRelation `json:"relations"`
+	// comments is the item's whole discussion (fetched separately).
+	comments []adoWorkItemComment
 }
 
 type workItemBatchResponse struct {
@@ -110,6 +116,13 @@ func (a *APISource) fetchAdoWorkItems(ctx context.Context, client *http.Client, 
 	items, err := a.workItemsBatch(ctx, client, org, apiVersion, ids, progress)
 	if err != nil {
 		return nil, err
+	}
+	discussions, err := a.fetchWorkItemDiscussions(ctx, client, org, apiVersion, items, progress)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		items[i].comments = discussions[items[i].ID]
 	}
 	return a.workItemsToDocuments(items), nil
 }
@@ -207,9 +220,11 @@ func (a *APISource) workItemsBatch(ctx context.Context, client *http.Client, org
 	return all, nil
 }
 
-// workItemsToDocuments converts fetched work item fields into documents. Every
+// workItemsToDocuments converts fetched work items into documents. Every
 // fetched field (system + custom) is embedded — sorted for stable output, and
-// with HTML rich-text values reduced to readable plain text.
+// with HTML rich-text values reduced to readable plain text — followed by
+// the item's links and its whole discussion. System.History is left out:
+// it holds only the latest revision's comment, and the discussion has all.
 func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.SourceDocument {
 	docs := make([]models.SourceDocument, 0, len(items))
 	for _, item := range items {
@@ -221,7 +236,7 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 
 		fieldNames := make([]string, 0, len(item.Fields))
 		for k := range item.Fields {
-			if k != "System.Title" {
+			if k != "System.Title" && k != "System.History" {
 				fieldNames = append(fieldNames, k)
 			}
 		}
@@ -258,7 +273,15 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 			props["web_url"] = webURL
 		}
 
+		if links := workItemLinks(item.Relations); len(links) > 0 {
+			parts = append(parts, "\nLinks:\n- "+strings.Join(links, "\n- "))
+		}
+		if len(item.comments) > 0 {
+			parts = append(parts, "\n"+discussionText(item.comments))
+		}
+
 		var filters models.DocumentFilters
+		filters.Add(models.FilterID, strconv.Itoa(item.ID))
 		filters.Add(models.FilterProject, project)
 		filters.Add(models.FilterWorkItemType, wiType)
 		filters.Add(models.FilterState, state)

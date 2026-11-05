@@ -50,3 +50,25 @@ func TestDocumentFiltersAddDedupesAndSkipsEmpty(t *testing.T) {
 		t.Errorf("tags = %v, want %v", got, want)
 	}
 }
+
+func TestIDFilterAcceptsReferenceForms(t *testing.T) {
+	for _, in := range []string{"1234", "#1234", "AB#1234", "ab#1234", " !1234 "} {
+		if got := NormalizeFilterValue(FilterID, in); got != "1234" {
+			t.Errorf("NormalizeFilterValue(id, %q) = %q, want 1234", in, got)
+		}
+	}
+}
+
+// A commit is findable by any abbreviation from git's 7 characters up.
+func TestCommitFilterStoresPrefixes(t *testing.T) {
+	sha := "ABC123DEF4567890ABC123DEF4567890ABCD1234"
+	vals := FilterValues(FilterCommit, sha)
+	for _, q := range []string{sha, "abc123d", "abc123def4", "abc123def4567890"} {
+		if !containsString(vals, NormalizeFilterValue(FilterCommit, q)) {
+			t.Errorf("query %q doesn't match the stored values", q)
+		}
+	}
+	if containsString(vals, "abc123") {
+		t.Error("prefixes shorter than 7 characters must not match")
+	}
+}

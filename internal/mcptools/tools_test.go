@@ -561,8 +561,24 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 		}
 	}
 	pipeline := filterProps("search_pipeline_run")
-	if len(pipeline) != 2 || pipeline["result"] == nil || pipeline["branch"] == nil {
-		t.Errorf("search_pipeline_run filters = %v, want exactly result and branch", pipeline)
+	if len(pipeline) != 4 || pipeline["result"] == nil || pipeline["branch"] == nil || pipeline["build_id"] == nil || pipeline["commit"] == nil {
+		t.Errorf("search_pipeline_run filters = %v, want exactly result, branch, build_id and commit", pipeline)
+	}
+	// Every item another result can name by id is reachable by that id.
+	for tool, field := range map[string]string{
+		"search_workitem": "id", "search_requirement": "id", "search_testcase": "id",
+		"search_commit": "commit",
+	} {
+		if filterProps(tool)[field] == nil {
+			t.Errorf("%s lacks the %q lookup filter", tool, field)
+		}
+	}
+	hasPRID := false
+	for _, f := range collectionFilters[models.CollectionPullRequests] {
+		hasPRID = hasPRID || f.name == models.FilterID
+	}
+	if !hasPRID {
+		t.Error("indexed pull requests lack the id lookup filter")
 	}
 	workItem := filterProps("search_workitem")
 	if _, ok := workItem["repository"]; ok {

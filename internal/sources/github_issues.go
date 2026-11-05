@@ -253,6 +253,7 @@ func (g *GitHubSource) issueDocument(is githubIssue, comments []githubComment) m
 		"web_url": webURL,
 	}
 	filters := g.scopeFilters(props)
+	filters.Add(models.FilterID, strconv.Itoa(is.Number))
 	filters.Add(models.FilterWorkItemType, issueType)
 	filters.Add(models.FilterState, is.State)
 	filters.Add(models.FilterAssignedTo, assignees...)

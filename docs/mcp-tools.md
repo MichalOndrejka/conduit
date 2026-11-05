@@ -86,16 +86,18 @@ Use this instead of `semantic_search` when you need an exact match rather than a
 
 ## Which tool to use
 
+When a result names another item by its ID (a work item `#1234`, a pull request `!45`, a commit SHA, a build ID), open it with that tool's `id`, `commit` or `build_id` filter. A semantic search may not surface it.
+
 | Tool | Searches | Best for |
 |---|---|---|
-| `search_workitem` | Work items — bugs, tasks, user stories, features, epics | Finding related issues, checking if a bug's been filed, sprint scope |
+| `search_workitem` | Work items — bugs, tasks, user stories, features, epics, with their links and whole discussion (filter `id` opens one by its ID: `1234`, `#1234` or `AB#1234`) | Finding related issues, checking if a bug's been filed, sprint scope, following a parent or linked item |
 | `search_requirement` | Requirements — features, user stories, epics | Finding relevant requirements, acceptance criteria |
 | `search_source_code` | Production source code (classes, methods, functions) — no tests | Finding implementations, locating where a concept is defined |
 | `search_test_code` | Test code — unit, integration, specs | Finding test coverage, patterns, and examples |
 | `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
 | `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
-| `search_commit` | Git commit history — messages, authors, file changes | When a change was made, which commit introduced a behaviour |
-| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`) | Why a run failed, whether an error or test failed before, which commit a run built |
+| `search_commit` | Git commit history — messages, authors, file changes (filter `commit` opens one by its full or 7+ character SHA) | When a change was made, which commit introduced a behaviour |
+| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`, `build_id`, `commit`; `build_id` returns a run with all its step logs and test documents) | Why a run failed or needed several attempts, whether an error or test failed before, which commit a run built |
 
 ---
 
@@ -191,7 +193,7 @@ Finds Azure DevOps and GitHub pull requests, and reads them **live** for code re
 
 It has two kinds of modes:
 
-- **Indexed search** (`semantic_search`, `pattern_search`, `retrieve_chunk`) finds a pull request without its URL: by topic, the code or work item it touched, its discussion, author or reviewer. It searches `conduit_pull_requests`, the pull requests embedded by **Pull Requests** sources (see [sources](sources.md#pull-requests)). Each result is one pull request as of the last sync: title, description, status, branches, reviewers and votes, linked work items, commit messages, the changed-file list and every comment thread. Diffs and checks aren't embedded. Filters: `project`, `repository`, `author`, `reviewer`, `state` (`active`, `completed`, `abandoned`), `branch` (target branch), and `since`/`until` on the creation date. The request shapes are the same as the collection search tools'.
+- **Indexed search** (`semantic_search`, `pattern_search`, `retrieve_chunk`) finds a pull request without its URL: by topic, the code or work item it touched, its discussion, author or reviewer. It searches `conduit_pull_requests`, the pull requests embedded by **Pull Requests** sources (see [sources](sources.md#pull-requests)). Each result is one pull request as of the last sync: title, description, status, branches, reviewers and votes, linked work items, commit messages, the changed-file list and every comment thread. Diffs and checks aren't embedded. Filters: `id` (pull request ID or number; `!45` works too), `project`, `repository`, `author`, `reviewer`, `state` (`active`, `completed`, `abandoned`), `branch` (target branch), and `since`/`until` on the creation date. The request shapes are the same as the collection search tools'.
 - **Live modes** (`list`, `get`, `files`, `diff`, `threads`, `iterations`, `commits`) read the provider directly, so they show the pull request as it is now. Pass an indexed result's `properties.web_url` as `url`.
 
 ```

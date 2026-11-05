@@ -25,6 +25,9 @@ const (
 	FilterResult        = "result"         // pipeline run result
 	FilterBranch        = "branch"         // pipeline run source branch; pull request target branch
 	FilterReviewer      = "reviewer"       // pull request reviewer name and unique name / login
+	FilterBuildID       = "build_id"       // pipeline run id: the run and its step/test documents
+	FilterID            = "id"             // work item id, issue number, pull request id/number
+	FilterCommit        = "commit"         // commit SHA; any prefix of 7+ characters matches
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
@@ -44,11 +47,21 @@ var filterSeparators = map[string]string{
 	FilterIterationPath: `\`,
 }
 
+// minCommitPrefix is the shortest commit SHA prefix the commit filter
+// matches (git's own default abbreviation).
+const minCommitPrefix = 7
+
 // NormalizeFilterValue canonicalizes one value of field for storage or
 // matching: trimmed and lower-cased, and for hierarchical fields with either
 // slash accepted as the separator and leading/trailing separators removed.
+// IDs drop the reference prefixes they are written with (AB#123, #123,
+// !45 for a pull request).
 func NormalizeFilterValue(field, v string) string {
 	v = strings.ToLower(strings.TrimSpace(v))
+	if field == FilterID {
+		v = strings.TrimPrefix(v, "ab")
+		v = strings.TrimLeft(v, "#!")
+	}
 	if sep, ok := filterSeparators[field]; ok {
 		v = strings.ReplaceAll(strings.ReplaceAll(v, `\`, sep), "/", sep)
 		v = strings.Trim(v, sep)
@@ -64,6 +77,15 @@ func FilterValues(field, raw string) []string {
 	v := NormalizeFilterValue(field, raw)
 	if v == "" {
 		return nil
+	}
+	if field == FilterCommit {
+		// Every prefix from git's short form up, so a short SHA from a log,
+		// a link or a build summary matches with plain equality.
+		out := []string{v}
+		for n := minCommitPrefix; n < len(v); n++ {
+			out = append(out, v[:n])
+		}
+		return out
 	}
 	sep, ok := filterSeparators[field]
 	if !ok {

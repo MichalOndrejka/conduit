@@ -309,6 +309,8 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 		filters := g.scopeFilters(props)
 		filters.Add(models.FilterResult, r.Conclusion)
 		filters.Add(models.FilterBranch, r.HeadBranch)
+		filters.Add(models.FilterBuildID, strconv.FormatInt(r.ID, 10))
+		filters.Add(models.FilterCommit, r.HeadSHA)
 		if id != runDocID {
 			props["parent_doc_id"] = runDocID
 		}

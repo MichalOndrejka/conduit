@@ -718,6 +718,8 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 	var filters models.DocumentFilters
 	filters.Add(models.FilterResult, b.Result)
 	filters.Add(models.FilterBranch, b.SourceBranch, shortBranch(b.SourceBranch))
+	filters.Add(models.FilterBuildID, strconv.Itoa(b.ID))
+	filters.Add(models.FilterCommit, b.SourceVersion)
 
 	newDoc := func(id, title, text, kind, webURL, header string) models.SourceDocument {
 		props := map[string]string{

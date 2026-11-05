@@ -424,6 +424,7 @@ func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, co
 		docs[i].Properties["files_changed"] = strconv.Itoa(out.filesChanged)
 
 		f := &docs[i].Filters
+		f.Add(models.FilterCommit, fieldString(items[i], "commitId"))
 		f.Add(models.FilterPath, out.paths...)
 		if author, ok := navigate(items[i], "author").(map[string]any); ok {
 			name, _ := author["name"].(string)
