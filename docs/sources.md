@@ -124,6 +124,8 @@ Documents (all in `conduit_pipeline_runs`):
 
 Properties: `type` (`run`, `step`, `test`), `build_id`, `result`, `branch`, `commit`, `project`, `repository`, `web_url`; step and test documents also carry `parent_doc_id` (the run document's ID) and steps `step_path`; run documents of Azure Repos runs carry `commit_web_url`. Every chunk's text starts with a `[Run #<number> > Stage > Job > Task | chunk k/N]` header (`[Run #<number> > test <name> | …]` for tests, `[Run #<number> | …]` for runs), so a chunk deep inside a long log still names the run and step it belongs to.
 
+A run with several attempts records which attempt every failed step and test belongs to: the `attempt` filter and property, and "Attempt: n of N" with its `Stage > Job` in the text. A test's attempt comes from its test run's pipeline reference, or else from the job execution whose start/finish holds the test run. One matching neither is listed as "attempt unknown" rather than guessed. The run document labels each failed test "(attempt n, Stage > Job)" and ends with **Tests by attempt**, which lists each attempt's failures side by side.
+
 Fetching is lossless: any run, timeline, log or test-result request that still fails after retries — including a 404 for a log Azure DevOps already purged — fails the sync, leaving the previous snapshot untouched.
 
 ### Requirements and Test Cases (dual-mode)

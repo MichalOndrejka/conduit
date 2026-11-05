@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -84,13 +85,15 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 				map[string]any{"id": "s1", "type": "Stage", "name": "Build", "result": "succeeded", "order": 1, "attempt": 1},
 				map[string]any{"id": "p1", "parentId": "s1", "type": "Phase", "name": "Linux", "result": "succeeded", "order": 1, "attempt": 2},
 				map[string]any{"id": "j1", "parentId": "p1", "type": "Job", "name": "Linux", "result": "succeeded", "order": 1, "attempt": 2,
+					"startTime": "2026-10-14T08:30:00Z", "finishTime": "2026-10-14T08:40:00Z",
 					"log": map[string]any{"id": 30}, "previousAttempts": []any{map[string]any{"attempt": 1, "timelineId": "tl-2a1", "recordId": "j1"}}},
 				map[string]any{"id": "t1", "parentId": "j1", "type": "Task", "name": "Test", "result": "succeeded", "order": 1, "attempt": 2, "log": map[string]any{"id": 31}},
 			}})
 		case path == "build/builds/2/timeline/tl-2a1":
 			// The previous attempt's timeline holds only the rerun job.
 			writeJSON(w, map[string]any{"id": "tl-2a1", "records": []any{
-				map[string]any{"id": "j1", "parentId": "p1", "type": "Job", "name": "Linux", "result": "failed", "order": 1, "attempt": 1, "log": map[string]any{"id": 20}},
+				map[string]any{"id": "j1", "parentId": "p1", "type": "Job", "name": "Linux", "result": "failed", "order": 1, "attempt": 1,
+					"startTime": "2026-10-14T08:00:00Z", "finishTime": "2026-10-14T08:10:00Z", "log": map[string]any{"id": 20}},
 				map[string]any{"id": "t1", "parentId": "j1", "type": "Task", "name": "Test", "result": "failed", "order": 1, "attempt": 1, "log": map[string]any{"id": 21},
 					"issues": []any{map[string]any{"type": "error", "message": "connection reset"}}},
 			}})
@@ -134,9 +137,11 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 				writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 100, "name": "Unit tests"}}})
 			case "vstfs:///Build/Build/2":
 				writeJSON(w, map[string]any{"value": []any{
-					map[string]any{"id": 200, "name": "Integration (attempt 1)", "runStatistics": []any{
+					map[string]any{"id": 200, "name": "VSTest_TestResults_1", "pipelineReference": map[string]any{
+						"stageReference": map[string]any{"stageName": "Build", "attempt": 1},
+						"jobReference":   map[string]any{"jobName": "Linux", "attempt": 1}}, "runStatistics": []any{
 						map[string]any{"outcome": "Failed", "count": 1}, map[string]any{"outcome": "Passed", "count": 5}}},
-					map[string]any{"id": 201, "name": "Integration (attempt 2)", "runStatistics": []any{
+					map[string]any{"id": 201, "name": "VSTest_TestResults_2", "completedDate": "2026-10-14T08:35:00Z", "runStatistics": []any{
 						map[string]any{"outcome": "Passed", "count": 6},
 						map[string]any{"outcome": "Passed", "count": 1, "resultMetadata": "rerun"}}},
 				}})
@@ -316,8 +321,9 @@ func TestFetchPipelineRunsKeepsFailuresOfRerunAttempts(t *testing.T) {
 		"CI #20261014.2 succeeded", "Attempts: 2", "Passed after rerun",
 		"[error] Build > Linux > Test (attempt 1): connection reset",
 		"- Build > Linux > Test (attempt 1) (document src-1_run_2_step_t1)",
-		"- Api.Tests.Upload [Failed] (document src-1_run_2_test_200_9)",
-		"Flaky tests (passed on retry after failing):\n- Api.Tests.Retry [Passed on retry] (document src-1_run_2_test_201_11)",
+		"- Api.Tests.Upload [Failed] (attempt 1, Build > Linux) (document src-1_run_2_test_200_9)",
+		"- Api.Tests.Retry [Passed on retry] (attempt 2, Build > Linux) (document src-1_run_2_test_201_11)",
+		"Tests by attempt:\n- attempt 1: Api.Tests.Upload\n- attempt 2: Api.Tests.Retry (passed on in-run retry)",
 	} {
 		if !strings.Contains(run.Text, s) {
 			t.Errorf("rerun run doc missing %q:\n%s", s, run.Text)
@@ -528,5 +534,37 @@ func TestCleanLogText(t *testing.T) {
 				t.Errorf("cleanLogText(%q) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+// Two attempts with different failing tests: each test is attributed to
+// its attempt — from the test run's pipeline reference, or else from the
+// job execution whose time span holds the run — and an unattributable one
+// says so instead of guessing.
+func TestFetchPipelineRunsAttributesTestsToAttempts(t *testing.T) {
+	docs, err := fetchPipeline(t, &pipelineStub{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upload, retry := docByID(docs, "src-1_run_2_test_200_9"), docByID(docs, "src-1_run_2_test_201_11")
+	if !strings.Contains(upload.Text, "Attempt: 1 of 2\nJob: Build > Linux") || upload.Properties["attempt"] != "1" ||
+		!slices.Contains(upload.Filters.Fields[models.FilterAttempt], "1") {
+		t.Errorf("attempt-1 test doc:\n%s\n%v", upload.Text, upload.Properties)
+	}
+	if !strings.Contains(retry.Text, "Attempt: 2 of 2") || !slices.Contains(retry.Filters.Fields[models.FilterAttempt], "2") {
+		t.Errorf("attempt-2 test doc (placed by time):\n%s", retry.Text)
+	}
+	if step := docByID(docs, "src-1_run_2_step_t1"); !slices.Contains(step.Filters.Fields[models.FilterAttempt], "1") {
+		t.Errorf("step attempt filter = %v", step.Filters.Fields[models.FilterAttempt])
+	}
+
+	d := &pipelineRunDetail{attempts: 2}
+	if a, job := d.testRunAttempt(adoTestRun{ID: 1, CompletedDate: "2026-10-14T12:00:00Z"}, []jobExecution{
+		{name: "Linux", path: "Build > Linux", attempt: 1, start: parseTime("2026-10-14T08:00:00Z"), finish: parseTime("2026-10-14T08:10:00Z")},
+	}); a != 0 || job != "" {
+		t.Errorf("a run outside every job = attempt %d %q, want unknown", a, job)
+	}
+	if a, _ := (&pipelineRunDetail{attempts: 1}).testRunAttempt(adoTestRun{}, nil); a != 1 {
+		t.Errorf("a single-attempt run's tests are attempt 1, got %d", a)
 	}
 }

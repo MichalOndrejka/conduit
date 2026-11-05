@@ -97,7 +97,7 @@ When a result names another item by its ID (a work item `#1234`, a pull request 
 | `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
 | `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
 | `search_commit` | Git commit history — messages, authors, file changes (filter `commit` opens one by its full or 7+ character SHA) | When a change was made, which commit introduced a behaviour |
-| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`, `build_id`, `commit`; `build_id` returns a run with all its step logs and test documents) | Why a run failed or needed several attempts, whether an error or test failed before, which commit a run built |
+| `search_pipeline_run` | Build pipeline runs — run summaries, failed-step logs, failed tests (filters: `result`, `branch`, `build_id`, `commit`, `attempt`; `build_id` returns a run with all its step logs and test documents) | Why a run failed or needed several attempts, whether an error or test failed before, which commit a run built |
 
 ---
 

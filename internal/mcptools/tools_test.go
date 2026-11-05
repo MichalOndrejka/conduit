@@ -561,8 +561,9 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 		}
 	}
 	pipeline := filterProps("search_pipeline_run")
-	if len(pipeline) != 4 || pipeline["result"] == nil || pipeline["branch"] == nil || pipeline["build_id"] == nil || pipeline["commit"] == nil {
-		t.Errorf("search_pipeline_run filters = %v, want exactly result, branch, build_id and commit", pipeline)
+	if len(pipeline) != 5 || pipeline["result"] == nil || pipeline["branch"] == nil || pipeline["build_id"] == nil ||
+		pipeline["commit"] == nil || pipeline["attempt"] == nil {
+		t.Errorf("search_pipeline_run filters = %v, want exactly result, branch, build_id, commit and attempt", pipeline)
 	}
 	// Every item another result can name by id is reachable by that id.
 	for tool, field := range map[string]string{

@@ -390,6 +390,7 @@ func (g *GitHubSource) runDocuments(r githubRun, detail *githubRunDetail) []mode
 			doc.Properties["step_path"] = j.Name
 			if r.RunAttempt > 1 {
 				doc.Properties["attempt"] = strconv.Itoa(max(j.RunAttempt, 1))
+				doc.Filters.Add(models.FilterAttempt, strconv.Itoa(max(j.RunAttempt, 1)))
 			}
 			children = append(children, doc)
 		}

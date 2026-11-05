@@ -103,7 +103,11 @@ type adoTimelineRecord struct {
 	Result   string `json:"result"`
 	Order    int    `json:"order"`
 	Attempt  int    `json:"attempt"`
-	Log      *struct {
+	// StartTime / FinishTime place a job execution in time, to match a test
+	// run to the attempt that produced it when the run doesn't say.
+	StartTime  string `json:"startTime"`
+	FinishTime string `json:"finishTime"`
+	Log        *struct {
 		ID int `json:"id"`
 	} `json:"log"`
 	Issues []struct {
@@ -123,8 +127,26 @@ type adoTimelineRecord struct {
 func (r adoTimelineRecord) attempt() int { return max(r.Attempt, 1) }
 
 type adoTestRun struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
+	ID            int    `json:"id"`
+	Name          string `json:"name"`
+	StartedDate   string `json:"startedDate"`
+	CompletedDate string `json:"completedDate"`
+	// PipelineReference names the stage, phase and job — with their
+	// attempts — whose task published the run (YAML pipelines).
+	PipelineReference struct {
+		StageReference struct {
+			StageName string `json:"stageName"`
+			Attempt   int    `json:"attempt"`
+		} `json:"stageReference"`
+		PhaseReference struct {
+			PhaseName string `json:"phaseName"`
+			Attempt   int    `json:"attempt"`
+		} `json:"phaseReference"`
+		JobReference struct {
+			JobName string `json:"jobName"`
+			Attempt int    `json:"attempt"`
+		} `json:"jobReference"`
+	} `json:"pipelineReference"`
 	// RunStatistics (requested with includeRunDetails) count results by
 	// outcome; ResultMetadata "rerun"/"flaky" flags results that were retried.
 	RunStatistics []struct {
@@ -199,6 +221,10 @@ type pipelineStep struct {
 type pipelineTest struct {
 	run    adoTestRun
 	result adoTestResult
+	// attempt is the pipeline attempt whose job published the test run
+	// (0: unknown), job that job's Stage > Job path when known.
+	attempt int
+	job     string
 }
 
 // pipelineRunDetail is everything fetched for a run that failed, partially
@@ -470,13 +496,15 @@ func (a *APISource) fetchPipelineRunDetail(ctx context.Context, client *http.Cli
 	if err != nil {
 		return nil, err
 	}
+	jobs := jobExecutions(latest, timelines)
 	for _, run := range runs {
+		attempt, job := detail.testRunAttempt(run, jobs)
 		failed, err := a.fetchAdoTestResults(ctx, client, scope, run.ID, adoFailedTestOutcomes)
 		if err != nil {
 			return nil, fmt.Errorf("test run %d: %w", run.ID, err)
 		}
 		for _, res := range failed {
-			detail.tests = append(detail.tests, pipelineTest{run: run, result: res})
+			detail.tests = append(detail.tests, pipelineTest{run: run, result: res, attempt: attempt, job: job})
 		}
 		if !run.mayHaveRetriedResults() {
 			continue
@@ -487,7 +515,7 @@ func (a *APISource) fetchPipelineRunDetail(ctx context.Context, client *http.Cli
 		}
 		for _, res := range passed {
 			if hasFailedSubResult(res.SubResults) {
-				detail.tests = append(detail.tests, pipelineTest{run: run, result: res})
+				detail.tests = append(detail.tests, pipelineTest{run: run, result: res, attempt: attempt, job: job})
 			}
 		}
 	}
@@ -813,6 +841,7 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 			doc.Properties["step_path"] = st.path
 			if detail.attempts > 1 {
 				doc.Properties["attempt"] = strconv.Itoa(n)
+				doc.Filters.Add(models.FilterAttempt, strconv.Itoa(n))
 			}
 			children = append(children, doc)
 		}
@@ -836,14 +865,32 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 		testDocID := func(t pipelineTest) string {
 			return fmt.Sprintf("%s_test_%d_%d", runDocID, t.run.ID, t.result.ID)
 		}
+		where := func(t pipelineTest) string {
+			if detail.attempts <= 1 {
+				if t.job != "" {
+					return " (" + t.job + ")"
+				}
+				return ""
+			}
+			if t.attempt == 0 {
+				return " (attempt unknown: the test run names no job and ran outside every job of the timeline)"
+			}
+			if t.job != "" {
+				return fmt.Sprintf(" (attempt %d, %s)", t.attempt, t.job)
+			}
+			return fmt.Sprintf(" (attempt %d)", t.attempt)
+		}
 		for _, t := range failedTests {
-			fmt.Fprintf(&sb, "- %s [%s] (document %s)\n", testName(t), t.result.Outcome, testDocID(t))
+			fmt.Fprintf(&sb, "- %s [%s]%s (document %s)\n", testName(t), t.result.Outcome, where(t), testDocID(t))
 		}
 		if len(flakyTests) > 0 {
-			sb.WriteString("\nFlaky tests (passed on retry after failing):\n")
+			sb.WriteString("\nFlaky tests (failed, then passed on an in-run retry within the same attempt):\n")
 		}
 		for _, t := range flakyTests {
-			fmt.Fprintf(&sb, "- %s [%s on retry] (document %s)\n", testName(t), t.result.Outcome, testDocID(t))
+			fmt.Fprintf(&sb, "- %s [%s on retry]%s (document %s)\n", testName(t), t.result.Outcome, where(t), testDocID(t))
+		}
+		if detail.attempts > 1 && len(detail.tests) > 0 {
+			sb.WriteString(testsByAttempt(detail))
 		}
 		for _, t := range append(failedTests, flakyTests...) {
 			id := testDocID(t)
@@ -864,6 +911,13 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 				writeField(&tb, "Title", t.result.TestCaseTitle)
 			}
 			writeField(&tb, "Outcome", t.result.Outcome)
+			switch {
+			case detail.attempts > 1 && t.attempt > 0:
+				writeField(&tb, "Attempt", fmt.Sprintf("%d of %d", t.attempt, detail.attempts))
+			case detail.attempts > 1:
+				writeField(&tb, "Attempt", fmt.Sprintf("unknown (the run had %d attempts; this test run names no job)", detail.attempts))
+			}
+			writeField(&tb, "Job", t.job)
 			writeField(&tb, "Test storage", t.result.AutomatedTestStorage)
 			writeField(&tb, "Test run", fmt.Sprintf("%s (id %d)", t.run.Name, t.run.ID))
 			if t.result.DurationInMs > 0 {
@@ -885,6 +939,10 @@ func (a *APISource) pipelineRunDocuments(scope adoPipelineScope, b adoBuild, det
 				fmt.Sprintf("Run #%s > test %s", b.BuildNumber, name))
 			if flaky {
 				doc.Properties["flaky"] = "true"
+			}
+			if t.attempt > 0 {
+				doc.Properties["attempt"] = strconv.Itoa(t.attempt)
+				doc.Filters.Add(models.FilterAttempt, strconv.Itoa(t.attempt))
 			}
 			children = append(children, doc)
 		}

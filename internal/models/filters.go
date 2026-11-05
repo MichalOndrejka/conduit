@@ -28,6 +28,7 @@ const (
 	FilterBuildID       = "build_id"       // pipeline run id: the run and its step/test documents
 	FilterID            = "id"             // work item id, issue number, pull request id/number
 	FilterCommit        = "commit"         // commit SHA; any prefix of 7+ characters matches
+	FilterAttempt       = "attempt"        // pipeline attempt a failed step or test belongs to
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
