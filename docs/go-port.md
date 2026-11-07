@@ -26,7 +26,7 @@ internal/sourcemgmt/    source types, config validation, save/delete with vector
 internal/embedstate/    detects embedding model changes at startup
 internal/store/         conduit-sources.json store
 internal/web/           routes, templates
-internal/stats/         in-memory record of searches and syncs, Stats page data
+internal/stats/         in-memory record of searches and syncs, Dashboard data
 internal/eval/          `conduit eval`: accuracy evals comparing source layouts
 ```
 

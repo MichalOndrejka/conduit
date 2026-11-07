@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -16,10 +17,13 @@ import (
 // SetStats gives the server the recorder whose events the Stats page shows.
 func (s *Server) SetStats(r *stats.Recorder) { s.stats = r }
 
+// SetToolNames gives the server the registered MCP tools, so the Stats charts
+// list each one before it is first called.
+func (s *Server) SetToolNames(names []string) { s.tools = names }
+
 func fmtPct(v float64) string   { return fmt.Sprintf("%.0f%%", v*100) }
 func fmtCount(v float64) string { return fmt.Sprintf("%.0f", v) }
 func fmtMs(v float64) string    { return fmtDuration(time.Duration(v) * time.Millisecond) }
-func fmtPerQ(v float64) string  { return fmt.Sprintf("%.2f", v) }
 
 func fmtDuration(d time.Duration) string {
 	switch {
@@ -36,8 +40,9 @@ func fmtDuration(d time.Duration) string {
 
 // statsTile is one headline number.
 type statsTile struct {
-	Label, Tip, Value string
-	Alert             string // a status note, e.g. rate-limit hits
+	Label, Value string
+	Note         string // a neutral subline, e.g. a share
+	Alert        string // a status note, e.g. rate-limit hits
 }
 
 type statsSourceRow struct {
@@ -51,72 +56,99 @@ type statsSourceRow struct {
 	FetchPct, IndexPct     int // phase split, for the thin bar
 }
 
-type statsFilter struct {
-	Tool, Field, Value string
-	Uses, Empty        int
-	EmptyPct           int
-	EmptyRate          string
-}
-
 type statsEmptySearch struct {
 	When, Tool, Mode, Query, Filters string
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	data := map[string]any{"Active": "stats", "Enabled": s.stats != nil}
+	data := map[string]any{"Active": "dashboard", "Enabled": s.stats != nil}
 	if s.stats == nil {
 		s.render(w, s.statsTmpl, "base", data)
 		return
 	}
 	d := stats.Summarize(s.stats.Events())
-	data["Since"] = s.stats.Started().Local().Format("Jan 2 15:04")
 
 	// Headline numbers.
-	searched, synced := d.Search.FirstPages > 0, d.Sync.Sources > 0
 	pick := func(ok bool, v string) string {
 		if ok {
 			return v
 		}
 		return "–"
 	}
-	tiles := []statsTile{
-		{Label: "Searches", Tip: "Questions the agent asked: first-page semantic and pattern searches.",
-			Value: fmtCount(float64(d.Search.FirstPages))},
-		{Label: "Empty results", Tip: "Share of searches that found nothing: a missing or unsynced source, or a filter value that doesn't exist. Lower is better.",
-			Value: pick(searched, fmtPct(d.Search.EmptyRate()))},
-		{Label: "Further pages", Tip: "Further pages per search: how often the agent asked for page 2 or later because the answer wasn't on the first page. Lower is better.",
-			Value: pick(searched, fmtPerQ(d.Search.NextPageRate()))},
-		{Label: "Latency p95", Tip: "95th percentile of semantic search time, embedding included; the cold first search left out.",
-			Value: pick(d.Search.P95Ms > 0, fmtMs(float64(d.Search.P95Ms)))},
-		{Label: "Sync time", Tip: "Sum of each source's latest sync.",
-			Value: pick(synced, fmtMs(float64(d.Sync.DurationMs)))},
-		{Label: "API requests", Tip: "HTTP requests to source APIs across each source's latest sync.",
-			Value: pick(synced, fmtCount(float64(d.Sync.Requests)))},
+	var syncs, requests, rateLimited int
+	for _, p := range d.Providers {
+		syncs += p.Syncs
+		requests += p.Requests
+		rateLimited += p.RateLimited
 	}
-	if d.Sync.RateLimited > 0 {
-		tiles[5].Alert = fmt.Sprintf("%d rate-limited", d.Sync.RateLimited)
+	share := func(n int) string {
+		if d.Search.FirstPages == 0 {
+			return ""
+		}
+		return fmtPct(float64(n)/float64(d.Search.FirstPages)) + " of searches"
+	}
+	tiles := []statsTile{
+		{Label: "Tool Calls",
+			Value: fmtCount(float64(d.ToolCalls))},
+		{Label: "Hits",
+			Value: fmtCount(float64(d.Search.Hits)), Note: share(d.Search.Hits)},
+		{Label: "Misses",
+			Value: fmtCount(float64(d.Search.Empty)), Note: share(d.Search.Empty)},
+		{Label: "Latency",
+			Value: pick(d.Search.P95Ms > 0, fmtMs(float64(d.Search.P95Ms))), Note: pick(d.Search.P95Ms > 0, "p95")},
+		{Label: "Syncs",
+			Value: fmtCount(float64(syncs))},
+		{Label: "API Requests",
+			Value: fmtCount(float64(requests))},
+	}
+	if d.ToolErrors > 0 {
+		tiles[0].Alert = fmt.Sprintf("%d failed", d.ToolErrors)
+	}
+	if d.Sync.Failed > 0 {
+		tiles[4].Alert = fmt.Sprintf("%d sources failing", d.Sync.Failed)
+	}
+	if rateLimited > 0 {
+		tiles[5].Alert = fmt.Sprintf("%d rate-limited", rateLimited)
 	}
 	data["Tiles"] = tiles
 
-	// Search quality tab.
-	var emptyBars, callBars []rankedBar
+	// Sources tab: every registered tool gets a row, called yet or not, so
+	// the charts show from the start.
+	byName := map[string]*stats.ToolRow{}
 	for _, t := range d.Tools {
-		callBars = append(callBars, rankedBar{Label: t.Name, Value: float64(t.Calls), Text: fmtCount(float64(t.Calls))})
-		if t.Search.FirstPages > 0 {
-			emptyBars = append(emptyBars, rankedBar{Label: t.Name, Value: t.Search.EmptyRate(), Text: fmtPct(t.Search.EmptyRate())})
+		byName[t.Name] = t
+	}
+	names := slices.Clone(s.tools)
+	for _, t := range d.Tools {
+		if !slices.Contains(names, t.Name) {
+			names = append(names, t.Name)
 		}
 	}
-	sort.SliceStable(emptyBars, func(i, j int) bool { return emptyBars[i].Value > emptyBars[j].Value })
-	data["ChartToolEmpty"] = rankedBars(emptyBars, "found nothing", 520)
-	data["ChartToolCalls"] = rankedBars(callBars, "calls", 520)
-
-	var filters []statsFilter
-	for _, f := range d.Filters {
-		rate := float64(f.Empty) / float64(f.Uses)
-		filters = append(filters, statsFilter{Tool: f.Tool, Field: f.Field, Value: f.Value, Uses: f.Uses, Empty: f.Empty,
-			EmptyPct: int(rate * 100), EmptyRate: fmtPct(rate)})
+	var emptyBars, callBars []rankedBar
+	for _, name := range names {
+		t := byName[name]
+		if t == nil {
+			t = &stats.ToolRow{Name: name}
+		}
+		callBars = append(callBars, rankedBar{Label: name, Value: float64(t.Calls), Text: fmtCount(float64(t.Calls))})
+		if strings.HasPrefix(name, "search_") {
+			emptyBars = append(emptyBars, rankedBar{Label: name, Value: t.Search.EmptyRate(),
+				Text: fmtPct(t.Search.EmptyRate())})
+		}
 	}
-	data["Filters"] = filters
+	byValue := func(bars []rankedBar) {
+		sort.SliceStable(bars, func(i, j int) bool {
+			if bars[i].Value != bars[j].Value {
+				return bars[i].Value > bars[j].Value
+			}
+			return bars[i].Label < bars[j].Label
+		})
+	}
+	byValue(callBars)
+	byValue(emptyBars)
+	data["ChartToolCalls"] = rankedBars(callBars, "calls", 520)
+	data["ChartToolEmpty"] = rankedBars(emptyBars, "found nothing", 520)
+
 	var empties []statsEmptySearch
 	for _, e := range d.EmptySearches {
 		var parts []string

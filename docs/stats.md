@@ -1,10 +1,10 @@
-# Stats
+# Dashboard
 
-The **Stats** page shows what the agent's searches and the source syncs did since the Conduit process started.
+The **Dashboard** is Conduit's home page (`/`, also opened by clicking the logo; old `/stats` links redirect there). It shows what the agent's searches and the source syncs did since the Conduit process started.
 
 ## Where the data lives
 
-Events are kept in memory only. Nothing is written to disk, so a restart (including a hot reload) starts with empty stats.
+Events are kept in memory only. Nothing is written to disk, so a restart (including a hot reload) starts with an empty dashboard.
 
 ## What is recorded
 
@@ -18,17 +18,15 @@ The process's first search embeds a query while the model is still loading, so i
 ## The page
 
 - **Headline tiles:**
-  - searches, and the share that found nothing;
-  - further pages per search (the answer wasn't on page 1);
-  - p95 search latency, sync time and API requests (with rate-limit hits flagged).
-- **Search Quality:**
-  - empty results per tool;
-  - calls per tool;
-  - the searches that found nothing, with their query text;
-  - the filter values used and how often each came back empty. A value that always comes back empty usually doesn't exist in the data.
-- **Syncs:**
+  - tool calls (failed calls flagged);
+  - hits and misses: first-page searches that found something or nothing, each with its share of searches;
+  - p95 semantic search latency;
+  - syncs and API requests across every sync since the process started (failing sources and rate-limit hits flagged).
+- **Sources:**
+  - calls per tool and the empty-result share per search tool. Every registered tool is listed from the start, at zero until it is called;
+  - the searches that found nothing, with their query text and filters;
   - API requests per provider (GitHub, Azure DevOps) across every sync since the process started, retries included, with rate-limit hits, to show how much load Conduit puts on each service;
   - sync time per source.
-- **Experience:** recalls, recalls that found nothing, the most-recalled entries, and entries not recalled since the process started.
+- **Experience:** entries remembered, memories recalled, recall misses, the most-recalled entries, and entries not recalled since the process started.
 
 Every chart mark shows its values on hover and keyboard focus.

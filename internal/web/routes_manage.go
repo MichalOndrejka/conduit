@@ -153,7 +153,7 @@ func (s *Server) handleSourceCreatePost(w http.ResponseWriter, r *http.Request) 
 	if r.FormValue("action") == "save_sync" {
 		go s.sync.Sync(context.Background(), src.ID)
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 func (s *Server) handleSourceEditGet(w http.ResponseWriter, r *http.Request) {
@@ -163,7 +163,7 @@ func (s *Server) handleSourceEditGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if src == nil {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/sources", http.StatusFound)
 		return
 	}
 	s.renderSourceForm(w, src, "")
@@ -176,7 +176,7 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if existing == nil {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/sources", http.StatusFound)
 		return
 	}
 	// Capture before sourceFromForm mutates existing in place.
@@ -197,7 +197,7 @@ func (s *Server) handleSourceEditPost(w http.ResponseWriter, r *http.Request) {
 	if r.FormValue("action") == "save_sync" {
 		go s.sync.Sync(context.Background(), src.ID)
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 // previewFetchLimit caps how many items handleSourcePreview returns per page
@@ -335,7 +335,7 @@ func (s *Server) handleSourceDelete(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 // handleSourceToggle flips a source's disabled flag. A disabled source is
@@ -347,7 +347,7 @@ func (s *Server) handleSourceToggle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if src == nil {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/sources", http.StatusFound)
 		return
 	}
 	src.Disabled = !src.Disabled
@@ -355,7 +355,7 @@ func (s *Server) handleSourceToggle(w http.ResponseWriter, r *http.Request) {
 		httpError(w, err)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 // handleDisableSelected marks each checked source as disabled, for the
@@ -377,7 +377,7 @@ func (s *Server) handleDisableSelected(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 // handleDeleteSelected removes each checked source (and its vectors), for the
@@ -390,7 +390,7 @@ func (s *Server) handleDeleteSelected(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 // ── Sync control ────────────────────────────────────────────────────────────
@@ -401,7 +401,7 @@ func (s *Server) handleSyncSelected(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	ids := r.Form["ids"]
 	go s.sync.SyncSelected(context.Background(), ids)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
 func (s *Server) handleSyncPause(w http.ResponseWriter, r *http.Request) {
@@ -537,7 +537,7 @@ func (s *Server) handleMap(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{
 		"Active":    "sources",
 		"Kind":      "sources",
-		"BackHref":  "/",
+		"BackHref":  "/sources",
 		"BackLabel": "Sources",
 		"EmptyText": "No completed sources with vectors yet.",
 	}

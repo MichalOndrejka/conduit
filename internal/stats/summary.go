@@ -12,6 +12,8 @@ type SearchStats struct {
 	// FirstPages are searches (semantic or pattern) for page 1: one per
 	// question asked.
 	FirstPages int `json:"first_pages"`
+	// Hits are first-page searches that found something.
+	Hits int `json:"hits"`
 	// Empty are first-page searches that found nothing.
 	Empty int `json:"empty"`
 	// NextPages are searches for page 2 or later: the answer wasn't on the
@@ -51,8 +53,12 @@ func (s *SearchStats) add(tc *ToolCall) {
 			s.NextPages++
 		} else {
 			s.FirstPages++
-			if tc.Error == "" && tc.Results == 0 {
-				s.Empty++
+			if tc.Error == "" {
+				if tc.Results == 0 {
+					s.Empty++
+				} else {
+					s.Hits++
+				}
 			}
 		}
 		if tc.Mode == "semantic_search" && !tc.Cold && tc.Error == "" {

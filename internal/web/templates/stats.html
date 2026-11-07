@@ -1,4 +1,4 @@
-{{define "title"}}Stats — Conduit{{end}}
+{{define "title"}}Dashboard — Conduit{{end}}
 
 {{define "card-title"}}<h3 class="text-sm font-medium text-slate-200 mb-3">{{.}}</h3>{{end}}
 
@@ -6,7 +6,7 @@
 <div class="viz">
 
 <div class="flex items-center justify-between mb-6 flex-wrap gap-3">
-  <h1 class="text-2xl font-semibold text-white">Stats {{if .Enabled}}{{template "tip" (printf "What the agent's searches and the source syncs did since this process started (%s). Kept in memory only: a restart starts empty." .Since)}}{{end}}</h1>
+  <h1 class="text-2xl font-semibold text-white">Dashboard</h1>
 </div>
 
 {{if not .Enabled}}
@@ -17,8 +17,9 @@
 <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-8">
   {{range .Tiles}}
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 flex flex-col">
-    <div class="text-xs text-slate-400 mb-1">{{.Label}} {{template "tip" .Tip}}</div>
+    <div class="text-xs text-slate-400 mb-1">{{.Label}}</div>
     <div class="text-2xl font-semibold text-white tabular-nums">{{.Value}}</div>
+    {{if .Note}}<div class="mt-1 text-xs text-slate-500">{{.Note}}</div>{{end}}
     {{if .Alert}}<div class="mt-1 text-xs viz-tone-bad">⚠ {{.Alert}}</div>{{end}}
   </div>
   {{end}}
@@ -26,77 +27,45 @@
 
 <!-- Sections as tabs. -->
 <div class="tabs" role="tablist">
-  <label class="tab"><input type="radio" name="StatsTab" value="search" class="sr-only" checked onchange="showStatsTab('search')">Search Quality</label>
-  <label class="tab"><input type="radio" name="StatsTab" value="syncs" class="sr-only" onchange="showStatsTab('syncs')">Syncs</label>
+  <label class="tab"><input type="radio" name="StatsTab" value="sources" class="sr-only" checked onchange="showStatsTab('sources')">Sources</label>
   <label class="tab"><input type="radio" name="StatsTab" value="experience" class="sr-only" onchange="showStatsTab('experience')">Experience</label>
 </div>
 
-<!-- ── Search quality ─────────────────────────────────────────────── -->
-<div id="stats-tab-search" class="tab-panel p-5 space-y-6">
+<!-- ── Sources: search quality, then syncs ────────────────────────── -->
+<div id="stats-tab-sources" class="tab-panel p-5 space-y-6">
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Empty results by tool {{template "tip" "Each search tool's share of searches that found nothing. Lower is better."}}</h3>
-      {{if .ChartToolEmpty}}{{.ChartToolEmpty}}{{else}}<p class="text-sm text-slate-500">No searches yet.</p>{{end}}
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Calls by tool</h3>
+      {{.ChartToolCalls}}
     </div>
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Calls by tool {{template "tip" "How often the agent called each MCP tool."}}</h3>
-      {{if .ChartToolCalls}}{{.ChartToolCalls}}{{else}}<p class="text-sm text-slate-500">No tool calls yet.</p>{{end}}
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Empty results by tool</h3>
+      {{.ChartToolEmpty}}
     </div>
   </div>
 
-  <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
-    <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">What the agent didn't find {{template "tip" "First-page searches with no results, newest first."}}</h3>
-      {{if .EmptySearches}}
-      <div class="divide-y divide-slate-800 max-h-96 overflow-y-auto -mx-1">
-        {{range .EmptySearches}}
-        <div class="px-1 py-2">
-          <div class="text-sm text-slate-200 break-words">{{.Query}}</div>
-          <div class="text-xs text-slate-500 mt-0.5"><span class="font-mono">{{.Tool}}</span>{{if .Filters}} · {{.Filters}}{{end}} · {{.When}}</div>
-        </div>
-        {{end}}
+  <div class="rounded-xl border border-slate-800 p-4">
+    <h3 class="text-sm font-medium text-slate-200 mb-3">What the agent didn't find</h3>
+    {{if .EmptySearches}}
+    <div class="divide-y divide-slate-800 max-h-96 overflow-y-auto -mx-1">
+      {{range .EmptySearches}}
+      <div class="px-1 py-2">
+        <div class="text-sm text-slate-200 break-words">{{.Query}}</div>
+        <div class="text-xs text-slate-500 mt-0.5"><span class="font-mono">{{.Tool}}</span>{{if .Filters}} · {{.Filters}}{{end}} · {{.When}}</div>
       </div>
-      {{else}}<p class="text-sm text-slate-500">Every search found something.</p>{{end}}
+      {{end}}
     </div>
-    <div class="rounded-xl border border-slate-800 p-4 min-w-0">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Filter values {{template "tip" "Each filter value the agent used and the share of those searches that found nothing. A value that always comes back empty usually doesn't exist in the data: check the facets or the source's real vocabulary."}}</h3>
-      {{if .Filters}}
-      <div class="max-h-96 overflow-y-auto -mx-1 px-1">
-      <table class="w-full text-sm table-fixed">
-        <thead class="text-left text-xs text-slate-500">
-          <tr><th class="pb-2 font-normal">Filter</th><th class="pb-2 font-normal text-right w-14">Uses</th><th class="pb-2 font-normal pl-4 w-40">Found nothing</th></tr>
-        </thead>
-        <tbody class="divide-y divide-slate-800">
-          {{range .Filters}}
-          <tr>
-            <td class="py-2 pr-2 min-w-0"><div class="text-slate-200 break-all">{{.Field}} = {{.Value}}</div><div class="text-xs text-slate-500 font-mono truncate" title="{{.Tool}}">{{.Tool}}</div></td>
-            <td class="py-2 text-right tabular-nums text-slate-300">{{.Uses}}</td>
-            <td class="py-2 pl-4">
-              <div class="flex items-center gap-2">
-                <div class="viz-meter flex-1"><span style="width: {{.EmptyPct}}%"></span></div>
-                <span class="text-xs tabular-nums w-10 text-right text-slate-300">{{.EmptyRate}}</span>
-              </div>
-            </td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
-      </div>
-      {{else}}<p class="text-sm text-slate-500">No filtered searches.</p>{{end}}
-    </div>
+    {{else}}<p class="text-sm text-slate-500">Every search found something.</p>{{end}}
   </div>
-</div>
 
-<!-- ── Syncs ──────────────────────────────────────────────────────── -->
-<div id="stats-tab-syncs" class="tab-panel p-5 space-y-6 hidden">
   {{if .Sources}}
   <div class="rounded-xl border border-slate-800 p-4">
-    <h3 class="text-sm font-medium text-slate-200 mb-3">API requests by provider {{template "tip" "HTTP requests every sync since the process started made to each provider's API, retries included, and how many the API refused for its rate limit."}}</h3>
+    <h3 class="text-sm font-medium text-slate-200 mb-3">API requests by provider</h3>
     {{.ChartProviders}}
   </div>
 
   <div class="rounded-xl border border-slate-800 p-4">
-    <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time by source {{template "tip" "Each source's latest sync, longest first."}}</h3>
+    <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time by source</h3>
     {{.ChartSourceTime}}
   </div>
   {{else}}
@@ -106,18 +75,18 @@
 
 <!-- ── Experience ─────────────────────────────────────────────────── -->
 <div id="stats-tab-experience" class="tab-panel p-5 space-y-6 hidden">
-  <div class="grid grid-cols-3 gap-3 max-w-2xl">
-    <div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Recalls</div><div class="text-2xl font-semibold text-white">{{.Experience.Retrieves}}</div></div>
-    <div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Recalls with nothing found</div><div class="text-2xl font-semibold text-white">{{.Experience.EmptyRetrieves}}</div></div>
-    <div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Entries remembered</div><div class="text-2xl font-semibold text-white">{{.Experience.Remembers}}</div></div>
+  <div class="grid grid-cols-3 gap-3">
+    <div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Entries Remembered</div><div class="text-2xl font-semibold text-white">{{.Experience.Remembers}}</div></div>
+    <div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Memories Recalled</div><div class="text-2xl font-semibold text-white">{{.Experience.Retrieves}}</div></div>
+    <div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Recall Miss</div><div class="text-2xl font-semibold text-white">{{.Experience.EmptyRetrieves}}</div></div>
   </div>
   <div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Most recalled {{template "tip" "Experience entries returned most often."}}</h3>
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Most recalled</h3>
       {{if .ChartRecalled}}{{.ChartRecalled}}{{else}}<p class="text-sm text-slate-500">No recalls yet.</p>{{end}}
     </div>
     <div class="rounded-xl border border-slate-800 p-4">
-      <h3 class="text-sm font-medium text-slate-200 mb-3">Never recalled {{template "tip" "Entries not recalled since the process started. They may be worded so they never match a real task."}}</h3>
+      <h3 class="text-sm font-medium text-slate-200 mb-3">Never recalled</h3>
       {{if .NeverRetrieved}}
       <div class="divide-y divide-slate-800 max-h-80 overflow-y-auto">
         {{range .NeverRetrieved}}<div class="py-2 text-sm text-slate-300 break-words">{{.}}</div>{{end}}
@@ -134,7 +103,7 @@
 <script>
 // Tabs: one panel at a time; the choice survives reloads via the URL hash.
 function showStatsTab(name) {
-  ['search', 'syncs', 'experience'].forEach(function (t) {
+  ['sources', 'experience'].forEach(function (t) {
     var el = document.getElementById('stats-tab-' + t);
     if (el) el.classList.toggle('hidden', t !== name);
   });

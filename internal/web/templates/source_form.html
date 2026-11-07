@@ -77,7 +77,7 @@
 
 <div class="mb-6">
   <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
-    <a href="/" class="hover:text-violet-400">Sources</a>
+    <a href="/sources" class="hover:text-violet-400">Sources</a>
     <span>/</span>
     {{if .IsNew}}<a href="/sources/create" class="hover:text-violet-400">Add source</a><span>/</span>{{end}}
     <span class="text-slate-400">{{.TypeLabel}}</span>
@@ -352,7 +352,7 @@
             class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Save &amp; sync</button>
     <button type="button" id="preview-btn" onclick="previewSource()"
             class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Preview data</button>
-    <a href="/" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
+    <a href="/sources" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
   </div>
 
   <!-- Preview results — fetches a handful of documents with the form's

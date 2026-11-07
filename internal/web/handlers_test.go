@@ -91,7 +91,7 @@ func TestHandleIndexRendersSourcesList(t *testing.T) {
 	h := newHarness(t)
 	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "My Source"})
 
-	resp := h.get("/")
+	resp := h.get("/sources")
 	body := bodyString(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
@@ -107,7 +107,7 @@ func TestHandleIndexSortsSourcesByName(t *testing.T) {
 	mustSave(t, h, models.SourceDefinition{ID: "s2", Name: "alpha"})
 	mustSave(t, h, models.SourceDefinition{ID: "s3", Name: "Mango"})
 
-	resp := h.get("/")
+	resp := h.get("/sources")
 	body := bodyString(t, resp)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)

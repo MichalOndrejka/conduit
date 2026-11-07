@@ -55,6 +55,7 @@ type Server struct {
 	sync    *syncsvc.Service
 	health  *health.Monitor
 	stats   *stats.Recorder // nil: the Stats page says stats are off
+	tools   []string        // registered MCP tools: every one gets a chart row, called or not
 
 	indexTmpl         *template.Template
 	itemsTmpl         *template.Template
@@ -115,7 +116,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /status", s.handleStatus)
 
-	mux.HandleFunc("GET /{$}", s.handleIndex)
+	mux.HandleFunc("GET /{$}", s.handleStats)
+	mux.HandleFunc("GET /sources", s.handleIndex)
 	mux.HandleFunc("GET /sources/{id}/items", s.handleSourceItems)
 	mux.HandleFunc("GET /experience", s.handleExperience)
 	mux.HandleFunc("GET /experience/create", s.handleExperienceCreateGet)
@@ -153,7 +155,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/map-data", s.handleMapData)
 
 	// Settings (see routes_settings.go)
-	mux.HandleFunc("GET /stats", s.handleStats)
+	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/", http.StatusMovedPermanently) })
 	mux.HandleFunc("GET /settings", s.handleSettings)
 	mux.HandleFunc("POST /settings/embedding", s.handleSettingsEmbedding)
 	mux.HandleFunc("POST /settings/qdrant", s.handleSettingsQdrant)
@@ -269,7 +271,7 @@ func (s *Server) handleSourceItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if src == nil {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "/sources", http.StatusFound)
 		return
 	}
 	collection := sources.CollectionFor(src)

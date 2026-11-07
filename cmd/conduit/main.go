@@ -165,6 +165,7 @@ func main() {
 	mux := http.NewServeMux()
 	webServer := web.NewServer(cfg, sourceStore, vectors, memorySvc, secretsStore, syncSvc, healthMon)
 	webServer.SetStats(statsRec)
+	webServer.SetToolNames(mcptools.ToolNames(mcpServer))
 	webServer.Routes(mux)
 	mux.Handle("/mcp", mcpHTTP)
 

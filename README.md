@@ -55,7 +55,7 @@ Conduit has no authentication — keep it on localhost or a trusted network.
 - [Configuration](docs/configuration.md) — `config.json` and env vars
 - [Sources](docs/sources.md) — connecting APIs
 - [MCP tools](docs/mcp-tools.md)
-- [Stats](docs/stats.md) — searches and syncs since the process started
+- [Dashboard](docs/stats.md) — the home page: searches and syncs since the process started
 - [Architecture & development](docs/go-port.md)
 
 ## License
