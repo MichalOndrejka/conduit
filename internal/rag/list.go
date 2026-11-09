@@ -50,6 +50,37 @@ func (v *VectorStore) EnsureFieldIndex(ctx context.Context, collection, key, sch
 	return nil
 }
 
+// forgetFieldIndexes drops what this process remembers about collection's
+// payload indexes, for when the collection is deleted or created anew.
+func forgetFieldIndexes(collection string) {
+	prefix := collection + "\x00"
+	fieldIndexes.Range(func(k, _ any) bool {
+		if strings.HasPrefix(k.(string), prefix) {
+			fieldIndexes.Delete(k)
+		}
+		return true
+	})
+}
+
+// EnsureSourceIndex creates collection's keyword index on the source id, so
+// counting, listing and deleting one source's points reads only that
+// source's points instead of every payload in the collection.
+func (v *VectorStore) EnsureSourceIndex(ctx context.Context, collection string) error {
+	return v.EnsureFieldIndex(ctx, collection, models.TagKey("source_id"), "keyword")
+}
+
+// EnsureSourceIndexes runs EnsureSourceIndex on every collection that
+// exists; a missing one gets its index when it's created.
+func (v *VectorStore) EnsureSourceIndexes(ctx context.Context, collections []string) error {
+	var errs []error
+	for _, coll := range collections {
+		if err := v.EnsureSourceIndex(ctx, coll); err != nil && !errors.Is(err, ErrCollectionNotFound) {
+			errs = append(errs, fmt.Errorf("%s: %w", coll, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // EnsureListIndexes creates the payload index of every sort key, per
 // collection, so the first sorted listing doesn't wait for one to build.
 func (v *VectorStore) EnsureListIndexes(ctx context.Context, indexes map[string][]OrderBy) error {

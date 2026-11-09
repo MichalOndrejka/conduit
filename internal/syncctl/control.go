@@ -24,12 +24,29 @@ type controlState struct {
 }
 
 type ControlStore struct {
-	mu     sync.Mutex
-	states map[string]*controlState
+	mu       sync.Mutex
+	states   map[string]*controlState
+	onChange func(sourceID string)
 }
 
 func NewControlStore() *ControlStore {
 	return &ControlStore{states: map[string]*controlState{}}
+}
+
+// OnChange registers fn to run, outside the lock, after a pause or resume.
+func (c *ControlStore) OnChange(fn func(sourceID string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onChange = fn
+}
+
+func (c *ControlStore) changed(sourceID string) {
+	c.mu.Lock()
+	fn := c.onChange
+	c.mu.Unlock()
+	if fn != nil {
+		fn(sourceID)
+	}
 }
 
 func (c *ControlStore) get(sourceID string) *controlState {
@@ -79,23 +96,25 @@ func (c *ControlStore) SetCancelFunc(sourceID string, cancel context.CancelFunc)
 
 func (c *ControlStore) Pause(sourceID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	st := c.get(sourceID)
 	if !st.paused {
 		st.paused = true
 		st.resumeCh = make(chan struct{})
 	}
+	c.mu.Unlock()
+	c.changed(sourceID)
 }
 
 func (c *ControlStore) Resume(sourceID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	st := c.get(sourceID)
 	if st.paused {
 		st.paused = false
 		close(st.resumeCh)
 		st.resumeCh = nil
 	}
+	c.mu.Unlock()
+	c.changed(sourceID)
 }
 
 func (c *ControlStore) IsPaused(sourceID string) bool {
@@ -141,16 +160,35 @@ func (c *ControlStore) Clear(sourceID string) {
 type ProgressStore struct {
 	mu       sync.RWMutex
 	progress map[string]models.SyncProgress
+	onChange func(sourceID string)
 }
 
 func NewProgressStore() *ProgressStore {
 	return &ProgressStore{progress: map[string]models.SyncProgress{}}
 }
 
-func (p *ProgressStore) Set(sourceID string, prog models.SyncProgress) {
+// OnChange registers fn to run after every Set and Clear, outside the lock.
+// It runs on the syncing goroutine, so it must return quickly.
+func (p *ProgressStore) OnChange(fn func(sourceID string)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	p.onChange = fn
+}
+
+func (p *ProgressStore) changed(sourceID string) {
+	p.mu.RLock()
+	fn := p.onChange
+	p.mu.RUnlock()
+	if fn != nil {
+		fn(sourceID)
+	}
+}
+
+func (p *ProgressStore) Set(sourceID string, prog models.SyncProgress) {
+	p.mu.Lock()
 	p.progress[sourceID] = prog
+	p.mu.Unlock()
+	p.changed(sourceID)
 }
 
 func (p *ProgressStore) Get(sourceID string) (models.SyncProgress, bool) {
@@ -162,6 +200,7 @@ func (p *ProgressStore) Get(sourceID string) (models.SyncProgress, bool) {
 
 func (p *ProgressStore) Clear(sourceID string) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	delete(p.progress, sourceID)
+	p.mu.Unlock()
+	p.changed(sourceID)
 }

@@ -39,6 +39,8 @@ type fakeQdrant struct {
 	deleteFilterCalls []string // collections DeleteByFilter was called against
 	createCalls       []string
 	deleteCollCalls   []string
+	indexCalls        []string // collections a payload index was created on
+	countCalls        int
 }
 
 func newFakeQdrant() *fakeQdrant {
@@ -66,6 +68,10 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"collections": list}})
 
+		case r.Method == http.MethodPut && strings.HasSuffix(path, "/index"):
+			q.indexCalls = append(q.indexCalls, collOf("/index"))
+			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
+
 		case r.Method == http.MethodPut && strings.HasPrefix(path, "/collections/") && !strings.Contains(path, "/points"):
 			name := strings.TrimPrefix(path, "/collections/")
 			q.collections[name] = true
@@ -86,6 +92,7 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/points/count"):
 			name := collOf("/points/count")
+			q.countCalls++
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"count": q.count[name]}})
 
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/points/delete"):

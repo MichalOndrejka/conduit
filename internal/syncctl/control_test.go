@@ -200,3 +200,45 @@ func TestProgressStoreSetGetClear(t *testing.T) {
 		t.Fatal("expected progress to be gone after Clear")
 	}
 }
+
+func TestProgressAndControlReportChanges(t *testing.T) {
+	var got []string
+	record := func(id string) { got = append(got, id) }
+
+	p := NewProgressStore()
+	p.OnChange(record)
+	p.Set("a", models.SyncProgress{Phase: "fetching"})
+	p.Clear("a")
+
+	c := NewControlStore()
+	c.OnChange(record)
+	c.Pause("b")
+	c.Resume("b")
+
+	if want := []string{"a", "a", "b", "b"}; len(got) != len(want) || got[0] != "a" || got[1] != "a" || got[2] != "b" || got[3] != "b" {
+		t.Errorf("changes = %v, want %v", got, want)
+	}
+}
+
+func TestOnChangeMayReadTheStore(t *testing.T) {
+	// The hook runs outside the lock, so it can read the state it reports.
+	p := NewProgressStore()
+	var phase string
+	p.OnChange(func(id string) {
+		prog, _ := p.Get(id)
+		phase = prog.Phase
+	})
+	done := make(chan struct{})
+	go func() {
+		p.Set("a", models.SyncProgress{Phase: "indexing"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Set deadlocked: OnChange ran under the lock")
+	}
+	if phase != "indexing" {
+		t.Errorf("phase seen by the hook = %q, want indexing", phase)
+	}
+}

@@ -56,6 +56,8 @@ type Server struct {
 	health  *health.Monitor
 	stats   *stats.Recorder // nil: the Stats page says stats are off
 	tools   []string        // registered MCP tools: every one gets a chart row, called or not
+	events  *broker         // signals open /events streams (see events.go)
+	counts  *vectorCounts   // cached per-source vector counts
 
 	indexTmpl         *template.Template
 	itemsTmpl         *template.Template
@@ -82,7 +84,7 @@ func NewServer(
 	page := func(name string) *template.Template {
 		return template.Must(template.ParseFS(templateFS, "templates/base.html", "templates/"+name))
 	}
-	return &Server{
+	s := &Server{
 		cfg:               cfg,
 		sources:           sourceStore,
 		mgr:               sourcemgmt.New(sourceStore, vectors, secretsStore),
@@ -103,6 +105,8 @@ func NewServer(
 		settingsTmpl:      page("settings.html"),
 		statsTmpl:         page("stats.html"),
 	}
+	s.watchChanges()
+	return s
 }
 
 // Routes registers all handlers on mux. The MCP handler is mounted separately
@@ -115,6 +119,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	})
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /status", s.handleStatus)
+	mux.HandleFunc("GET /events", s.handleEvents)
 
 	mux.HandleFunc("GET /{$}", s.handleStats)
 	mux.HandleFunc("GET /sources", s.handleIndex)
@@ -183,48 +188,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
-	srcs, err := s.sources.ListAll()
-	if err != nil {
-		httpError(w, err)
-		return
-	}
-	type sourceStatus struct {
-		ID             string               `json:"id"`
-		Name           string               `json:"name"`
-		SyncStatus     string               `json:"sync_status"`
-		SyncError      *string              `json:"sync_error,omitempty"`
-		SyncErrorPhase *string              `json:"sync_error_phase,omitempty"`
-		Paused         bool                 `json:"paused"`
-		Progress       *models.SyncProgress `json:"progress,omitempty"`
-		VectorCount    int                  `json:"vector_count"`
-	}
-	out := make([]sourceStatus, 0, len(srcs))
-	for i := range srcs {
-		src := &srcs[i]
-		st := sourceStatus{
-			ID: src.ID, Name: src.Name,
-			SyncStatus: src.SyncStatus, SyncError: src.SyncError, SyncErrorPhase: src.SyncErrorPhase,
-			Paused: s.sync.Control().IsPaused(src.ID),
-		}
-		if p, ok := s.sync.Progress().Get(src.ID); ok {
-			st.Progress = &p
-		}
-		// Included so the Sources list can update its "No data embedded"
-		// badge from this same poll, instead of relying on catching a
-		// syncing→idle transition to trigger a reload — a fast sync (e.g. a
-		// small manual source) can finish before the page's first poll ever
-		// observes it as "syncing", which left the badge stuck stale.
-		collection := sources.CollectionFor(src)
-		filter := &rag.Filter{Must: []rag.FieldCondition{{
-			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-		}}}
-		st.VectorCount = s.vectors.Count(r.Context(), collection, filter)
-		out = append(out, st)
-	}
-	writeJSON(w, out)
-}
-
 // ── UI pages ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -232,7 +195,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // sourceRow pairs a source definition with its indexed vector count, so the
-// Sources list can warn about sources with nothing embedded.
+// Sources list can warn about sources with nothing embedded. VectorCount is
+// -1 while not counted yet; the live stream fills it in.
 type sourceRow struct {
 	*models.SourceDefinition
 	VectorCount int
@@ -248,14 +212,14 @@ func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, 
 	sort.Slice(allSources, func(i, j int) bool {
 		return strings.ToLower(allSources[i].Name) < strings.ToLower(allSources[j].Name)
 	})
+	counts := s.counts.lookup(allSources, statusWait)
 	rows := make([]sourceRow, len(allSources))
 	for i := range allSources {
-		src := &allSources[i]
-		collection := sources.CollectionFor(src)
-		filter := &rag.Filter{Must: []rag.FieldCondition{{
-			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-		}}}
-		rows[i] = sourceRow{SourceDefinition: src, VectorCount: s.vectors.Count(r.Context(), collection, filter)}
+		n, ok := counts[allSources[i].ID]
+		if !ok {
+			n = -1
+		}
+		rows[i] = sourceRow{SourceDefinition: &allSources[i], VectorCount: n}
 	}
 	s.render(w, s.indexTmpl, "base", map[string]any{
 		"Active":        "sources",

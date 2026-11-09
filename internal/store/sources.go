@@ -21,15 +21,27 @@ var credentialFields = []string{"Pat", "Token", "Password", "ApiKeyValue"}
 type SourceConfigStore struct {
 	path string
 	mu   sync.Mutex
-	// Parsed-file cache: /status is polled every few seconds per open tab,
+	// Parsed-file cache: every status update the UI receives lists all sources,
 	// and the file only changes through this store, so reads are served from
 	// memory and the cache is refreshed on every write.
 	cache  []models.SourceDefinition
 	loaded bool
+
+	onChange func(sourceID string) // nil: nobody listens
 }
 
 func NewSourceConfigStore(path string) *SourceConfigStore {
 	return &SourceConfigStore{path: path}
+}
+
+// OnChange registers fn to run after every successful write, with the
+// changed source's ID, or "" when a write may have changed any source. fn
+// runs under the store's lock: it must return quickly and not call back
+// into the store.
+func (s *SourceConfigStore) OnChange(fn func(sourceID string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onChange = fn
 }
 
 // ── Reads ───────────────────────────────────────────────────────────────────
@@ -75,7 +87,7 @@ func (s *SourceConfigStore) Save(source models.SourceDefinition) error {
 	if !replaced {
 		sources = append(sources, source)
 	}
-	return s.write(sources)
+	return s.write(source.ID, sources)
 }
 
 func (s *SourceConfigStore) Delete(id string) error {
@@ -91,7 +103,7 @@ func (s *SourceConfigStore) Delete(id string) error {
 			out = append(out, src)
 		}
 	}
-	return s.write(out)
+	return s.write(id, out)
 }
 
 // RenameCredentialReferences cascades a credential rename into source configs.
@@ -114,7 +126,7 @@ func (s *SourceConfigStore) RenameCredentialReferences(oldName, newName string) 
 	if !changed {
 		return nil
 	}
-	return s.write(sources)
+	return s.write("", sources)
 }
 
 // Import parses an exported sources document (flat [...] array or the
@@ -164,7 +176,7 @@ func (s *SourceConfigStore) Import(data []byte) (int, error) {
 		imported++
 	}
 	if imported > 0 {
-		if err := s.write(sources); err != nil {
+		if err := s.write("", sources); err != nil {
 			return 0, err
 		}
 	}
@@ -191,7 +203,7 @@ func (s *SourceConfigStore) ReconcileStaleSync() error {
 	if !changed {
 		return nil
 	}
-	return s.write(sources)
+	return s.write("", sources)
 }
 
 // ResetAllSyncStatus sets every source's sync status (clearing any error),
@@ -209,7 +221,7 @@ func (s *SourceConfigStore) ResetAllSyncStatus(status string) error {
 		sources[i].SyncError = nil
 		sources[i].LastSyncedAt = nil
 	}
-	return s.write(sources)
+	return s.write("", sources)
 }
 
 // ExportStripped returns sources for download, replacing manual document
@@ -287,8 +299,9 @@ func (s *SourceConfigStore) readFile() ([]models.SourceDefinition, error) {
 	return sources, nil
 }
 
-// write persists sources and refreshes the cache; caller must hold s.mu.
-func (s *SourceConfigStore) write(sources []models.SourceDefinition) error {
+// write persists sources, refreshes the cache and reports the change of
+// sourceID ("" for any) to the OnChange listener; caller must hold s.mu.
+func (s *SourceConfigStore) write(sourceID string, sources []models.SourceDefinition) error {
 	data, err := json.MarshalIndent(sources, "", "  ")
 	if err != nil {
 		return err
@@ -302,6 +315,9 @@ func (s *SourceConfigStore) write(sources []models.SourceDefinition) error {
 	}
 	s.cache = cloneSources(sources)
 	s.loaded = true
+	if s.onChange != nil {
+		s.onChange(sourceID)
+	}
 	return nil
 }
 

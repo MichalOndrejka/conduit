@@ -87,3 +87,46 @@ func TestListRecreatesALostIndex(t *testing.T) {
 		t.Errorf("results %d, scrolls %d, index calls %v", len(results), q.scrolls, q.indexCalls)
 	}
 }
+
+func TestEnsureSourceIndexIsKeywordOnSourceIDOncePerCollection(t *testing.T) {
+	q := &listQdrant{}
+	store := listStore(t, q)
+	coll := "conduit_source_index_test"
+	ctx := context.Background()
+	for range 2 {
+		if err := store.EnsureSourceIndex(ctx, coll); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := coll + "." + models.TagKey("source_id") + ":keyword"
+	if len(q.indexCalls) != 1 || q.indexCalls[0] != want {
+		t.Errorf("index calls = %v, want one %s", q.indexCalls, want)
+	}
+}
+
+// A deleted or recreated collection has lost its indexes: the next ensure
+// creates them again instead of trusting what this process remembers.
+func TestDeleteAndCreateCollectionForgetItsIndexes(t *testing.T) {
+	q := &listQdrant{}
+	store := listStore(t, q)
+	ctx := context.Background()
+	coll := "conduit_forget_index_test"
+	if err := store.EnsureSourceIndex(ctx, coll); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteCollection(ctx, coll); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureSourceIndex(ctx, coll); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateCollection(ctx, coll, 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureSourceIndex(ctx, coll); err != nil {
+		t.Fatal(err)
+	}
+	if len(q.indexCalls) != 3 {
+		t.Errorf("index calls = %v, want 3 (initial, after delete, after create)", q.indexCalls)
+	}
+}

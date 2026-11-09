@@ -233,10 +233,17 @@ func (v *VectorStore) CreateCollection(ctx context.Context, name string, dimensi
 		// race to create it — fine, since both compute the same target size.
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	// A new collection has none of the payload indexes this process may have
+	// created on an earlier one of the same name.
+	forgetFieldIndexes(name)
+	return nil
 }
 
 func (v *VectorStore) DeleteCollection(ctx context.Context, name string) error {
+	forgetFieldIndexes(name)
 	return v.do(ctx, http.MethodDelete, "/collections/"+name, nil, nil)
 }
 
@@ -409,10 +416,19 @@ func (v *VectorStore) DeleteByIDs(ctx context.Context, collection string, ids []
 	return v.do(ctx, http.MethodPost, "/collections/"+collection+"/points/delete?wait=true", body, nil)
 }
 
+// Count is CountExact answering 0 when Qdrant can't be read.
 func (v *VectorStore) Count(ctx context.Context, collection string, filter *Filter) int {
-	// exact: true — Conduit creates no payload indexes, so Qdrant's
-	// approximate count for a filtered query is always 0, which would make
-	// every source look like it has no embedded data.
+	n, _ := v.CountExact(ctx, collection, filter)
+	return n
+}
+
+// CountExact counts the points matching filter, reporting a failed request
+// instead of answering 0, so a caller can tell "no points" from "no answer".
+func (v *VectorStore) CountExact(ctx context.Context, collection string, filter *Filter) (int, error) {
+	// exact: true — Qdrant's approximate count of a filtered query is 0
+	// unless every filtered key is indexed, which would make sources look
+	// empty. With the source_id index (EnsureSourceIndex) the exact count of
+	// one source reads only that source's points.
 	body := map[string]any{"exact": true}
 	if filter != nil {
 		body["filter"] = filter
@@ -423,9 +439,9 @@ func (v *VectorStore) Count(ctx context.Context, collection string, filter *Filt
 		} `json:"result"`
 	}
 	if err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/points/count", body, &resp); err != nil {
-		return 0
+		return 0, err
 	}
-	return resp.Result.Count
+	return resp.Result.Count, nil
 }
 
 // HealthCheck errors if Qdrant is unreachable.

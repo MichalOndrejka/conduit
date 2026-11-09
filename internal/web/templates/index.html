@@ -31,7 +31,7 @@
     <input type="checkbox" id="select-all" class="h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600 cursor-pointer">
     Select all
   </label>
-  <button type="button" onclick="bulkAction('/sources/sync-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
+  <button type="button" onclick="syncSelected()" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
   <button type="button" onclick="bulkAction('/sources/disable-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Disable</button>
   <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete</button>
   <div id="sync-eta" class="ml-auto text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2" style="visibility:hidden">&nbsp;</div>
@@ -50,7 +50,7 @@
           {{end}}
           <span data-no-data-badge class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5{{if ne .VectorCount 0}} hidden{{end}}">No data embedded</span>
         </div>
-        <div class="text-xs text-slate-500 mt-1">
+        <div data-last-synced class="text-xs text-slate-500 mt-1">
           {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
         </div>
         {{$notEmbedded := and (eq .VectorCount 0) (ne .SyncStatus "syncing")}}
@@ -84,15 +84,23 @@
 
 <script>
 function syncCtl(id, action) {
-  fetch('/sources/' + id + '/sync/' + action, {method: 'POST'}).then(poll);
+  fetch('/sources/' + id + '/sync/' + action, {method: 'POST'})
+    .catch(() => showToast('Could not reach Conduit', 'error'));
 }
-function syncOne(id) {
-  fetch('/sources/sync-selected', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-    body: 'ids=' + encodeURIComponent(id)
-  }).then(poll);
+// startSync asks the server to sync ids and stays on the page: the event
+// stream shows each source as queued, then its progress.
+function startSync(ids) {
+  if (ids.length === 0) return;
+  const body = new URLSearchParams();
+  ids.forEach(id => body.append('ids', id));
+  fetch('/sources/sync-selected', {method: 'POST', body: body, redirect: 'manual'})
+    .catch(() => showToast('Could not start the sync', 'error'));
 }
+function syncOne(id) { startSync([id]); }
+function selectedIDs() {
+  return [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
+}
+function syncSelected() { startSync(selectedIDs()); }
 document.getElementById('select-all').addEventListener('change', e => {
   document.querySelectorAll('.row-check').forEach(cb => cb.checked = e.target.checked);
 });
@@ -113,93 +121,123 @@ function submitIDs(url, ids, confirmMsg) {
   form.submit();
 }
 function bulkAction(url, confirmMsg) {
-  const ids = [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
-  submitIDs(url, ids, confirmMsg);
+  submitIDs(url, selectedIDs(), confirmMsg);
 }
-let syncBatchStart = null;
-let wasSyncing = false;
+
 function formatDuration(ms) {
   const totalSec = Math.max(0, Math.round(ms / 1000));
   const m = Math.floor(totalSec / 60);
   const sec = totalSec % 60;
   return m > 0 ? `${m}m ${sec}s` : `${sec}s`;
 }
-function poll() {
-  fetch('/status').then(r => r.json()).then(list => {
-    let anySyncing = false;
-    let syncingCount = 0;
-    for (const s of list) {
-      const card = document.querySelector(`[data-source-id="${s.id}"]`);
-      if (!card) continue;
-      const progWrap = card.querySelector('[data-progress-wrap]');
-      const prog = card.querySelector('[data-progress]');
-      const bar = card.querySelector('[data-progress-bar]');
-      if (s.progress) {
-        anySyncing = true;
-        syncingCount++;
-        const p = s.progress;
-        prog.className = 'text-xs text-violet-400 mb-1 h-4';
-        prog.textContent = p.phase + (p.total ? ` ${p.current}/${p.total}` : '') + (p.message ? ` — ${p.message}` : '');
-        progWrap.style.opacity = '1';
-        if (p.total > 0) {
-          bar.style.width = Math.min(100, (p.current / p.total) * 100) + '%';
-          bar.classList.remove('animate-pulse');
-        } else {
-          bar.style.width = '100%';
-          bar.classList.add('animate-pulse');
-        }
-      } else if (s.vector_count === 0) {
-        // Not currently syncing and nothing embedded yet — surface an
-        // actionable hint in the progress-bar spot instead of leaving it
-        // blank, so it's obvious at a glance which sources still need a sync.
-        progWrap.style.opacity = '1';
-        prog.className = 'text-xs text-amber-300 mb-1 h-4';
-        prog.textContent = 'Not embedded yet — click Sync to index this source';
-        bar.style.width = '0%';
+function formatSynced(iso) {
+  if (!iso) return 'Never synced';
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2, '0');
+  return `Last synced ${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ` +
+    `${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
+}
+
+// applyStatus updates every card from one snapshot of the server's state.
+// vector_count is null while the server hasn't counted a source yet: the
+// count-dependent parts then keep what they show.
+let batchStart = null;
+function applyStatus(list) {
+  let running = 0, queued = 0;
+  const present = new Set();
+  for (const s of list) {
+    present.add(s.id);
+    const card = document.querySelector(`[data-source-id="${s.id}"]`);
+    if (!card) continue; // added elsewhere: appears on the next page load
+    const progWrap = card.querySelector('[data-progress-wrap]');
+    const prog = card.querySelector('[data-progress]');
+    const bar = card.querySelector('[data-progress-bar]');
+    const counted = s.vector_count !== null && s.vector_count !== undefined;
+    const empty = counted && s.vector_count === 0;
+    const p = s.progress;
+    if (p && p.phase === 'queued') {
+      queued++;
+      prog.className = 'text-xs text-slate-400 mb-1 h-4';
+      prog.textContent = 'Queued — waiting for a free sync slot';
+      progWrap.style.opacity = '1';
+      bar.style.width = '0%';
+      bar.classList.remove('animate-pulse');
+    } else if (p) {
+      running++;
+      prog.className = 'text-xs text-violet-400 mb-1 h-4';
+      prog.textContent = p.phase + (p.total ? ` ${p.current}/${p.total}` : '') + (p.message ? ` — ${p.message}` : '');
+      progWrap.style.opacity = '1';
+      if (p.total > 0) {
+        bar.style.width = Math.min(100, (p.current / p.total) * 100) + '%';
         bar.classList.remove('animate-pulse');
       } else {
-        progWrap.style.opacity = '0';
-        bar.classList.remove('animate-pulse');
+        bar.style.width = '100%';
+        bar.classList.add('animate-pulse');
       }
-      const errBox = card.querySelector('[data-error]');
-      if (s.sync_error) {
-        errBox.textContent = 'Sync failed' + (s.sync_error_phase ? ' during ' + s.sync_error_phase : '') + ': ' + s.sync_error;
-        errBox.classList.remove('hidden');
-      } else {
-        errBox.classList.add('hidden');
-      }
-      const syncing = s.sync_status === 'syncing';
-      card.querySelector('[data-pause]').classList.toggle('hidden', !syncing || s.paused);
-      card.querySelector('[data-resume]').classList.toggle('hidden', !syncing || !s.paused);
-      card.querySelector('[data-cancel]').classList.toggle('hidden', !syncing);
-      card.querySelector('[data-no-data-badge]').classList.toggle('hidden', s.vector_count !== 0);
-      const syncBtn = card.querySelector('[data-sync-btn]');
-      syncBtn.className = 'text-xs rounded-lg px-3 py-1.5 ' + (s.vector_count === 0
+    } else if (empty) {
+      // Nothing embedded and not syncing: an actionable hint in the
+      // progress-bar spot, so it's obvious which sources still need a sync.
+      progWrap.style.opacity = '1';
+      prog.className = 'text-xs text-amber-300 mb-1 h-4';
+      prog.textContent = 'Not embedded yet — click Sync to index this source';
+      bar.style.width = '0%';
+      bar.classList.remove('animate-pulse');
+    } else if (counted) {
+      progWrap.style.opacity = '0';
+      bar.classList.remove('animate-pulse');
+    }
+    const errBox = card.querySelector('[data-error]');
+    if (s.sync_error) {
+      errBox.textContent = 'Sync failed' + (s.sync_error_phase ? ' during ' + s.sync_error_phase : '') + ': ' + s.sync_error;
+      errBox.classList.remove('hidden');
+    } else {
+      errBox.classList.add('hidden');
+    }
+    card.querySelector('[data-last-synced]').textContent = formatSynced(s.last_synced_at);
+    const syncing = s.sync_status === 'syncing';
+    card.querySelector('[data-pause]').classList.toggle('hidden', !syncing || s.paused);
+    card.querySelector('[data-resume]').classList.toggle('hidden', !syncing || !s.paused);
+    card.querySelector('[data-cancel]').classList.toggle('hidden', !syncing);
+    if (counted) {
+      card.querySelector('[data-no-data-badge]').classList.toggle('hidden', !empty);
+      card.querySelector('[data-sync-btn]').className = 'text-xs rounded-lg px-3 py-1.5 ' + (empty
         ? 'bg-violet-600 text-white border border-violet-600 hover:bg-violet-500'
         : 'border border-slate-700 hover:bg-slate-800');
     }
-    const etaBox = document.getElementById('sync-eta');
-    if (anySyncing) {
-      if (syncBatchStart === null) syncBatchStart = Date.now();
-      const elapsed = Date.now() - syncBatchStart;
-      const msg = `Syncing ${syncingCount} source${syncingCount === 1 ? '' : 's'} — elapsed ${formatDuration(elapsed)}`;
-      etaBox.textContent = msg;
-      etaBox.style.visibility = 'visible';
-    } else {
-      syncBatchStart = null;
-      etaBox.style.visibility = 'hidden';
-      if (wasSyncing) {
-        // A sync just finished — reload so "Last synced" (rendered
-        // server-side, not part of this JSON) picks up its new value.
-        location.reload();
-        return;
-      }
-    }
-    wasSyncing = anySyncing;
-    setTimeout(poll, anySyncing ? 1500 : 5000);
-  }).catch(() => setTimeout(poll, 5000));
+  }
+  // Sources deleted elsewhere (another tab, an MCP client).
+  document.querySelectorAll('[data-source-id]').forEach(card => {
+    if (!present.has(card.dataset.sourceId)) card.remove();
+  });
+
+  if (running + queued > 0) {
+    if (batchStart === null) batchStart = Date.now();
+    batchText = `Syncing ${running} source${running === 1 ? '' : 's'}` + (queued > 0 ? `, ${queued} queued` : '');
+  } else {
+    batchStart = null;
+  }
+  renderBatch();
 }
-poll();
+
+// The banner's elapsed time ticks on its own: a long fetch can go a while
+// without an event.
+let batchText = '';
+function renderBatch() {
+  const etaBox = document.getElementById('sync-eta');
+  if (batchStart === null) {
+    etaBox.style.visibility = 'hidden';
+    return;
+  }
+  etaBox.textContent = `${batchText} — elapsed ${formatDuration(Date.now() - batchStart)}`;
+  etaBox.style.visibility = 'visible';
+}
+setInterval(renderBatch, 1000);
+
+// The server sends a snapshot on connect and after every change; the
+// browser reconnects by itself if the stream drops.
+const statusEvents = new EventSource('/events');
+statusEvents.onmessage = e => applyStatus(JSON.parse(e.data));
+window.addEventListener('pagehide', () => statusEvents.close());
 </script>
 {{end}}
 {{end}}

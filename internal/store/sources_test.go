@@ -482,3 +482,22 @@ func TestCacheServesFromMemoryAfterFirstRead(t *testing.T) {
 		t.Errorf("Name = %q, want the cached value %q (store shouldn't re-read on its own)", got.Name, "Cached")
 	}
 }
+
+func TestOnChangeReportsTheChangedSource(t *testing.T) {
+	s := NewSourceConfigStore(filepath.Join(t.TempDir(), "sources.json"))
+	var got []string
+	s.OnChange(func(id string) { got = append(got, id) })
+
+	if err := s.Save(models.SourceDefinition{ID: "a", Name: "A", Config: map[string]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Delete("a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResetAllSyncStatus("idle"); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0] != "a" || got[1] != "a" || got[2] != "" {
+		t.Errorf("changes = %q, want [a a \"\"] (\"\" = any source)", got)
+	}
+}

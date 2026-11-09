@@ -691,3 +691,67 @@ func TestSyncAfterShutdownIsRefused(t *testing.T) {
 		t.Errorf("status = %q, want idle", saved.SyncStatus)
 	}
 }
+
+func TestSyncSelectedShowsQueuedThenClearsForSkippedSource(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+	}))
+	defer apiSrv.Close()
+
+	svc, st, _, src := setupPipeline(t, apiSrv.URL)
+	src.Disabled = true
+	if err := st.Save(*src); err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var phases []string
+	svc.Progress().OnChange(func(id string) {
+		p, ok := svc.Progress().Get(id)
+		mu.Lock()
+		defer mu.Unlock()
+		if ok {
+			phases = append(phases, p.Phase)
+		} else {
+			phases = append(phases, "cleared")
+		}
+	})
+
+	svc.SyncSelected(context.Background(), []string{src.ID})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(phases) != 2 || phases[0] != PhaseQueued || phases[1] != "cleared" {
+		t.Errorf("progress changes = %v, want [queued cleared] for a skipped (disabled) source", phases)
+	}
+	if _, ok := svc.Progress().Get(src.ID); ok {
+		t.Error("a skipped source keeps a progress entry; the Sources page would show it queued forever")
+	}
+}
+
+func TestSyncReplacesQueuedWithFetchingBeforeStatus(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{}})
+	}))
+	defer apiSrv.Close()
+
+	svc, st, _, src := setupPipeline(t, apiSrv.URL)
+	var mu sync.Mutex
+	var phaseAtSyncing string
+	st.OnChange(func(id string) {
+		// Runs under the store's lock: read progress only.
+		p, _ := svc.Progress().Get(id)
+		mu.Lock()
+		defer mu.Unlock()
+		if phaseAtSyncing == "" {
+			phaseAtSyncing = p.Phase
+		}
+	})
+
+	svc.SyncSelected(context.Background(), []string{src.ID})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if phaseAtSyncing != "fetching" {
+		t.Errorf("phase when the status became syncing = %q, want fetching (not the stale queued)", phaseAtSyncing)
+	}
+}

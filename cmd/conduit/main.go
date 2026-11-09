@@ -119,12 +119,18 @@ func main() {
 		log.Printf("warning: could not create collections yet (retried by the Qdrant health probe): %v", err)
 	}
 	cancelEnsure()
-	// The list mode's sort indexes, in the background: building one on a
-	// large collection takes a while, and a listing would otherwise wait for
-	// it. A listing still creates a missing index itself.
+	// Payload indexes, in the background: building one on a large
+	// collection takes a while, and requests would otherwise wait for it. A
+	// listing still creates a missing sort index itself, and a new
+	// collection gets its source index when it's created.
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
+		// The source index first: the Sources page counts each source's
+		// points, which reads every payload of the collection without it.
+		if err := vectors.EnsureSourceIndexes(ctx, models.AllCollections); err != nil {
+			log.Printf("warning: creating source indexes: %v", err)
+		}
 		if err := vectors.EnsureListIndexes(ctx, mcptools.ListIndexes()); err != nil {
 			log.Printf("warning: creating list sort indexes: %v", err)
 		}
@@ -181,6 +187,9 @@ func main() {
 		Handler:           web.LocalOnly(mux, os.Getenv("CONDUIT_HOST")),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	// Shutdown waits for open requests; the Sources page's event streams
+	// would otherwise hold it until its timeout.
+	srv.RegisterOnShutdown(webServer.CloseEvents)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
 	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s",

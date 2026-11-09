@@ -107,6 +107,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	if s.closing {
 		s.mu.Unlock()
 		log.Printf("shutting down — ignoring sync request for source %s", sourceID)
+		s.progress.Clear(sourceID) // drop a "queued" mark
 		return
 	}
 	if s.inflight[sourceID] {
@@ -124,6 +125,15 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		s.mu.Unlock()
 	}()
 
+	// A sync that doesn't get going drops the "queued" mark SyncSelected
+	// may have set; one that does replaces it with its progress.
+	begun := false
+	defer func() {
+		if !begun {
+			s.progress.Clear(sourceID)
+		}
+	}()
+
 	src, err := s.store.Get(sourceID)
 	if err != nil || src == nil {
 		log.Printf("error: source not found: %s", sourceID)
@@ -134,14 +144,17 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		return
 	}
 
+	// Progress before the status: the "syncing" status change is what the
+	// Sources page sees first, and it should come with "fetching", not with
+	// the stale "queued" mark.
+	s.progress.Set(sourceID, models.SyncProgress{Phase: "fetching"})
 	src.SyncStatus = "syncing"
 	src.SyncError = nil
 	if err := s.store.Save(*src); err != nil {
 		log.Printf("error: saving sync status: %v", err)
 		return
 	}
-
-	s.progress.Set(sourceID, models.SyncProgress{Phase: "fetching"})
+	begun = true
 	s.control.Register(sourceID)
 
 	// Derived per-source so RequestCancel can abort this sync's in-flight
@@ -321,8 +334,18 @@ func isCancelled(err error) bool {
 // user selects many sources at once.
 const maxConcurrentSyncs = 4
 
+// PhaseQueued is the progress phase of a source waiting for a sync slot.
+const PhaseQueued = "queued"
+
 // SyncSelected syncs the given source IDs in parallel, capped at maxConcurrentSyncs.
 func (s *Service) SyncSelected(ctx context.Context, ids []string) {
+	// Every source waiting for a slot shows as queued until its sync starts.
+	// One already running keeps its progress (its new request is a no-op).
+	for _, id := range ids {
+		if !s.IsSyncing(id) {
+			s.progress.Set(id, models.SyncProgress{Phase: PhaseQueued})
+		}
+	}
 	sem := make(chan struct{}, maxConcurrentSyncs)
 	var wg sync.WaitGroup
 	for _, id := range ids {
