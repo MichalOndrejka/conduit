@@ -233,3 +233,26 @@ func TestStatusSendsNullCountWhenQdrantIsDown(t *testing.T) {
 		t.Errorf("status = %s, want vector_count null (unknown), not 0 (which shows 'No data embedded')", body)
 	}
 }
+
+func TestLiveSourceIsFlaggedAndNeverCounted(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "runs", Name: "Runs", Type: models.SourcePipelineRun})
+	before := func() int {
+		h.qd.mu.Lock()
+		defer h.qd.mu.Unlock()
+		return h.qd.countCalls
+	}()
+
+	var out []sourceStatus
+	if err := json.Unmarshal([]byte(bodyString(t, h.get("/status"))), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 || !out[0].Live || out[0].VectorCount != nil {
+		t.Errorf("status = %+v, want the source live with no vector count", out)
+	}
+	h.qd.mu.Lock()
+	defer h.qd.mu.Unlock()
+	if h.qd.countCalls != before {
+		t.Errorf("Qdrant was asked to count a live source (%d calls); it has no collection", h.qd.countCalls-before)
+	}
+}

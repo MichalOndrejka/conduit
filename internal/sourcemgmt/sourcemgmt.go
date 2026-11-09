@@ -31,8 +31,8 @@ var Types = []TypeInfo{
 	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
-	{models.SourcePipelineRun, "Pipeline Runs", "Build pipeline runs with failed-step logs and failed test results."},
-	{models.SourcePullRequest, "Pull Requests", "Pull requests with their description, reviewers, commits, changed files and comment threads."},
+	{models.SourcePipelineRun, "Pipeline Runs", "A build pipeline whose runs, failed-step logs and failed tests are read live. Not synced."},
+	{models.SourcePullRequest, "Pull Requests", "A repository whose pull requests, diffs and comment threads are read live. Not synced."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
 	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
@@ -66,7 +66,7 @@ var APIConfigKeys = []string{
 	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
 	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"FetchMode", "DefinitionId", "Days",
+	"FetchMode", "DefinitionId", "Runs",
 }
 
 // PresetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
@@ -81,7 +81,7 @@ var PresetConfigKeys = []string{
 // internal/sources/github.go). Token names a stored credential.
 var GitHubConfigKeys = []string{
 	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "PathFilter",
-	"Top", "FetchMode", "WorkItemTypes", "Labels", "Workflow", "Days", "VerifySSL",
+	"Top", "FetchMode", "WorkItemTypes", "Labels", "Workflow", "Runs", "VerifySSL",
 }
 
 // Providers are the values of the Provider config key: "api" runs the
@@ -122,7 +122,7 @@ func Validate(srcType string, cfg map[string]string) string {
 			if n, err := strconv.Atoi(strings.TrimSpace(cfg["DefinitionId"])); err != nil || n <= 0 {
 				return "Pipeline definition ID must be a positive number."
 			}
-			if msg := validateDays(cfg); msg != "" {
+			if msg := validateRuns(cfg); msg != "" {
 				return msg
 			}
 		}
@@ -141,9 +141,6 @@ func Validate(srcType string, cfg map[string]string) string {
 			}
 			if strings.TrimSpace(cfg["AdoRepo"]) == "" {
 				return "Repository is required for Pull Requests sources."
-			}
-			if msg := validateDays(cfg); msg != "" {
-				return msg
 			}
 		}
 		if srcType == models.SourceGitCommits {
@@ -192,19 +189,20 @@ func validateGitHub(srcType string, cfg map[string]string) string {
 		if strings.TrimSpace(cfg["Workflow"]) == "" {
 			return "Workflow is required: its file name (e.g. ci.yml) or numeric ID."
 		}
-		if msg := validateDays(cfg); msg != "" {
-			return msg
-		}
-	}
-	if srcType == models.SourcePullRequest {
-		return validateDays(cfg)
+		return validateRuns(cfg)
 	}
 	return ""
 }
 
-func validateDays(cfg map[string]string) string {
-	if n, err := strconv.Atoi(strings.TrimSpace(cfg["Days"])); err != nil || n <= 0 {
-		return "Days must be a positive number."
+// validateRuns checks the optional Runs field: how many runs a listing
+// returns by default.
+func validateRuns(cfg map[string]string) string {
+	v := strings.TrimSpace(cfg["Runs"])
+	if v == "" {
+		return ""
+	}
+	if n, err := strconv.Atoi(v); err != nil || n <= 0 || n > sources.MaxPipelineRuns {
+		return fmt.Sprintf("Runs must be a number from 1 to %d.", sources.MaxPipelineRuns)
 	}
 	return ""
 }
@@ -242,6 +240,10 @@ func (m *Manager) CredentialNames() []string {
 // (a re-sync only replaces within the new collection) — and it's reset to
 // idle for a fresh sync.
 func (m *Manager) Save(ctx context.Context, oldCollection string, src *models.SourceDefinition) error {
+	if models.IsLiveType(src.Type) {
+		// Nothing of a live source is synced: no status to keep.
+		src.SyncStatus, src.LastSyncedAt, src.SyncError, src.SyncErrorPhase = "idle", nil, nil, nil
+	}
 	if oldCollection != "" && sources.CollectionFor(src) != oldCollection {
 		if err := m.vectors.DeleteByFilter(ctx, oldCollection, sourceFilter(src.ID)); err != nil {
 			log.Printf("warning: could not clean up vectors in %s after collection change: %v", oldCollection, err)
@@ -263,13 +265,20 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 		return nil
 	}
 	// Best-effort vector cleanup — the source record is removed either way.
-	_ = m.vectors.DeleteByFilter(ctx, sources.CollectionFor(src), sourceFilter(src.ID))
+	if coll := sources.CollectionFor(src); coll != "" {
+		_ = m.vectors.DeleteByFilter(ctx, coll, sourceFilter(src.ID))
+	}
 	return m.sources.Delete(src.ID)
 }
 
-// IndexedChunks counts the source's indexed chunks (0 on error).
+// IndexedChunks counts the source's indexed chunks (0 on error, and for a
+// live source, which has none).
 func (m *Manager) IndexedChunks(ctx context.Context, src *models.SourceDefinition) int {
-	return m.vectors.Count(ctx, sources.CollectionFor(src), sourceFilter(src.ID))
+	coll := sources.CollectionFor(src)
+	if coll == "" {
+		return 0
+	}
+	return m.vectors.Count(ctx, coll, sourceFilter(src.ID))
 }
 
 func sourceFilter(id string) *rag.Filter {

@@ -32,9 +32,9 @@ tool_name(request: { mode: "pattern_search", pattern: str, page: int, regex?: bo
 tool_name(request: { mode: "list", filters?: {...}, order_by?: str, direction?: "desc"|"asc", page?: int })
 ```
 
-**Conduit is a cache.** Only syncs talk to Azure DevOps or GitHub; a tool call reads the index and nothing else. Every response carries `as_of`, when each source in the results last synced (`"never"` if it hasn't). For a question about right now, the agent calls `sync_source` (`trigger`, then `status` until `completed`) and asks again.
+**Conduit is a cache.** Only syncs talk to Azure DevOps or GitHub; a search tool call reads the index and nothing else. The two exceptions are [`search_pipeline_run`](#search_pipeline_run) and [`search_pull_request`](#search_pull_request), which read the provider live and index nothing. Every response carries `as_of`, when each source in the results last synced (`"never"` if it hasn't). For a question about right now, the agent calls `sync_source` (`trigger`, then `status` until `completed`) and asks again.
 
-**`"me"`** works in person filters (`author`, `assigned_to`, `reviewer`, `requested_for`, …). Each sync records the source token's owner (Azure DevOps `connectionData`, GitHub `/user`), and `me` matches the owners of every enabled source. Before any source has synced, `me` is an error that says so.
+**`"me"`** works in person filters (`author`, `assigned_to`). Each sync records the source token's owner (Azure DevOps `connectionData`, GitHub `/user`), and `me` matches the owners of every enabled source. Before any source has synced, `me` is an error that says so.
 
 `semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
 
@@ -70,19 +70,12 @@ Answers "the latest …", "the last failed …", "every … matching …" withou
 
 | Tool | `order_by` |
 |---|---|
-| `search_pipeline_run` | `finished` (default), `queued`, `started`, `duration`, `attempts`, `last_failed`, `fail_count`, `flaky_count` |
 | `search_commit` | `authored` (default) |
 | others | none yet — documents come in storage order |
 
-On `search_pipeline_run`, a listing returns run documents unless `filters.type` asks for `step`, `test`, `deployment` or `test_history`. The response's `list_notes` says so. They also note when the order leaves documents out: the default `finished` order leaves out runs still queued or running, which are listed with `filters.status` and `order_by: "queued"`. Conduit creates the sort indexes in the background at startup, so the first listing doesn't wait for one to build.
-
-Sort keys and filter values are computed at sync. Documents synced before Conduit stored a key don't carry it and don't appear in a listing sorted by it until their source syncs again.
+Conduit creates the sort indexes in the background at startup, so the first listing doesn't wait for one to build. Sort keys and filter values are computed at sync. Documents synced before Conduit stored a key don't carry it and don't appear in a listing sorted by it until their source syncs again.
 
 ```
-search_pipeline_run(request={"mode":"list","filters":{"type":"run","result":"failed","branch":"main"}})   → the last failed build on main
-search_pipeline_run(request={"mode":"list","filters":{"status":"inProgress"},"order_by":"queued"})       → running at the last sync
-search_pipeline_run(request={"mode":"list","filters":{"type":"deployment","environment":"production"}})  → what's on prod
-search_pipeline_run(request={"mode":"list","filters":{"type":"test_history","flaky":"true"},"order_by":"flaky_count"})
 search_commit(request={"mode":"list","filters":{"author":"me","since":"2026-11-01"}})
 ```
 
@@ -115,7 +108,7 @@ One call scans up to **50,000 chunks** by default (about 90 MB of text at the de
 
 ## Which tool to use
 
-When a result names another item by its ID (a work item `#1234`, a pull request `!45`, a commit SHA, a build ID), open it with that tool's `id`, `commit` or `build_id` filter. A semantic search may not surface it.
+When a result names another item by its ID (a work item `#1234`, a commit SHA), open it with that tool's `id` or `commit` filter. A semantic search may not surface it. Pull requests (`!45`) and pipeline runs (build IDs) are read live with `search_pull_request` and `search_pipeline_run`.
 
 | Tool | Searches | Best for |
 |---|---|---|
@@ -126,7 +119,8 @@ When a result names another item by its ID (a work item `#1234`, a pull request 
 | `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
 | `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
 | `search_commit` | Git commit history — messages, authors, file changes (filter `commit` opens one by its full or 7+ character SHA) | When a change was made, which commit introduced a behaviour |
-| `search_pipeline_run` | Build pipeline runs — run summaries with the commits each built, failed-step logs, failed tests, deployments, test history. Filters: `type`, `pipeline`, `result`, `status`, `reason`, `requested_for`, `branch`, `build_id`, `build_number`, `commit`, `contains_commit`, `rerun`, `attempt`, `failed_stage`/`failed_job`/`failed_step`/`failed_test`, `flaky`, `environment`, `tags`, `since`/`until`; `build_id` returns a run with all its step logs and test documents | The last (failed) build, why a run failed or needed several attempts, what changed since the last green run, what's deployed where, flaky tests |
+| `search_pipeline_run` | Build pipeline runs, **live** — the latest runs, one run's failed steps and tests of every attempt, a step's log (see [below](#search_pipeline_run)) | The last (failed) build, why a run failed or needed several attempts, what a run built |
+| `search_pull_request` | Pull requests, **live** — list, details, files, diffs, threads (see [below](#search_pull_request)) | Code review, what's open, who reviews what |
 
 ---
 
@@ -175,7 +169,8 @@ sync_source(request: { mode: "trigger", source_ids: [str] })
 ```
 
 - **`status`** lists every source (or just `source_ids`) with `id`, `name`, `type`, `disabled`, `sync_status` (`idle`, `syncing`, `completed`, `failed`), `last_synced_at`, `sync_error` / `sync_error_phase` when the last sync failed, and live `progress` (`phase`, `current`, `total`) while a sync runs. IDs that match no source are listed under `not_found`. Source config is never returned.
-- **`trigger`** starts the given sources syncing in the background (at most 4 at once, same as **Sync selected** in the UI) and returns immediately with one outcome per ID: `started`, `already_syncing`, `disabled` or `not_found`. Poll `status` until `sync_status` is `completed` or `failed`.
+- **`trigger`** starts the given sources syncing in the background (at most 4 at once, same as **Sync selected** in the UI) and returns immediately with one outcome per ID: `started`, `already_syncing`, `disabled`, `not_found` or `live_not_synced`. Poll `status` until `sync_status` is `completed` or `failed`.
+- Pipeline Runs and Pull Requests sources are never synced: `status` reports them as `live`, and `trigger` answers `live_not_synced`. Their tools read the provider on every call.
 
 ```
 sync_source(request={"mode":"trigger","source_ids":["a1b2"]})
@@ -198,7 +193,7 @@ manage_source(request: { mode: "delete", source_id: str, confirm?: bool })
 
 - **`list`** returns every source (`id`, `name`, `type`, `provider`, `disabled`, `sync_status`), the stored **credential names** and the source types.
 - **`get`** returns one source with its `config`.
-- **`create`** / **`update`** take the same config keys as the UI and the export file (see [Sources](sources.md)). `config.Provider` is `api` (Azure DevOps, the default) or `github`, and decides which keys are allowed. `update` merges `config` into the existing one; `""` removes a key. Changing `type` moves the source to another collection and removes its old vectors. Saving never syncs — call `sync_source` `trigger` afterwards.
+- **`create`** / **`update`** take the same config keys as the UI and the export file (see [Sources](sources.md)). `config.Provider` is `api` (Azure DevOps, the default) or `github`, and decides which keys are allowed. `update` merges `config` into the existing one; `""` removes a key. Changing `type` moves the source to another collection and removes its old vectors. Saving never syncs — call `sync_source` `trigger` afterwards (a Pipeline Runs or Pull Requests source needs no sync; `next` says so).
 - **`delete`** without `confirm: true` only reports what would go (`indexed_chunks`); with it, the source and its vectors are deleted.
 
 Credentials are referenced by name only. `Token`, `Password` and `ApiKeyValue` must name a credential from `list`; anything else is rejected (and not echoed back), so a pasted secret is never stored. New credentials are added in the UI at `/credentials`.
@@ -214,21 +209,39 @@ manage_source(request={"mode":"create","name":"Bugs","type":"work-item",
 
 ---
 
+## Pipeline run tool
+
+### `search_pipeline_run`
+
+Reads Azure DevOps builds and GitHub Actions workflow runs **live** from the provider. It is read-only and indexes nothing, so every answer is current. A **Pipeline Runs** source names the pipeline and the credentials (see [sources](sources.md#pipeline-runs)); it is never synced.
+
+```
+search_pipeline_run(request: { mode: "list", source_id?: str, top?: int, result?: str, status?: str, branch?: str, reason?: str, requested_for?: str })
+search_pipeline_run(request: { mode: "get", source_id?: str, run_id?: int, url?: str, page?: int })
+search_pipeline_run(request: { mode: "log", source_id?: str, run_id?: int, url?: str, log_id: int, page?: int })
+```
+
+`source_id` may be left out when exactly one Pipeline Runs source is enabled. `get` and `log` take either `run_id` (with that source) or `url`, the run's web link (`…/_build/results?buildId={id}` or `…/{owner}/{repo}/actions/runs/{id}`), which is matched to a configured source of the same organization or server for credentials, like a pull request URL. Every response names the source used (`source` or `credentials_from`).
+
+- **`list`**: the latest runs, newest first: `top` of them (default the source's **Runs**, else 5; at most 100). Each has `id`, `number`, `pipeline`, `status`, `result`, `reason`, `branch`, `commit`, `requested_for`, `queued`/`started`/`finished`, `duration` and `web_url`. Filters pass to the provider as given: Azure DevOps `result` is `succeeded`, `partiallySucceeded`, `failed` or `canceled` and `status` `completed`, `inProgress`, `notStarted`…; GitHub takes its own values (`failure`, `success`, `in_progress`, …), `reason` is the event and `requested_for` the actor's login. `branch` takes `main` or a full ref.
+- **`get`**: one run with `attempts`, `issues` (timeline errors and warnings, or GitHub annotations, each with its `Stage > Job > Task` path), `failed_stages`/`failed_jobs`, `failed_steps` of **every attempt** (each with `path`, `attempt`, `result`, `log_id` and `web_url`), `tests` (failed and flaky tests with outcome, attempt, job, error message, stack trace, sub-results and attachments; 20 per `page`, with `total_tests` and `tests_has_more`), `test_run_attachments`, `changes` (the commits built since the previous run) and `artifacts` (metadata only). `cached` is true when a completed run came from the in-memory cache.
+- **`log`**: one failed step's complete log (Azure DevOps log id, GitHub job id, from `get`), 500 lines per page with `total_pages`, `first_line` and `last_line`. Without `page` it returns the **last** page, where the error usually is.
+
+```
+1. search_pipeline_run(request={"mode":"list","result":"failed","branch":"main","top":1})      → the last failed build on main
+2. search_pipeline_run(request={"mode":"get","run_id":4711})                                  → failed_steps[0].log_id: 23
+3. search_pipeline_run(request={"mode":"log","run_id":4711,"log_id":23})                      → the end of the failing step's log
+```
+
+---
+
 ## Pull request tool
 
 ### `search_pull_request`
 
-Finds Azure DevOps and GitHub pull requests, and reads them **live** for code review. It is read-only.
-
-It has two kinds of modes:
-
-- **Indexed search** (`semantic_search`, `pattern_search`, `retrieve_chunk`) finds a pull request without its URL: by topic, the code or work item it touched, its discussion, author or reviewer. It searches `conduit_pull_requests`, the pull requests embedded by **Pull Requests** sources (see [sources](sources.md#pull-requests)). Each result is one pull request as of the last sync: title, description, status, branches, reviewers and votes, linked work items, commit messages, the changed-file list and every comment thread. Diffs and checks aren't embedded. Filters: `id` (pull request ID or number; `!45` works too), `project`, `repository`, `author`, `reviewer`, `state` (`active`, `completed`, `abandoned`), `branch` (target branch), and `since`/`until` on the creation date. The request shapes are the same as the collection search tools'.
-- **Live modes** (`list`, `get`, `files`, `diff`, `threads`, `iterations`, `commits`) read the provider directly, so they show the pull request as it is now. Pass an indexed result's `properties.web_url` as `url`.
+Finds Azure DevOps and GitHub pull requests and reads them **live** from the provider, for code review and questions about changes. It is read-only and indexes nothing, so every answer is current.
 
 ```
-search_pull_request(request: { mode: "semantic_search", query: str, page: int, filters?: {...} })
-search_pull_request(request: { mode: "pattern_search", pattern: str, regex?: bool, page: int, filters?: {...} })
-search_pull_request(request: { mode: "retrieve_chunk", source_doc_id: str, chunk_index: int })
 search_pull_request(request: { mode: "list", source_id: str, status?: "active"|"completed"|"abandoned"|"all", author?: str, reviewer?: str, target_branch?: str, page?: int })
 search_pull_request(request: { mode: "get", url: str })
 search_pull_request(request: { mode: "files", url: str, page?: int, from_iteration?: int, to_iteration?: int })
@@ -251,8 +264,6 @@ search_pull_request(request: { mode: "commits", url: str, page?: int })
 **Large pull requests** are paged, never truncated. Where GitHub itself leaves data out, the response says so in `incomplete`, either on the file or at the top level. GitHub omits patches for binary or very large files, lists at most 3000 files and 250 commits of a pull request, and compares at most 300 files between iterations. Azure DevOps diffs are built from the file contents, so every text file's diff is complete. On both providers, binary files show only their path and change type.
 
 ```
-0. search_pull_request(request={"mode":"semantic_search","query":"retry on payment timeout","page":1})
-                                                                                   → properties.web_url of the match
 1. search_pull_request(request={"mode":"get","url":"https://dev.azure.com/acme/Shop/_git/web/pullrequest/12"})
 2. search_pull_request(request={"mode":"files","url":"…/pullrequest/12"})            → total_files: 7
 3. search_pull_request(request={"mode":"diff","url":"…/pullrequest/12","path":"/src/cart.ts","include_content":true})
@@ -288,4 +299,4 @@ Use `search_test_code` the same way to find where a method is tested.
 
 **Combining tools for a code change:** `experience_retrieve` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_workitem` (related requirements or bugs).
 
-**Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `semantic_search` if you don't have its URL → `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.
+**Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `list` (by author, reviewer or target branch) if you don't have its URL → `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.

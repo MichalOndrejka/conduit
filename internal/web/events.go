@@ -135,6 +135,9 @@ func (c *vectorCounts) lookup(srcs []models.SourceDefinition, wait time.Duration
 	c.mu.Lock()
 	for i := range srcs {
 		src := &srcs[i]
+		if sources.CollectionFor(src) == "" {
+			continue // read live: nothing in Qdrant to count
+		}
 		if e, ok := c.known[src.ID]; ok {
 			out[src.ID] = e.n
 			continue
@@ -219,7 +222,8 @@ type sourceStatus struct {
 	LastSyncedAt   *time.Time           `json:"last_synced_at,omitempty"`
 	Paused         bool                 `json:"paused"`
 	Progress       *models.SyncProgress `json:"progress,omitempty"`
-	VectorCount    *int                 `json:"vector_count"` // null: not counted yet
+	VectorCount    *int                 `json:"vector_count"` // null: not counted yet, or live
+	Live           bool                 `json:"live"`         // read live by its tool: never synced
 }
 
 // statusSnapshot is every source's live state. wait bounds how long it
@@ -237,7 +241,7 @@ func (s *Server) statusSnapshot(wait time.Duration) ([]sourceStatus, error) {
 		st := sourceStatus{
 			ID: src.ID, Name: src.Name,
 			SyncStatus: src.SyncStatus, SyncError: src.SyncError, SyncErrorPhase: src.SyncErrorPhase,
-			LastSyncedAt: src.LastSyncedAt,
+			LastSyncedAt: src.LastSyncedAt, Live: models.IsLiveType(src.Type),
 		}
 		if s.sync != nil {
 			st.Paused = s.sync.Control().IsPaused(src.ID)

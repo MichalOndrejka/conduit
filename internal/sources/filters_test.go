@@ -51,7 +51,7 @@ func TestAdoScope(t *testing.T) {
 }
 
 func TestCommitDocumentsCarryFilters(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/_apis/git/repositories/api/commits"):
 			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {

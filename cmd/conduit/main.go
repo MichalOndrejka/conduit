@@ -118,6 +118,17 @@ func main() {
 	if err := vectors.EnsureCollections(ensureCtx, models.AllCollections, cfg.Embedding.Dimensions); err != nil {
 		log.Printf("warning: could not create collections yet (retried by the Qdrant health probe): %v", err)
 	}
+	// Pipeline runs and pull requests are read live now; drop what earlier
+	// versions indexed of them.
+	for _, name := range models.RetiredCollections {
+		if vectors.CollectionExists(ensureCtx, name) {
+			if err := vectors.DeleteCollection(ensureCtx, name); err != nil {
+				log.Printf("warning: could not drop retired collection %s: %v", name, err)
+			} else {
+				log.Printf("dropped retired collection %s (now read live)", name)
+			}
+		}
+	}
 	cancelEnsure()
 	// Payload indexes, in the background: building one on a large
 	// collection takes a while, and requests would otherwise wait for it. A
@@ -164,7 +175,8 @@ func main() {
 	mcpServer := server.NewMCPServer("Conduit", version, server.WithToolHandlerMiddleware(statsRec.ToolMiddleware))
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
 	mcptools.RegisterSyncTool(mcpServer, sourceStore, syncSvc)
-	mcptools.RegisterPullRequestTool(mcpServer, searchSvc, sourceStore, secretsStore)
+	mcptools.RegisterPullRequestTool(mcpServer, sourceStore, secretsStore)
+	mcptools.RegisterPipelineTool(mcpServer, sourceStore, secretsStore)
 	mcptools.RegisterSourcesTool(mcpServer, sourcemgmt.New(sourceStore, vectors, secretsStore), syncSvc)
 	mcpHTTP := server.NewStreamableHTTPServer(mcpServer, server.WithEndpointPath("/mcp"))
 

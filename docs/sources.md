@@ -59,17 +59,17 @@ Fetches from github.com or a GitHub Enterprise Server through the GitHub REST AP
 | Issue types | `WorkItemTypes` | Issues. Comma-separated organization issue types (Bug, Feature, …), picked from tiles loaded from `GET /orgs/{owner}/issue-types`; an issue of any of them is fetched. Empty = every issue, typed or not. Combines with Labels: an issue needs one of the labels and one of the types. Personal accounts and GitHub Enterprise Server versions without issue types have none to pick. |
 | Labels | `Labels` | Issues. Comma-separated; an issue with any of them is fetched. Empty = every issue. |
 | Workflow | `Workflow` | Pipeline Runs. Workflow file name (`ci.yml`) or numeric ID. |
-| Days | `Days` | Pipeline Runs: completed runs created in the last N days. Pull Requests: pull requests created in the last N days. |
+| Runs | `Runs` | Pipeline Runs. How many of the latest runs `search_pipeline_run` lists when the agent doesn't ask for a number (default `5`, at most `100`). |
 | Verify SSL | `VerifySSL` | `false` skips TLS verification (self-hosted servers with private CAs). |
 
 What each source type fetches:
 
 - **Source Code / Test Code / Documentation** (and Requirements / Test Cases in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. The branch is downloaded as a single tarball (`/repos/{owner}/{repo}/tarball/{branch}`) and read as it streams in, so a sync costs one API request, plus one to look up the default branch when `Branch` is empty, whatever the repository size. A download cut off part-way is restarted.
 - **Commit History**: one document per commit with its full message and the patch of every changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case.
-- **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out; use a Pull Requests source for them. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
-- **Pipeline Runs**: one document per completed workflow run; a failed run (failure, timed_out, startup_failure) also lists its failed jobs' annotations and yields one document per failed job with the complete job log (`parent_doc_id` links it to the run). Logs GitHub has already deleted are noted. GitHub returns at most 1000 runs per query; a window holding more fails the sync and asks for fewer Days. As on Azure DevOps, runs carry `type`, `pipeline` (workflow), `status`, `reason` (the event, also as `ci`/`pr`/`manual`/`scheduled`), `requested_for` (actor), `build_number`, `rerun`, `failed_job`/`failed_step` filters and `queued`/`started`/`finished`/`duration`/`attempts` sort keys. Each run lists the commits since the previous run on its branch (compare API) and the artifacts it uploaded: name, size, creation and expiry date and a browser link, never the contents. Runs queued or in progress at sync get summary documents. Deployments of commits the workflow's runs built become `deployment` documents with their latest status. GitHub has no test results API, so there is no test history.
+- **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out; `search_pull_request` reads them live. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
+- **Pipeline Runs**: not synced. The source names the workflow (`Workflow`) and `search_pipeline_run` reads its runs live — see [Pipeline Runs](#pipeline-runs). A run's details list each failed job of every attempt (so a run re-run to green still shows attempt 1's failures) with its failed steps, the failed jobs' annotations, the commits since the previous run of the workflow on the branch (compare API) and the artifacts it uploaded (metadata only). A job's log is read on request; logs GitHub has already deleted are noted. GitHub has no test results API, so there are no tests.
 
-- **Pull Requests**: see [Pull Requests](#pull-requests). They are listed from `/repos/{owner}/{repo}/pulls?state=all`, newest first. Linked work items are the issues the description closes with `fixes #12`-style keywords. GitHub lists at most 3000 files and 250 commits of a pull request; the document notes either case.
+- **Pull Requests**: not synced; see [Pull Requests](#pull-requests).
 
 The owner fills the `project` filter and the repository the `repository` filter, so search narrows GitHub and Azure DevOps sources the same way.
 
@@ -83,8 +83,8 @@ The source **type** only decides which Qdrant collection a source's documents la
 | Requirements | `conduit_requirements` |
 | Test Cases | `conduit_testcases` |
 | Commit History | `conduit_commits` |
-| Pipeline Runs | `conduit_pipeline_runs` |
-| Pull Requests | `conduit_pull_requests` |
+| Pipeline Runs | — (read live, never synced) |
+| Pull Requests | — (read live, never synced) |
 | Source Code | `conduit_code` |
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
@@ -95,7 +95,13 @@ The **Sources → Create** flow offers a friendly **Azure DevOps** tab. It's a f
 
 Commit History sources on the Azure DevOps tab expose a **Max commits** field (`Top` config key, default `100`) instead of the raw `Top` key — Azure DevOps' commits-list endpoint caps a single response at 100 commits, so values above that are fetched by paging with `searchCriteria.$top`/`searchCriteria.$skip` rather than the generic `NextUrlPath` mechanism. They also expose a **Branch** field (`Branch` config key; empty = the repository's default branch, looked up from the repository), applied as `searchCriteria.itemVersion.version` — without it, ADO's commits endpoint walks every branch's history, duplicating commits shared with the default branch and pulling in stray feature-branch work.
 
-Source Code, Test Code and Documentation sources (and Requirements / Test Cases in Files mode) have an optional **Branch** field too (`Branch` config key), applied to the items listing as `versionDescriptor` so files and their web links come from that branch; empty = the repository's default branch.
+Each commit's diff is built from its change list (`commits/{id}/changes`, one request per commit, more for commits over 100 files) and the old and new content of every changed file. That content is downloaded in **zips of up to 500 blobs** (`POST …/blobs` with the blob IDs, Azure DevOps' Get Blobs Zip), consecutive commits sharing a zip. It isn't fetched one request per file. A blob the zip doesn't hold under its ID is read on its own, so a server that names zip entries differently still gets complete diffs, only slower; the log says so. Top 100 commits with ~5 edited files each is about 1 list request, 100 change lists and 2 zips.
+
+Source Code, Test Code and Documentation sources (and Requirements / Test Cases in Files mode) have an optional **Branch** field too (`Branch` config key), applied as `versionDescriptor` so files and their web links come from that branch; empty = the repository's default branch.
+
+These sources download the branch's whole tree as **one zip** (`…/items?path=/&recursionLevel=Full&$format=zip&download=true`) to a temporary file, then apply **File filter** (`PathFilter`) and **Max items** (`Top`) locally. A sync costs one request for the files, whatever the repository size; a download cut off part-way is restarted. Each matching file becomes one document, ID `{source}_capi_{path}`, holding its path and full content; files over 200 KB or binary are noted as skipped. The form's preview downloads the whole zip too.
+
+Within one sync batch (**Sync selected**, or `sync_source trigger` with several IDs), sources that read the same archive — the same repository, branch and credential, e.g. a Source Code and a Test Code source of one repository — share a single download: the first downloads, the others wait for it and read the same file. This holds for GitHub tarballs too. The files are deleted when the batch ends; nothing is kept between syncs, and a source synced on its own downloads for itself. A download that ends early (even when the response itself ended cleanly) is detected by reading the archive back and restarted.
 
 The generic API config keys aren't tied to Azure DevOps — the backend runs any single-endpoint JSON API this way — but the web UI no longer exposes a form for building one from scratch; non-ADO API sources must be added directly to `conduit-sources.json`. Examples expressible as pure configuration:
 
@@ -110,34 +116,7 @@ The type picker shows the project's own work item types, loaded from Azure DevOp
 
 ### Azure DevOps Pipeline Runs
 
-Pipeline Runs sources (`pipeline-run`) on Azure DevOps are fetched entirely server-side. One source covers one build definition (YAML or classic). GitHub Actions workflows are covered in the GitHub section above. Config keys: `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), **Pipeline definition ID** (`DefinitionId`, the `definitionId` in the pipeline's URL, required) and **Days** (`Days`, required, form default `30`). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
-
-Each sync lists every **completed** run of the definition that finished in the last `Days` days, plus runs still queued or running (see below), on all branches including PR validation runs. It follows ADO's `x-ms-continuationtoken` paging and fully replaces the source's previous documents. The index is a snapshot of the last successful sync: runs, logs and test results deleted from Azure DevOps afterwards stay searchable (their `web_url` may then be stale) until the next successful sync.
-
-Documents (all in `conduit_pipeline_runs`):
-
-| Document | ID | When | Text |
-|---|---|---|---|
-| Run | `{source}_run_{buildId}` | every run | Pipeline, run number, result, status, reason, branch, triggering commit, trigger info, requester, timing; for failed / partially succeeded runs also every timeline error/warning (with its `Stage > Job > Task` path) and the IDs of its step and test documents |
-| Step | `{source}_run_{buildId}_step_{timelineRecordId}` | failed / partially succeeded runs | The **complete** log of each failed timeline record that has no failed child (so a job that failed without a failed task, e.g. a timeout, is captured too). Per-line timestamps and ANSI color codes are stripped; every line is kept |
-| Test | `{source}_run_{buildId}_test_{testRunId}_{resultId}` | failed / partially succeeded runs | Each test result with outcome Failed, Aborted or Error: name, storage, test run, duration, error message and full stack trace |
-
-Properties: `type` (`run`, `step`, `test`), `build_id`, `result`, `branch`, `commit`, `project`, `repository`, `web_url`; step and test documents also carry `parent_doc_id` (the run document's ID) and steps `step_path`; run documents of Azure Repos runs carry `commit_web_url`. Every chunk's text starts with a `[Run #<number> > Stage > Job > Task | chunk k/N]` header (`[Run #<number> > test <name> | …]` for tests, `[Run #<number> | …]` for runs), so a chunk deep inside a long log still names the run and step it belongs to.
-
-Each sync also stores, so the `list` mode can filter and sort on it without calling Azure DevOps:
-
-- **Run filters and sort keys** on every run, step and test document: `type`, `pipeline` (name and ID), `status`, `reason` (also as `ci`, `pr`, `manual`, `scheduled`), `requested_for`, `build_number`, `tags`, `repository`, `rerun`, and the names of every stage, job, step and test that failed in any attempt. Sort keys: `queued`, `started`, `finished`, `duration` (seconds) and `attempts`. Since/until filter on the finish time.
-- **Attempts:** every failed step and test records the pipeline attempt it belongs to (`attempt` filter and property; "Attempt: n of N" and its `Stage > Job` in the text). For a test, the attempt comes from its test run's pipeline reference, or else from the job execution whose start/finish holds the test run. A test that matches neither is listed as "attempt unknown" rather than guessed. A rerun run's document ends with **Tests by attempt**, which lists each attempt's failed tests side by side.
-- **Artifacts:** every run document lists the artifacts the run published (`builds/{id}/artifacts`): name, type, size and download link, never the contents. This is one extra request per run.
-- **Test attachments:** runs with test documents list each test run's attachments, and each test document lists its result's attachments (both from the preview `test/Runs/.../attachments` API), as metadata only. This is one extra request per test run and per failed or flaky test.
-- **Changes:** the commits each run built since the previous run (`builds/{id}/changes`, every page), listed in the run document and matched by `contains_commit`. This is one extra request per run.
-- **Runs still queued or running** at sync, as summary-only run documents with `status` `inProgress` or `notStarted`. They get their full detail once they've completed and the source syncs again.
-- **Deployments:** one `deployment` document per deployment record of this pipeline in any of the project's environments in the window, with `environment`, `result`, `build_id`, `commit` and `branch`. A server without environments (404) has none.
-- **Test history:** one `test_history` document per test that failed or passed only on retry in the window. It lists every such run, the first and last failure, and counts out of the window's completed runs. Filters: `failed_test`, `pipeline`, `flaky`; sort keys `last_failed`, `fail_count`, `flaky_count`.
-
-The form's preview (Top) skips running runs, deployments and test history.
-
-Fetching is lossless: any run, timeline, log, test-result, changes or deployment request that still fails after retries — including a 404 for a log Azure DevOps already purged — fails the sync, leaving the previous snapshot untouched.
+See [Pipeline Runs](#pipeline-runs). On the Azure DevOps tab a source takes `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), **Pipeline definition ID** (`DefinitionId`, the `definitionId` in the pipeline's URL, required) and **Runs** (`Runs`, optional, default `5`). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
 
 ### Requirements and Test Cases (dual-mode)
 
@@ -172,37 +151,38 @@ Because the backend is a single generic HTTP-JSON provider, some fetch patterns 
 
 These require dedicated provider code, which the Go backend deliberately does not have (see [go-port.md](go-port.md) for the rationale).
 
+## Pipeline Runs
+
+Pipeline Runs sources (`pipeline-run`) are **never synced**. One source names one pipeline — an Azure DevOps build definition (YAML or classic) or a GitHub Actions workflow — and the credentials to read it. [`search_pipeline_run`](mcp-tools.md#search_pipeline_run) asks the provider on every call, so its answers are always current, and nothing about runs is stored in Qdrant. The Sources page marks such a source **Live**; it has no Sync button, and `sync_source trigger` answers `live_not_synced` for it.
+
+What a call reads (Azure DevOps; GitHub reads the equivalents):
+
+| Mode | Requests |
+|---|---|
+| `list` | one `build/builds?definitions=…&$top=N` call, filtered by result, status, branch, reason and requester |
+| `get` | the run itself, its timeline plus one per earlier attempt of a rerun job, its changes and artifacts; unless the run is green with a single attempt, also its test runs, the failed results of each test run whose statistics show failures (or don't say), the passed results of each test run that may hold retried tests, and the attachments of each test run and failed or flaky test |
+| `log` | the run itself and one step log |
+
+A run's details cover every attempt: a run that went green after "Rerun failed jobs" still shows attempt 1's failed steps (from the previous-attempt timelines) and failed tests, and a test that passed only on an in-run retry (VSTest `rerunFailedTests` and the like, recorded as sub-results) is listed as flaky. Each failed step is the innermost failed timeline record with a log, so a job that failed without a failed task (a timeout) is listed too. Each test records the attempt and `Stage > Job` it belongs to: from its test run's pipeline reference, else from the job execution whose start/finish holds the test run; `attempt` 0 means it can't be told. Logs are cleaned of per-line timestamps and ANSI color codes; every line is kept.
+
+**Cache.** Completed runs barely change, so the details and logs of a **completed** run are kept in memory (up to 64 MB, least recently used out first), keyed by the run's finish time. Reading a cached run still costs one call — for the run itself, to see whether it was rerun since; a rerun gets a new finish time and is read again. Listings and runs still in progress always go to the provider. The cache lives for the process only.
+
+Nothing is dropped: every failed step and every failed or flaky test is listed (tests 20 per page), and a step's whole log is readable in pages of 500 lines. A request that still fails after retries fails the tool call; only a listing an older server lacks (HTTP 404, e.g. test attachments) becomes a note.
+
 ## Pull Requests
 
-Pull Requests sources (`pull-request`) embed a repository's pull requests, so an agent can find one by meaning instead of being given its URL. The indexed modes of [`search_pull_request`](mcp-tools.md#search_pull_request) search them. The same tool reads any result live (diffs, current checks) from its `web_url`.
+Pull Requests sources (`pull-request`) are **never synced**: a source names a repository and the credentials to read it, and [`search_pull_request`](mcp-tools.md#search_pull_request) lists and reads its pull requests live. Its `list` mode takes the source's id; every other mode takes a pull request URL and borrows the credentials of the closest configured source, so a Pull Requests source isn't required for those.
 
-Config keys: the Azure DevOps tab takes `AdoOrg`, `AdoProject`, `AdoRepo` (required) and `AdoApiVersion`, and stores `Url` as `{org}/{project}/_apis/git/repositories/{repo}/pullrequests`. The GitHub tab takes the usual `GitHubUrl`, `GitHubOwner`, `GitHubRepo` and `Token`. Both take **Days** (`Days`, required, form default `90`).
+Config keys: the Azure DevOps tab takes `AdoOrg`, `AdoProject`, `AdoRepo` (required) and `AdoApiVersion`, and stores `Url` as `{org}/{project}/_apis/git/repositories/{repo}/pullrequests`. The GitHub tab takes the usual `GitHubUrl`, `GitHubOwner`, `GitHubRepo` and `Token`.
 
-Each sync takes every pull request **created** in the last `Days` days, whatever its status (active, completed, abandoned), and fully replaces the source's previous documents. While a pull request is inside the window, each sync picks up its new comments, votes and status changes. Each pull request gets one document, ID `{source}_pr_{id}`, which holds:
-
-- title, status, draft flag, author, creation date, source and target branch, merge status and web URL
-- reviewers with their votes (and Azure DevOps' required flag)
-- linked work items with type, title and state
-- the description
-- every commit with its full message
-- the changed-file list with each file's change type (and a rename's old path)
-- every comment thread, with its file and line, status and replies. Azure DevOps system comments (votes, pushes, policy updates) are left out.
-- Azure DevOps only: the files uploaded to the pull request (name, uploader, date, link), from the preview `pullRequests/{id}/attachments` API. GitHub has no separate list; files pasted into GitHub comments show up as links in the comment text.
-- notes on anything the provider left out
-
-Diffs and checks aren't embedded. `search_commit` and the live `diff` mode cover diffs, and checks would go stale in a snapshot.
-
-Properties: `type` (`pull_request`), `pr_id`, `status`, `author`, `source_branch`, `target_branch`, `created_at`, `project`, `repository`, `web_url`. Filters: `project`, `repository`, `author`, `reviewer`, `state` (the status), `branch` (the target branch) and the creation date for `since`/`until`. Every chunk starts with a `[Pull request !12: <title> | chunk k/N]` header (`#12` on GitHub).
-
-Fetching is lossless: a sync fails if a pull request, commit list, changed-file list or thread list can't be read, and the previous snapshot stays untouched.
+Earlier versions indexed pull requests and pipeline runs into `conduit_pull_requests` and `conduit_pipeline_runs`; startup drops those collections.
 
 ## Attachments
 
-Attached files and published artifacts are indexed as **metadata only**: name, size, type, uploader, date, comment and link, never the contents. They can be zips of many gigabytes, and downloading them would stall syncs and fill the disk. This covers:
+Attached files and published artifacts are listed as **metadata only**: name, size, type, uploader, date, comment and link, never the contents. They can be zips of many gigabytes, and downloading them would stall syncs and fill the disk. This covers:
 
-- work item attachments
-- pipeline run artifacts (Azure DevOps and GitHub Actions)
-- test run and test result attachments (Azure DevOps)
-- pull request attachments (Azure DevOps)
+- work item attachments (indexed at sync)
+- pipeline run artifacts (Azure DevOps and GitHub Actions; read live by `search_pipeline_run`)
+- test run and test result attachments (Azure DevOps; read live by `search_pipeline_run`)
 
-Each list ends with a note telling the agent the files aren't searchable and that it should ask the user to download a file from its link and provide it when one matters. Conduit never fetches an attachment, at sync or at tool-call time. A server that lacks one of these listing APIs (HTTP 404) gets a note in the document instead of failing the sync. Any other error fails the sync, as for the rest of the source.
+Each indexed list ends with a note telling the agent the files aren't searchable and that it should ask the user to download a file from its link and provide it when one matters. Conduit never fetches an attachment's contents. A server that lacks one of these listing APIs (HTTP 404) gets a note instead of failing the sync or tool call. Any other error fails it, as for the rest of the source.

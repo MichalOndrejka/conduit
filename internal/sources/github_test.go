@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -366,147 +365,6 @@ func TestGitHubFetchIssues(t *testing.T) {
 	}
 }
 
-func TestGitHubFetchWorkflowRuns(t *testing.T) {
-	f := newFakeGitHub(t)
-	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows/ci.yml/runs", func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		if !strings.HasPrefix(q.Get("created"), ">=") {
-			t.Errorf("query = %v", q)
-		}
-		if q.Get("status") != "completed" {
-			_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 0, "workflow_runs": []any{}})
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 2, "workflow_runs": []any{
-			map[string]any{"id": 11, "name": "CI", "run_number": 7, "conclusion": "failure", "head_branch": "main", "head_sha": "abc",
-				"run_started_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-01T10:05:00Z"},
-			map[string]any{"id": 10, "name": "CI", "run_number": 6, "conclusion": "success", "head_branch": "main"},
-		}})
-	})
-	f.handleJSON("/actions/runs/11/jobs", map[string]any{"jobs": []any{
-		map[string]any{"id": 101, "name": "build", "conclusion": "failure",
-			"steps": []any{map[string]any{"name": "Checkout", "conclusion": "success"}, map[string]any{"name": "Test", "conclusion": "failure"}}},
-		map[string]any{"id": 102, "name": "lint", "conclusion": "timed_out"},
-		map[string]any{"id": 103, "name": "docs", "conclusion": "success"},
-	}})
-	f.handleJSON("/check-runs/101/annotations", []any{
-		map[string]any{"path": "a_test.go", "start_line": 12, "annotation_level": "failure", "message": "expected 1, got 2"},
-	})
-	f.handleJSON("/check-runs/102/annotations", []any{})
-	f.HandleFunc("/api/v3/repos/acme/app/actions/jobs/101/logs", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "2026-10-01T10:00:01.1234567Z ##[group]Run go test\n2026-10-01T10:00:02.0000000Z FAIL a_test.go:12\n")
-	})
-	f.HandleFunc("/api/v3/repos/acme/app/actions/jobs/102/logs", func(w http.ResponseWriter, r *http.Request) {
-		http.Error(w, "gone", http.StatusGone)
-	})
-
-	f.handleJSON("/actions/runs/10/artifacts", map[string]any{"total_count": 2, "artifacts": []any{
-		map[string]any{"id": 5, "name": "app-1.4.2", "size_in_bytes": 52428800, "created_at": "2026-10-01T09:00:00Z",
-			"expires_at": "2026-12-30T09:00:00Z", "archive_download_url": "https://api.github.com/repos/acme/app/actions/artifacts/5/zip"},
-		map[string]any{"id": 4, "name": "old-logs", "size_in_bytes": 10, "expired": true},
-	}})
-	f.handleJSON("/deployments", []any{})
-	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "30"}).FetchDocuments(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(docs) != 4 {
-		t.Fatalf("got %d docs, want run+2 jobs for the failed run and 1 for the green run", len(docs))
-	}
-	run, build, lint := docs[0], docs[1], docs[2]
-	for _, want := range []string{"CI #7 failure", "Duration: 5m0s", "[failure] build: expected 1, got 2 (a_test.go:12)", "- build (document s_run_11_job_101)"} {
-		if !strings.Contains(run.Text, want) {
-			t.Errorf("run text lacks %q:\n%s", want, run.Text)
-		}
-	}
-	if !strings.Contains(build.Text, "Failed steps: Test") || !strings.Contains(build.Text, "##[group]Run go test\nFAIL a_test.go:12") {
-		t.Errorf("build job text:\n%s", build.Text)
-	}
-	if build.Properties["parent_doc_id"] != "s_run_11" {
-		t.Errorf("parent_doc_id = %q", build.Properties["parent_doc_id"])
-	}
-	for _, d := range []models.SourceDocument{run, build} {
-		if got := d.Filters.Fields[models.FilterBuildID]; len(got) != 1 || got[0] != "11" {
-			t.Errorf("%s build_id filter = %v", d.ID, got)
-		}
-	}
-	if !strings.Contains(lint.Text, "log no longer available on GitHub: HTTP 410") {
-		t.Errorf("lint job text:\n%s", lint.Text)
-	}
-	if docs[3].ID != "s_run_10" {
-		t.Errorf("green run doc id = %q", docs[3].ID)
-	}
-	for _, want := range []string{"Artifacts (2), metadata only",
-		"- app-1.4.2 (50.0 MB, zip, 2026-10-01T09:00:00Z, expires 2026-12-30T09:00:00Z): " + f.srv.URL + "/acme/app/actions/runs/10/artifacts/5",
-		"- old-logs (10 B, zip, expired, no longer downloadable)\n"} {
-		if !strings.Contains(docs[3].Text+"\n", want) {
-			t.Errorf("green run text lacks %q:\n%s", want, docs[3].Text)
-		}
-	}
-	if strings.Contains(run.Text, "Artifacts") {
-		t.Errorf("a run without artifacts must not list any:\n%s", run.Text)
-	}
-}
-
-// A run re-run to green reports success for its latest attempt; attempt 1's
-// failed job must still be embedded, and a clean green run stays summary-only.
-func TestGitHubWorkflowRunsKeepFailedAttempts(t *testing.T) {
-	f := newFakeGitHub(t)
-	f.handleJSON("/actions/workflows/ci.yml/runs", map[string]any{"total_count": 2, "workflow_runs": []any{
-		map[string]any{"id": 21, "name": "CI", "run_number": 9, "run_attempt": 2, "conclusion": "success", "head_branch": "main"},
-		map[string]any{"id": 20, "name": "CI", "run_number": 8, "run_attempt": 1, "conclusion": "success", "head_branch": "main"},
-	}})
-	f.HandleFunc("/api/v3/repos/acme/app/actions/runs/21/jobs", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("filter") != "all" {
-			t.Errorf("jobs filter = %q, want all attempts", r.URL.Query().Get("filter"))
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": []any{
-			map[string]any{"id": 202, "name": "test", "run_attempt": 2, "conclusion": "success"},
-			map[string]any{"id": 201, "name": "test", "run_attempt": 1, "conclusion": "failure"},
-		}})
-	})
-	f.handleJSON("/check-runs/201/annotations", []any{map[string]any{"path": ".github", "annotation_level": "failure", "message": "Process completed with exit code 1."}})
-	f.HandleFunc("/api/v3/repos/acme/app/actions/jobs/201/logs", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, "--- FAIL: TestRace (flaky)\n")
-	})
-	f.HandleFunc("/api/v3/repos/acme/app/actions/runs/20/jobs", func(w http.ResponseWriter, r *http.Request) {
-		t.Error("a single-attempt green run must not be inspected")
-	})
-	f.handleJSON("/deployments", []any{})
-
-	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "30"}).FetchDocuments(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ids []string
-	for _, d := range docs {
-		ids = append(ids, d.ID)
-	}
-	if got := strings.Join(ids, ","); got != "s_run_21,s_run_21_job_201,s_run_20" {
-		t.Fatalf("doc ids = %s", got)
-	}
-	run := docs[0]
-	for _, want := range []string{"CI #9 success", "Passed after re-run", "[failure] test (attempt 1): Process completed with exit code 1.",
-		"- test (attempt 1) (document s_run_21_job_201)"} {
-		if !strings.Contains(run.Text, want) {
-			t.Errorf("run text lacks %q:\n%s", want, run.Text)
-		}
-	}
-	job := docs[1]
-	if !strings.Contains(job.Text, "--- FAIL: TestRace (flaky)") || job.Properties["attempt"] != "1" {
-		t.Errorf("attempt-1 job doc = %q %v", job.Text, job.Properties)
-	}
-}
-
-func TestGitHubWorkflowRunsOverQueryLimit(t *testing.T) {
-	f := newFakeGitHub(t)
-	f.handleJSON("/actions/workflows/7/runs", map[string]any{"total_count": 1500, "workflow_runs": []any{}})
-	_, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "7", "Days": "365"}).FetchDocuments(context.Background(), nil)
-	if err == nil || !strings.Contains(err.Error(), "lower Days") {
-		t.Errorf("err = %v, want the 1000-run limit error", err)
-	}
-}
-
 func TestGitHubRetriesRateLimit(t *testing.T) {
 	defer func(d time.Duration) { retryBaseDelay = d }(retryBaseDelay)
 	retryBaseDelay = time.Millisecond
@@ -563,21 +421,6 @@ func TestGitHubCommitsSkipPageShiftRepeats(t *testing.T) {
 	}
 	if len(docs) != 130 {
 		t.Errorf("got %d docs, want 130", len(docs))
-	}
-}
-
-// A run finishing during listing raises total_count above what was listed;
-// that is not GitHub's 1000-run cap and must not fail the sync.
-func TestGitHubRunsToleratesNewRunDuringListing(t *testing.T) {
-	f := newFakeGitHub(t)
-	f.handleJSON("/actions/workflows/ci.yml/runs", map[string]any{"total_count": 3, "workflow_runs": []any{
-		map[string]any{"id": 2, "name": "CI", "run_number": 2, "conclusion": "success"},
-		map[string]any{"id": 1, "name": "CI", "run_number": 1, "conclusion": "success"},
-	}})
-	f.handleJSON("/deployments", []any{})
-	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "7"}).FetchDocuments(context.Background(), nil)
-	if err != nil || len(docs) != 2 {
-		t.Errorf("got %d docs, err %v; want both runs", len(docs), err)
 	}
 }
 
@@ -647,83 +490,5 @@ func TestGitHubIssueTypesUnavailable(t *testing.T) {
 	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceWorkItemQuery, nil).src, nil)
 	if err != nil || available || len(types) != 0 {
 		t.Errorf("types = %v, available = %v, err = %v; want none, unavailable, no error", types, available, err)
-	}
-}
-
-// The GitHub run extras mirror ADO's: run filters and sort keys, the
-// commits since the previous run on the branch, runs still in progress and
-// deployments of the runs' commits — all at sync time.
-func TestGitHubWorkflowRunExtras(t *testing.T) {
-	f := newFakeGitHub(t)
-	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows/ci.yml/runs", func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Query().Get("status") {
-		case "completed":
-			_ = json.NewEncoder(w).Encode(map[string]any{"total_count": 2, "workflow_runs": []any{
-				map[string]any{"id": 31, "name": "CI", "run_number": 12, "run_attempt": 1, "event": "push", "status": "completed",
-					"conclusion": "failure", "head_branch": "main", "head_sha": "bbbbbbbbbb22", "actor": map[string]any{"login": "ann"},
-					"created_at": "2026-10-02T09:59:00Z", "run_started_at": "2026-10-02T10:00:00Z", "updated_at": "2026-10-02T10:04:00Z"},
-				map[string]any{"id": 30, "name": "CI", "run_number": 11, "status": "completed", "conclusion": "success",
-					"head_branch": "main", "head_sha": "aaaaaaaaaa11"},
-			}})
-		case "in_progress":
-			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []any{
-				map[string]any{"id": 32, "name": "CI", "run_number": 13, "status": "in_progress", "head_branch": "main",
-					"head_sha": "cccccccccc33", "created_at": "2026-10-03T08:00:00Z"},
-			}})
-		default:
-			_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []any{}})
-		}
-	})
-	f.handleJSON("/actions/runs/31/jobs", map[string]any{"jobs": []any{
-		map[string]any{"id": 301, "name": "build", "conclusion": "failure", "steps": []any{map[string]any{"name": "Test", "conclusion": "failure"}}},
-	}})
-	f.handleJSON("/check-runs/301/annotations", []any{})
-	f.HandleFunc("/api/v3/repos/acme/app/actions/jobs/301/logs", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "FAIL") })
-	f.handleJSON("/compare/aaaaaaaaaa11...bbbbbbbbbb22", map[string]any{"total_commits": 1, "commits": []any{
-		map[string]any{"sha": "bbbbbbbbbb22", "commit": map[string]any{"message": "Break it\n\nbody", "author": map[string]any{"name": "Ann", "date": "2026-10-02T09:00:00Z"}}},
-	}})
-	f.handleJSON("/deployments", []any{
-		map[string]any{"id": 501, "sha": "bbbbbbbbbb22", "ref": "main", "environment": "production", "created_at": time.Now().UTC().Format(time.RFC3339)},
-		map[string]any{"id": 502, "sha": "unrelated", "environment": "production", "created_at": time.Now().UTC().Format(time.RFC3339)},
-	})
-	f.handleJSON("/deployments/501/statuses", []any{map[string]any{"state": "failure", "created_at": "2026-10-02T11:00:00Z"}})
-
-	docs, err := f.source(t, models.SourcePipelineRun, map[string]string{"Workflow": "ci.yml", "Days": "30"}).FetchDocuments(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	has := func(d *models.SourceDocument, field, value string) bool { return slices.Contains(d.Filters.Fields[field], value) }
-
-	run := docByID(docs, "s_run_31")
-	for field, value := range map[string]string{
-		models.FilterType: "run", models.FilterPipeline: "ci", models.FilterReason: "ci", models.FilterRequestedFor: "ann",
-		models.FilterBuildNumber: "12", models.FilterRerun: "false", models.FilterFailedJob: "build", models.FilterFailedStep: "test",
-		models.FilterContainsCommit: "bbbbbbb", models.FilterStatus: "completed",
-	} {
-		if !has(run, field, value) {
-			t.Errorf("run %s filter = %v, want %q", field, run.Filters.Fields[field], value)
-		}
-	}
-	if run.Sort["duration"] != 240 || run.Sort["finished"] == 0 || run.Sort["queued"] == 0 {
-		t.Errorf("run sort = %v", run.Sort)
-	}
-	if !strings.Contains(run.Text, "Changes since the previous run on this branch (1):\n- bbbbbbbbbb22 Ann (2026-10-02T09:00:00Z): Break it") {
-		t.Errorf("run text lacks changes:\n%s", run.Text)
-	}
-	if job := docByID(docs, "s_run_31_job_301"); !has(job, models.FilterType, "step") || !has(job, models.FilterFailedJob, "build") {
-		t.Errorf("job filters = %v", job.Filters.Fields)
-	}
-	pending := docByID(docs, "s_run_32")
-	if pending == nil || !has(pending, models.FilterStatus, "in_progress") || pending.Sort["finished"] != 0 ||
-		!strings.Contains(pending.Text, "hadn't completed") {
-		t.Errorf("pending run = %+v", pending)
-	}
-	dep := docByID(docs, "s_deployment_501")
-	if dep == nil || !has(dep, models.FilterEnvironment, "production") || !has(dep, models.FilterResult, "failure") ||
-		!has(dep, models.FilterBuildID, "31") || dep.Sort["finished"] == 0 {
-		t.Fatalf("deployment = %+v", dep)
-	}
-	if docByID(docs, "s_deployment_502") != nil {
-		t.Error("a deployment of a commit no run built must not be recorded")
 	}
 }

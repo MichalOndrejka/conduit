@@ -31,6 +31,7 @@ const (
 	syncAlreadyRunning = "already_syncing"
 	syncDisabled       = "disabled"
 	syncNotFound       = "not_found"
+	syncLive           = "live_not_synced"
 )
 
 // syncSourceStatus is one source's sync state as reported by the tool. The
@@ -85,7 +86,9 @@ func RegisterSyncTool(s *server.MCPServer, sources SourceLister, runner SyncRunn
 			`completed, failed), last_synced_at, any sync error, and live progress while syncing; add "source_ids" `+
 			`to report only those. Pass request={"mode":"trigger","source_ids":[...]} to start syncing those sources `+
 			`in the background — it returns immediately with a per-source outcome (started, already_syncing, `+
-			`disabled, not_found); poll status mode to follow progress until sync_status is completed or failed.`),
+			`disabled, not_found, live_not_synced); poll status mode to follow progress until sync_status is completed `+
+			`or failed. Pipeline-run and pull-request sources (sync_status "live") are never synced: `+
+			`search_pipeline_run and search_pull_request read them live.`),
 		func(t *mcp.Tool) {
 			t.InputSchema.Properties["request"] = syncRequestSchema()
 			t.InputSchema.Required = append(t.InputSchema.Required, "request")
@@ -158,6 +161,8 @@ func handleSyncRequest(args map[string]any, sources SourceLister, runner SyncRun
 			switch {
 			case !ok:
 				outcomes[id] = syncNotFound
+			case models.IsLiveType(src.Type):
+				outcomes[id] = syncLive
 			case src.Disabled:
 				outcomes[id] = syncDisabled
 			case runner.IsSyncing(id):
@@ -187,6 +192,9 @@ func statusOf(src models.SourceDefinition, runner SyncRunner) syncSourceStatus {
 	}
 	if st.SyncStatus == "" {
 		st.SyncStatus = "idle"
+	}
+	if models.IsLiveType(src.Type) {
+		st.SyncStatus = "live"
 	}
 	if runner.IsSyncing(src.ID) {
 		st.SyncStatus = "syncing"

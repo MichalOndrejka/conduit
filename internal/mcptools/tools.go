@@ -278,10 +278,11 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		`same way as semantic_search. Both search modes accept an optional "filters" object to narrow results by ` +
 		`source-system fields — e.g. "filters":{"project":"Payments","repository":"api"} — see the schema for ` +
 		`the fields this tool supports; result properties (project, repository, state, …) show the values ` +
-		`available. When a result refers to another item by its id — a work item #1234, a commit SHA, a pull ` +
-		`request !45, a build id — open it with the matching tool's id, commit or build_id filter rather than ` +
-		`a semantic search, which may not surface it. When a result has properties.web_url, it is the browser link to the ` +
-		`source item (work item, file, commit, wiki page, pipeline run) — cite it as a markdown link, e.g. [title](web_url), ` +
+		`available. When a result refers to another item by its id — a work item #1234, a commit SHA — open it ` +
+		`with the matching tool's id or commit filter rather than a semantic search, which may not surface it; ` +
+		`pull requests (!45) and pipeline runs (build ids) are read live with search_pull_request and ` +
+		`search_pipeline_run. When a result has properties.web_url, it is the browser link to the ` +
+		`source item (work item, file, commit, wiki page) — cite it as a markdown link, e.g. [title](web_url), ` +
 		`whenever you reference that result in an answer.`
 	makeSearchTool := func(collection, name, description string) {
 		fields, sorts := collectionFilters[collection], collectionSorts[collection]
@@ -327,22 +328,6 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	makeSearchTool(models.CollectionCommits, "search_commit",
 		"Semantic search over git commit history — each commit's message, author and complete code diff. "+
 			"Filter by commit SHA, project, repository, author, changed path or author date.")
-	makeSearchTool(models.CollectionPipelineRuns, "search_pipeline_run",
-		"Semantic search over completed pipeline runs (Azure DevOps builds, GitHub Actions). Every run has a summary document "+
-			"(result, reason, branch, triggering commit, requester, timing, attempts). Failed and partially succeeded runs, "+
-			"and runs that passed only after a rerun, also list their timeline errors/warnings and have separate documents "+
-			"for each failed step of every attempt (its complete log) and each failed or flaky test (error message and "+
-			"stack trace); properties.type is run, step or test, and step/test documents carry properties.parent_doc_id, "+
-			"the source_doc_id of their run document. The run summary alone never says why a step failed: to explain a "+
-			"specific run (a link with buildId=…, a run number, a run found by an earlier search), search with "+
-			`"filters":{"build_id":"<properties.build_id>"} to get the run together with all its step logs and test `+
-			"documents, then page or retrieve_chunk through the logs. "+
-			`For the latest runs use the list mode with filters.type "run" `+
-			`(e.g. last failed build on main: {"mode":"list","filters":{"type":"run","result":"failed","branch":"main"}}); `+
-			`builds running at the last sync: filters.status "inProgress" with order_by "queued"; what's deployed: type "deployment" `+
-			`with filters.environment; flaky or failing tests: type "test_history" with order_by "last_failed" or "fail_count"; the `+
-			`first run containing a commit: filters.contains_commit with direction "asc"; failures of a stage, job or step: `+
-			`filters.failed_stage / failed_job / failed_step. Each run lists the commits it built since the previous run.`)
 
 	// ── Experience tools ───────────────────────────────────────────────────
 

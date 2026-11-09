@@ -39,6 +39,7 @@ func New(src *models.SourceDefinition, store secrets.Reader) (Source, error) {
 // CollectionFor mirrors collection_for in app/sources/factory.py: the source
 // type is a domain category (work items, code, docs…) that routes documents
 // to a Qdrant collection. Types are generic labels, not tied to any provider.
+// Live types (models.IsLiveType) have no collection: "".
 func CollectionFor(src *models.SourceDefinition) string {
 	switch src.Type {
 	case models.SourceWorkItemQuery:
@@ -49,10 +50,8 @@ func CollectionFor(src *models.SourceDefinition) string {
 		return models.CollectionTestCases
 	case models.SourceGitCommits:
 		return models.CollectionCommits
-	case models.SourcePipelineRun:
-		return models.CollectionPipelineRuns
-	case models.SourcePullRequest:
-		return models.CollectionPullRequests
+	case models.SourcePipelineRun, models.SourcePullRequest:
+		return "" // read live by their tools, never indexed
 	case models.SourceCodeRepo:
 		return models.CollectionSourceCode
 	case models.SourceTestCodeRepo:
@@ -60,4 +59,9 @@ func CollectionFor(src *models.SourceDefinition) string {
 	default:
 		return models.CollectionDocumentation
 	}
+}
+
+// errLiveSource is what fetching a live source's documents returns.
+func errLiveSource(src *models.SourceDefinition) error {
+	return fmt.Errorf("%s sources are read live by their tool and are never synced", src.Type)
 }

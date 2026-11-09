@@ -92,6 +92,7 @@ func (s *Server) renderSourceForm(w http.ResponseWriter, src *models.SourceDefin
 		"TypeLabel":   sourcemgmt.Label(src.Type),
 		"Tab":         tab,
 		"Credentials": creds,
+		"Live":        models.IsLiveType(src.Type),
 	})
 }
 
@@ -600,7 +601,7 @@ func (s *Server) handleMapData(w http.ResponseWriter, r *http.Request) {
 		const samplesPerSource = 200
 		for i := range srcs {
 			src := &srcs[i]
-			if src.SyncStatus != "completed" {
+			if src.SyncStatus != "completed" || models.IsLiveType(src.Type) {
 				continue
 			}
 			collection := sources.CollectionFor(src)

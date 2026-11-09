@@ -959,3 +959,34 @@ func TestGitHubIssueTypesEndpoint(t *testing.T) {
 		t.Errorf("personal account: ok=%v available=%v types=%v, want ok and unavailable", ok, available, types)
 	}
 }
+
+// Pipeline-run and pull-request sources are read live: the Sources page
+// marks them Live without sync controls, /status skips their vector count,
+// and the form has neither Save & sync nor Preview, and asks for Runs.
+func TestLiveSourcesHaveNoSyncControls(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "ci", Name: "CI builds", Type: models.SourcePipelineRun,
+		Config: map[string]string{"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example/org", "AdoProject": "proj", "DefinitionId": "12"}})
+
+	body := bodyString(t, h.get("/sources"))
+	card := body[strings.Index(body, `data-source-id="ci"`):]
+	card = card[:strings.Index(card, "Delete</button>")]
+	if !strings.Contains(card, ">Live</span>") || strings.Contains(card, "syncOne(") ||
+		strings.Contains(card, "No data embedded") || strings.Contains(card, "Never synced") || !strings.Contains(card, "/sources/ci/edit") {
+		t.Errorf("live source card:\n%s", card)
+	}
+
+	var status []struct {
+		ID   string `json:"id"`
+		Live bool   `json:"live"`
+	}
+	if err := json.Unmarshal([]byte(bodyString(t, h.get("/status"))), &status); err != nil || len(status) != 1 || !status[0].Live {
+		t.Errorf("status = %+v, %v", status, err)
+	}
+
+	form := bodyString(t, h.get("/sources/ci/edit"))
+	if strings.Contains(form, `value="save_sync"`) || strings.Contains(form, `id="preview-btn"`) ||
+		!strings.Contains(form, `name="Runs"`) || strings.Contains(form, `name="Days"`) {
+		t.Error("live source form still offers sync/preview or lacks Runs")
+	}
+}

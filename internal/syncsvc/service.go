@@ -143,6 +143,10 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		log.Printf("source %s is disabled — skipping sync", sourceID)
 		return
 	}
+	if models.IsLiveType(src.Type) {
+		log.Printf("source %s is read live by its tool — nothing to sync", sourceID)
+		return
+	}
 
 	// Progress before the status: the "syncing" status change is what the
 	// Sources page sees first, and it should come with "fetching", not with
@@ -338,14 +342,21 @@ const maxConcurrentSyncs = 4
 const PhaseQueued = "queued"
 
 // SyncSelected syncs the given source IDs in parallel, capped at maxConcurrentSyncs.
+// Sources of the batch that read the same repository archive (a Source Code
+// and a Test Code source of one repository, branch and credential) share a
+// single download, deleted when the batch ends.
 func (s *Service) SyncSelected(ctx context.Context, ids []string) {
 	// Every source waiting for a slot shows as queued until its sync starts.
-	// One already running keeps its progress (its new request is a no-op).
+	// One already running keeps its progress (its new request is a no-op);
+	// one that doesn't sync (a live source, a disabled one) drops the mark.
 	for _, id := range ids {
 		if !s.IsSyncing(id) {
 			s.progress.Set(id, models.SyncProgress{Phase: PhaseQueued})
 		}
 	}
+	archives := sources.NewArchiveCache()
+	defer archives.Close()
+	ctx = sources.WithArchiveCache(ctx, archives)
 	sem := make(chan struct{}, maxConcurrentSyncs)
 	var wg sync.WaitGroup
 	for _, id := range ids {

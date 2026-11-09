@@ -142,14 +142,14 @@ func TestManageCreateSavesGitHubSource(t *testing.T) {
 		"mode": "create", "name": "CI runs", "type": models.SourcePipelineRun,
 		"config": map[string]any{
 			"Provider": "github", "GitHubUrl": "https://ghe.example.com", "GitHubOwner": "acme",
-			"GitHubRepo": "app", "Token": "gh-pat", "Workflow": "ci.yml", "Days": float64(14),
+			"GitHubRepo": "app", "Token": "gh-pat", "Workflow": "ci.yml", "Runs": float64(14),
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	saved := m.byID[out["source"].(sourceView).ID]
-	if saved.Config["Provider"] != "github" || saved.Config["Workflow"] != "ci.yml" || saved.Config["Days"] != "14" {
+	if saved.Config["Provider"] != "github" || saved.Config["Workflow"] != "ci.yml" || saved.Config["Runs"] != "14" {
 		t.Errorf("config = %v", saved.Config)
 	}
 }

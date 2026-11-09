@@ -123,3 +123,10 @@ func anyInt64(v any) int64 {
 	}
 	return -1
 }
+
+// writeField appends "label: value" when value isn't empty.
+func writeField(sb *strings.Builder, label, value string) {
+	if value != "" {
+		fmt.Fprintf(sb, "%s: %s\n", label, value)
+	}
+}

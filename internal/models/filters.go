@@ -22,29 +22,8 @@ const (
 	FilterIterationPath = "iteration_path" // hierarchical ("\")
 	FilterAssignedTo    = "assigned_to"    // display name and unique name
 	FilterTag           = "tags"           // work item tags
-	FilterResult        = "result"         // pipeline run result
-	FilterBranch        = "branch"         // pipeline run source branch; pull request target branch
-	FilterReviewer      = "reviewer"       // pull request reviewer name and unique name / login
-	FilterBuildID       = "build_id"       // pipeline run id: the run and its step/test documents
-	FilterID            = "id"             // work item id, issue number, pull request id/number
+	FilterID            = "id"             // work item id, issue number
 	FilterCommit        = "commit"         // commit SHA; any prefix of 7+ characters matches
-
-	// Pipeline runs, their steps and tests, deployments and test history.
-	FilterType           = "type"            // document kind: run, step, test, deployment, test_history
-	FilterPipeline       = "pipeline"        // pipeline (definition / workflow) name and id
-	FilterStatus         = "status"          // run status at sync: completed, inprogress, notstarted
-	FilterReason         = "reason"          // what started the run: manual, ci, pullrequest, schedule, …
-	FilterRequestedFor   = "requested_for"   // who the run was requested for / triggered by
-	FilterBuildNumber    = "build_number"    // run number, e.g. 20261105.3
-	FilterRerun          = "rerun"           // "true" when the run had more than one attempt
-	FilterFailedStage    = "failed_stage"    // names of stages that failed in any attempt
-	FilterFailedJob      = "failed_job"      // names of jobs that failed in any attempt
-	FilterFailedStep     = "failed_step"     // names of steps (tasks) that failed in any attempt
-	FilterFailedTest     = "failed_test"     // names of tests that failed or were flaky
-	FilterContainsCommit = "contains_commit" // SHAs (and 7+ prefixes) of the commits a run built since the previous run
-	FilterEnvironment    = "environment"     // deployment environment
-	FilterFlaky          = "flaky"           // "true" for a test that passed only on retry
-	FilterAttempt        = "attempt"         // pipeline attempt a failed step or test belongs to
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
@@ -95,7 +74,7 @@ func FilterValues(field, raw string) []string {
 	if v == "" {
 		return nil
 	}
-	if field == FilterCommit || field == FilterContainsCommit {
+	if field == FilterCommit {
 		// Every prefix from git's short form up, so a short SHA from a log,
 		// a link or a build summary matches with plain equality.
 		out := []string{v}

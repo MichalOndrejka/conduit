@@ -12,11 +12,11 @@
 </div>
 {{end}}
 
-<!-- Pull Requests window, shared by both tabs. -->
-{{define "pr-days"}}
+<!-- Pipeline Runs listing size, shared by both tabs. -->
+{{define "pipeline-runs"}}
 <div>
-  <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> {{template "tip" "Pull requests created in the last N days, of any status. Each one embeds its title, description, reviewers and votes, linked work items, commit messages, changed-file list and every comment thread. Diffs aren't embedded; search_pull_request reads them live."}}</label>
-  <input type="number" name="Days" min="1" required value="{{or (.Source.GetConfig `Days`) `90`}}" placeholder="90"
+  <label class="block text-sm font-medium text-slate-300 mb-1">Runs {{template "tip" "How many of the latest runs search_pipeline_run lists when the agent doesn't ask for a number. Runs are read live from the provider, never synced; completed runs are cached in memory."}}</label>
+  <input type="number" name="Runs" min="1" max="100" value="{{or (.Source.GetConfig `Runs`) `5`}}" placeholder="5"
          class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
 </div>
 {{end}}
@@ -211,7 +211,6 @@
           <input name="AdoRepo" required value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
-        {{template "pr-days" .}}
       </div>
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -220,11 +219,7 @@
           <input type="number" name="DefinitionId" min="1" required value="{{$s.GetConfig `DefinitionId`}}" placeholder="42"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> {{template "tip" "Completed runs of the last N days. Every run gets a summary; failed and partially succeeded runs also embed the complete log of each failed step and every failed test's error and stack trace."}}</label>
-          <input type="number" name="Days" min="1" required value="{{or ($s.GetConfig `Days`) `30`}}" placeholder="30"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
+        {{template "pipeline-runs" .}}
       </div>
       {{else}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -321,9 +316,6 @@
         </div>
       </div>
       {{else if eq $s.Type "pull-request"}}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {{template "pr-days" .}}
-      </div>
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -331,11 +323,7 @@
           <input name="Workflow" required value="{{$s.GetConfig `Workflow`}}" placeholder="ci.yml"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Days <span class="text-red-400">*</span> {{template "tip" "Completed runs of the last N days. Every run gets a summary; failed runs also embed the complete log of each failed job and its error annotations."}}</label>
-          <input type="number" name="Days" min="1" required value="{{or ($s.GetConfig `Days`) `30`}}" placeholder="30"
-                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-        </div>
+        {{template "pipeline-runs" .}}
       </div>
       {{else}}
       {{template "gh-files" .}}
@@ -348,10 +336,12 @@
             class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">
       {{if .IsNew}}Create source{{else}}Save changes{{end}}
     </button>
+    {{if not .Live}}
     <button type="submit" name="action" value="save_sync"
             class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Save &amp; sync</button>
     <button type="button" id="preview-btn" onclick="previewSource()"
             class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Preview data</button>
+    {{end}}
     <a href="/sources" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
   </div>
 

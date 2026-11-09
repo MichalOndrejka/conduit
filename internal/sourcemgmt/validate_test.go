@@ -76,30 +76,6 @@ func TestValidateCodeRepoAcceptsAdoItemsURL(t *testing.T) {
 	}
 }
 
-func TestValidatePipelineRun(t *testing.T) {
-	valid := func() map[string]string {
-		return map[string]string{
-			"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example", "AdoProject": "proj",
-			"Url": "https://ado.example/proj", "DefinitionId": "12", "Days": "30",
-		}
-	}
-	if msg := Validate(models.SourcePipelineRun, valid()); msg != "" {
-		t.Errorf("valid pipeline-run config rejected: %q", msg)
-	}
-	for key, bad := range map[string]string{"DefinitionId": "abc", "Days": "0", "Platform": ""} {
-		cfg := valid()
-		cfg[key] = bad
-		if msg := Validate(models.SourcePipelineRun, cfg); msg == "" {
-			t.Errorf("%s=%q: expected a validation error", key, bad)
-		}
-	}
-	cfg := valid()
-	delete(cfg, "Days")
-	if msg := Validate(models.SourcePipelineRun, cfg); msg == "" {
-		t.Error("missing Days: expected a validation error")
-	}
-}
-
 func TestValidateAuthType(t *testing.T) {
 	cfg := map[string]string{"Provider": "api", "Url": "https://api.example.com/items"}
 	for _, ok := range []string{"", "none", "bearer", "Basic", "apikey"} {
@@ -114,29 +90,62 @@ func TestValidateAuthType(t *testing.T) {
 	}
 }
 
+func TestValidatePipelineRun(t *testing.T) {
+	valid := func() map[string]string {
+		return map[string]string{
+			"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example", "AdoProject": "proj",
+			"Url": "https://ado.example/proj", "DefinitionId": "12",
+		}
+	}
+	if msg := Validate(models.SourcePipelineRun, valid()); msg != "" {
+		t.Errorf("valid pipeline-run config (Runs defaulted) rejected: %q", msg)
+	}
+	cfg := valid()
+	cfg["Runs"] = "20"
+	if msg := Validate(models.SourcePipelineRun, cfg); msg != "" {
+		t.Errorf("Runs=20 rejected: %q", msg)
+	}
+	for key, bad := range map[string]string{"DefinitionId": "abc", "Runs": "0", "Platform": ""} {
+		cfg := valid()
+		cfg[key] = bad
+		if msg := Validate(models.SourcePipelineRun, cfg); msg == "" {
+			t.Errorf("%s=%q: expected a validation error", key, bad)
+		}
+	}
+	cfg = valid()
+	cfg["Runs"] = "101"
+	if msg := Validate(models.SourcePipelineRun, cfg); msg == "" {
+		t.Error("Runs over the cap: expected a validation error")
+	}
+	gh := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Workflow": "ci.yml"}
+	if msg := Validate(models.SourcePipelineRun, gh); msg != "" {
+		t.Errorf("valid GitHub pipeline-run config rejected: %q", msg)
+	}
+	delete(gh, "Workflow")
+	if msg := Validate(models.SourcePipelineRun, gh); msg == "" {
+		t.Error("GitHub without Workflow: expected a validation error")
+	}
+}
+
 func TestValidatePullRequest(t *testing.T) {
 	valid := func() map[string]string {
 		return map[string]string{
 			"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example", "AdoProject": "proj", "AdoRepo": "web",
-			"Url": "https://ado.example/proj/_apis/git/repositories/web/pullrequests?api-version=7.1", "Days": "90",
+			"Url": "https://ado.example/proj/_apis/git/repositories/web/pullrequests?api-version=7.1",
 		}
 	}
 	if msg := Validate(models.SourcePullRequest, valid()); msg != "" {
 		t.Errorf("valid ADO pull-request config rejected: %q", msg)
 	}
-	for key, bad := range map[string]string{"AdoRepo": " ", "Days": "0", "Platform": ""} {
+	for key, bad := range map[string]string{"AdoRepo": " ", "Platform": ""} {
 		cfg := valid()
 		cfg[key] = bad
 		if msg := Validate(models.SourcePullRequest, cfg); msg == "" {
 			t.Errorf("%s=%q: expected a validation error", key, bad)
 		}
 	}
-	gh := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Days": "30"}
+	gh := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app"}
 	if msg := Validate(models.SourcePullRequest, gh); msg != "" {
 		t.Errorf("valid GitHub pull-request config rejected: %q", msg)
-	}
-	delete(gh, "Days")
-	if msg := Validate(models.SourcePullRequest, gh); msg == "" {
-		t.Error("GitHub without Days: expected a validation error")
 	}
 }

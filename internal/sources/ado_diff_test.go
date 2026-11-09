@@ -1,6 +1,8 @@
 package sources
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -65,7 +67,7 @@ func TestAdoRepoAPIBase(t *testing.T) {
 // paging like the real endpoint) and /blobs/{sha}.
 func adoStub(t *testing.T, changesByCommit map[string]adoChangesResponse, blobs map[string]string) *httptest.Server {
 	t.Helper()
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.Contains(r.URL.Path, "/changes"):
 			// path: /repo/commits/{id}/changes
@@ -273,7 +275,7 @@ func TestGetRawRetriesTransientFailures(t *testing.T) {
 	retryBaseDelay = time.Millisecond
 
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		switch calls {
 		case 1:
@@ -298,7 +300,7 @@ func TestGetRawRetriesTransientFailures(t *testing.T) {
 
 func TestGetRawDoesNotRetryClientErrors(t *testing.T) {
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		http.Error(w, "nope", http.StatusNotFound)
 	}))
@@ -318,7 +320,7 @@ func TestGetRawGivesUpAfterMaxAttempts(t *testing.T) {
 	retryBaseDelay = time.Millisecond
 
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		http.Error(w, "down", http.StatusBadGateway)
 	}))
@@ -338,7 +340,7 @@ func TestFetchDocumentsWithFetchDiffsEnriches(t *testing.T) {
 		{ChangeType: "edit", Item: adoChangeItem{Path: "main.go", ObjectID: "newsha", OriginalObjectID: "oldsha"}},
 	}}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
@@ -392,7 +394,7 @@ func TestFetchDocumentsWithFetchDiffsEnriches(t *testing.T) {
 // would otherwise qualify — must never get diff enrichment. Diff fetching is
 // driven solely by Type == commit-history, not by config.
 func TestFetchDocumentsNonCommitsTypeNeverGetsDiffs(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -427,7 +429,7 @@ func TestFetchDocumentsNonCommitsTypeNeverGetsDiffs(t *testing.T) {
 }
 
 func TestFetchDocumentsFetchDiffsRequiresAdoURL(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "1"}})
 	}))
 	defer srv.Close()
@@ -448,7 +450,7 @@ func TestFetchDocumentsFailsOnUnfetchableCommit(t *testing.T) {
 		{ChangeType: "edit", Item: adoChangeItem{Path: "main.go", ObjectID: "newsha", OriginalObjectID: "oldsha"}},
 	}}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
@@ -489,7 +491,7 @@ func TestFetchDocumentsFailsOnUnfetchableCommit(t *testing.T) {
 // full message must be fetched from the single-commit endpoint.
 func TestFetchDocumentsFetchesFullTruncatedCommitMessage(t *testing.T) {
 	full := "Fix login bug\n\n" + strings.Repeat("Long explanation of the root cause. ", 50)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
@@ -532,7 +534,7 @@ func TestFetchDocumentsFetchesFullTruncatedCommitMessage(t *testing.T) {
 // cap commit-history sources at maxPages*adoCommitsPageSize commits.
 func TestFetchDocumentsCommitHistoryPagesPastMaxPages(t *testing.T) {
 	const total = maxPages*adoCommitsPageSize + 1
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
@@ -573,7 +575,7 @@ func TestFetchDocumentsWithFetchDiffsConcurrentOrderingIsCorrect(t *testing.T) {
 		}}
 	}
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			if skip := r.URL.Query().Get("searchCriteria.$skip"); skip != "" && skip != "0" {
@@ -644,7 +646,7 @@ func TestFetchDocumentsPaginatesPastAdoCommitsPageSize(t *testing.T) {
 	const total = adoCommitsPageSize + 30 // spans two pages
 	var gotSkips []string
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
@@ -705,7 +707,7 @@ func TestFetchDocumentsPaginatesPastAdoCommitsPageSize(t *testing.T) {
 // up to maxPages, producing many near-identical giant-JSON documents.
 func TestFetchDocumentsStopsPagingOnNullValueEnvelope(t *testing.T) {
 	pages := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			pages++
@@ -746,7 +748,7 @@ func TestFetchDocumentsStopsPagingOnNullValueEnvelope(t *testing.T) {
 // configured Top still caps the total fetched even once it spans more than
 // one paginated request.
 func TestFetchDocumentsCommitHistoryRespectsTopAcrossPages(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/_apis/git/repositories/repo/commits":
 			skip, _ := strconv.Atoi(r.URL.Query().Get("searchCriteria.$skip"))
@@ -799,7 +801,7 @@ func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			var gotBranch string
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 				switch {
 				case r.URL.Path == "/_apis/git/repositories/repo":
 					if c.branchCfg != "" {
@@ -864,16 +866,12 @@ func TestWithAdoItemsBranch(t *testing.T) {
 // links to that branch.
 func TestFetchDocumentsFilesUseBranch(t *testing.T) {
 	var gotVersion, gotType string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(blobsZipShim(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/items"):
 			gotVersion = r.URL.Query().Get("versionDescriptor.version")
 			gotType = r.URL.Query().Get("versionDescriptor.versionType")
-			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{
-				{"objectId": "b1", "gitObjectType": "blob", "path": "/main.go"},
-			}})
-		case strings.Contains(r.URL.Path, "/blobs/"):
-			fmt.Fprint(w, "package main")
+			_, _ = w.Write(repoZip(t, map[string]string{"main.go": "package main"}))
 		default:
 			http.Error(w, "unexpected path "+r.URL.Path, http.StatusNotFound)
 		}
@@ -896,3 +894,35 @@ func TestFetchDocumentsFilesUseBranch(t *testing.T) {
 		t.Errorf("docs = %+v, want one doc linking to GBdev", docs)
 	}
 }
+
+// blobsZipShim serves Azure DevOps' Get Blobs Zip (POST …/blobs with a JSON
+// array of ids) from h's per-blob GET …/blobs/{sha} responses, so a stub
+// written for single blobs serves batched downloads too.
+func blobsZipShim(h http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/blobs") {
+			h(w, r)
+			return
+		}
+		var shas []string
+		if err := json.NewDecoder(r.Body).Decode(&shas); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		for _, sha := range shas {
+			rec := httptest.NewRecorder()
+			h(rec, httptest.NewRequest(http.MethodGet, r.URL.Path+"/"+sha+"?api-version=7.1&$format=text", nil))
+			if rec.Code != http.StatusOK {
+				http.Error(w, "blob "+sha+": "+rec.Body.String(), rec.Code)
+				return
+			}
+			fw, _ := zw.Create(sha)
+			_, _ = fw.Write(rec.Body.Bytes())
+		}
+		_ = zw.Close()
+		_, _ = w.Write(buf.Bytes())
+	})
+}
+

@@ -98,28 +98,19 @@ func TestPullRequest_RequestErrors(t *testing.T) {
 	}
 }
 
-func TestPullRequestSchema_HasIndexedAndLiveModes(t *testing.T) {
+func TestPullRequestSchema_HasOnlyLiveModes(t *testing.T) {
 	var modes []string
 	for _, v := range pullRequestRequestSchema()["oneOf"].([]any) {
 		m := v.(map[string]any)["properties"].(map[string]any)["mode"].(map[string]any)["const"].(string)
 		modes = append(modes, m)
 	}
-	got := strings.Join(modes, ",")
-	if got != "semantic_search,retrieve_chunk,pattern_search,list,get,files,diff,threads,iterations,commits" {
+	if got := strings.Join(modes, ","); got != "list,get,files,diff,threads,iterations,commits" {
 		t.Fatalf("modes %s", got)
 	}
-}
-
-func TestSearchIndexedPullRequests_BadRequest(t *testing.T) {
-	// A malformed search is refused before the vector store is touched.
-	res, err := searchIndexedPullRequests(context.Background(), nil, map[string]any{"request": map[string]any{
-		"mode": "semantic_search", "page": float64(1)}})
-	if err != nil || !res.IsError {
-		t.Fatalf("got %+v, %v; want a tool error for a missing query", res, err)
-	}
-	res, _ = searchIndexedPullRequests(context.Background(), nil, map[string]any{"request": map[string]any{
-		"mode": "semantic_search", "query": "retry", "page": float64(1), "filters": map[string]any{"result": "failed"}}})
-	if !res.IsError {
-		t.Fatal("want a tool error for a filter pull requests don't have")
+	// The retired indexed modes are refused rather than silently served.
+	_, err := handlePullRequestRequest(context.Background(), map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "retry", "page": float64(1)}}, fakeSources{}, fakeCreds{})
+	if err == nil {
+		t.Fatal("semantic_search: want an error")
 	}
 }

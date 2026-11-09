@@ -1,7 +1,7 @@
-// GitHub source: repository files, commit history with diffs, issues with
-// their comments, pull requests with their discussion, and GitHub Actions
-// workflow runs, read from the GitHub REST
-// API of github.com or a GitHub Enterprise Server.
+// GitHub source: repository files, commit history with diffs and issues
+// with their comments, read from the GitHub REST API of github.com or a
+// GitHub Enterprise Server. Pull requests and GitHub Actions workflow runs
+// are read live by their tools (pullrequests.go, pipelines.go).
 //
 //	GitHubUrl    server URL: https://github.com (default) or a GitHub
 //	             Enterprise Server such as https://github.example.com
@@ -21,8 +21,7 @@
 //	             Feature, …); an issue of any of them is fetched (default:
 //	             every issue, typed or not)
 //	Workflow     pipeline runs: workflow file name (ci.yml) or numeric ID
-//	Days         pipeline runs: completed runs of the last N days; pull
-//	             requests: those created in the last N days
+//	Runs         pipeline runs: how many runs a listing returns by default
 //	VerifySSL    "false" to skip TLS verification (self-hosted servers)
 //
 // GitHub's own limits apply and are noted on the affected documents rather
@@ -116,10 +115,8 @@ func GitHubBases(server string) (apiBase, webBase string, err error) {
 
 func (g *GitHubSource) FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
 	switch {
-	case g.src.Type == models.SourcePipelineRun:
-		return g.fetchWorkflowRuns(ctx, progress)
-	case g.src.Type == models.SourcePullRequest:
-		return g.fetchPullRequests(ctx, progress)
+	case models.IsLiveType(g.src.Type):
+		return nil, errLiveSource(g.src)
 	case isWorkItemQuery(g.src):
 		return g.fetchIssues(ctx, progress)
 	case g.src.Type == models.SourceGitCommits:

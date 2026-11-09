@@ -240,7 +240,7 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 	want := []string{
 		"search_workitem", "search_requirement", "search_source_code",
 		"search_test_code", "search_testcase", "search_documentation",
-		"search_commit", "search_pipeline_run", "experience_retrieve", "experience_remember",
+		"search_commit", "experience_retrieve", "experience_remember",
 	}
 	for _, name := range want {
 		if !got[name] {
@@ -584,18 +584,6 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 			t.Errorf("%s must not offer a branch filter", tool)
 		}
 	}
-	pipeline := filterProps("search_pipeline_run")
-	for _, f := range []string{"type", "pipeline", "result", "status", "reason", "requested_for", "branch", "build_id", "build_number",
-		"commit", "contains_commit", "rerun", "failed_stage", "failed_job", "failed_step", "failed_test", "flaky", "environment", "since", "until"} {
-		if pipeline[f] == nil {
-			t.Errorf("search_pipeline_run lacks the %q filter", f)
-		}
-	}
-	for _, f := range []string{"project", "state", "work_item_type", "author"} {
-		if pipeline[f] != nil {
-			t.Errorf("search_pipeline_run must not offer %q", f)
-		}
-	}
 	// Every item another result can name by id is reachable by that id.
 	for tool, field := range map[string]string{
 		"search_workitem": "id", "search_requirement": "id", "search_testcase": "id",
@@ -604,13 +592,6 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 		if filterProps(tool)[field] == nil {
 			t.Errorf("%s lacks the %q lookup filter", tool, field)
 		}
-	}
-	hasPRID := false
-	for _, f := range collectionFilters[models.CollectionPullRequests] {
-		hasPRID = hasPRID || f.name == models.FilterID
-	}
-	if !hasPRID {
-		t.Error("indexed pull requests lack the id lookup filter")
 	}
 	workItem := filterProps("search_workitem")
 	if _, ok := workItem["repository"]; ok {

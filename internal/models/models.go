@@ -16,8 +16,6 @@ const (
 	CollectionTestCases     = "conduit_testcases"
 	CollectionDocumentation = "conduit_documentation"
 	CollectionCommits       = "conduit_commits"
-	CollectionPipelineRuns  = "conduit_pipeline_runs"
-	CollectionPullRequests  = "conduit_pull_requests"
 	CollectionExperience    = "conduit_experience"
 )
 
@@ -25,9 +23,12 @@ const (
 var AllCollections = []string{
 	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
 	CollectionTestCode, CollectionTestCases,
-	CollectionDocumentation, CollectionCommits, CollectionPipelineRuns,
-	CollectionPullRequests, CollectionExperience,
+	CollectionDocumentation, CollectionCommits, CollectionExperience,
 }
+
+// RetiredCollections held data that is now read live (pipeline runs, pull
+// requests); startup drops them if they still exist.
+var RetiredCollections = []string{"conduit_pipeline_runs", "conduit_pull_requests"}
 
 // ── Source types ─────────────────────────────────────────────────────────────
 
@@ -42,6 +43,13 @@ const (
 	SourcePipelineRun   = "pipeline-run"
 	SourcePullRequest   = "pull-request"
 )
+
+// IsLiveType reports whether sources of type t are read live by their tool
+// (search_pipeline_run, search_pull_request) instead of being synced into
+// Qdrant: such a source only holds the scope and credentials.
+func IsLiveType(t string) bool {
+	return t == SourcePipelineRun || t == SourcePullRequest
+}
 
 // ── Core domain models ────────────────────────────────────────────────────────
 

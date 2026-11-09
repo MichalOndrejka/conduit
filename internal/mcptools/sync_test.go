@@ -161,3 +161,32 @@ func TestSyncTriggerRejectsBadRequests(t *testing.T) {
 		}
 	}
 }
+
+// Pipeline-run and pull-request sources are read live: status says so and
+// a trigger doesn't start a sync for them.
+func TestSyncLiveSourcesAreNotSynced(t *testing.T) {
+	runner := newFakeRunner()
+	srcs := fakeSources{
+		{ID: "ci", Name: "CI", Type: models.SourcePipelineRun},
+		{ID: "prs", Name: "PRs", Type: models.SourcePullRequest},
+	}
+	payload, err := handleSyncRequest(map[string]any{"request": map[string]any{"mode": "trigger", "source_ids": []any{"ci", "prs"}}}, srcs, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcomes := payload["outcomes"].(map[string]string)
+	if outcomes["ci"] != syncLive || outcomes["prs"] != syncLive {
+		t.Errorf("outcomes = %v", outcomes)
+	}
+	select {
+	case ids := <-runner.started:
+		t.Errorf("started a sync of %v", ids)
+	default:
+	}
+	payload, _ = handleSyncRequest(map[string]any{"request": map[string]any{"mode": "status"}}, srcs, runner)
+	for _, st := range payload["sources"].([]syncSourceStatus) {
+		if st.SyncStatus != "live" {
+			t.Errorf("%s status = %q, want live", st.ID, st.SyncStatus)
+		}
+	}
+}

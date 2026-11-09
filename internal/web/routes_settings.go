@@ -208,11 +208,12 @@ func (s *Server) handleDeleteAllSources(w http.ResponseWriter, r *http.Request) 
 	}
 	for i := range srcs {
 		src := &srcs[i]
-		collection := sources.CollectionFor(src)
-		filter := &rag.Filter{Must: []rag.FieldCondition{{
-			Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-		}}}
-		_ = s.vectors.DeleteByFilter(r.Context(), collection, filter)
+		if collection := sources.CollectionFor(src); collection != "" {
+			filter := &rag.Filter{Must: []rag.FieldCondition{{
+				Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
+			}}}
+			_ = s.vectors.DeleteByFilter(r.Context(), collection, filter)
+		}
 		_ = s.sources.Delete(src.ID)
 	}
 	http.Redirect(w, r, "/settings?notice=sources_deleted", http.StatusSeeOther)

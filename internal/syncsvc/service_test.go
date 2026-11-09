@@ -562,80 +562,34 @@ func TestProgressAndControlAccessors(t *testing.T) {
 	}
 }
 
-// TestSyncPipelineRunSnapshot syncs a pipeline-run source into its own
-// collection, then asserts a later sync whose log fetch fails is recorded as
-// failed and leaves the previous snapshot intact.
-func TestSyncPipelineRunSnapshot(t *testing.T) {
-	var logsGone atomic.Bool
-	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch strings.TrimPrefix(r.URL.Path, "/proj/_apis/") {
-		case "build/builds/5/changes":
-			_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}})
-		case "build/builds":
-			if r.URL.Query().Get("statusFilter") != "completed" {
-				_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}}) // nothing running
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{map[string]any{
-				"id": 5, "buildNumber": "5", "result": "failed", "sourceBranch": "refs/heads/main",
-				"definition": map[string]any{"id": 12, "name": "CI"},
-			}}})
-		case "build/builds/5/timeline":
-			_ = json.NewEncoder(w).Encode(map[string]any{"records": []any{map[string]any{
-				"id": "t1", "type": "Task", "name": "Compile", "result": "failed", "log": map[string]any{"id": 1},
-			}}})
-		case "build/builds/5/logs/1":
-			if logsGone.Load() {
-				http.NotFound(w, r)
-				return
-			}
-			_, _ = w.Write([]byte("2026-10-14T08:00:00Z error CS1002\n"))
-		case "test/runs":
-			_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}})
-		default:
-			http.NotFound(w, r)
-		}
+// TestSyncLiveSourcesNeverFetch: pipeline-run and pull-request sources are
+// read live by their tools, so a sync neither calls the provider nor
+// touches the source's status.
+func TestSyncLiveSourcesNeverFetch(t *testing.T) {
+	var fetchCount int32
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&fetchCount, 1)
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []any{}})
 	}))
 	defer apiSrv.Close()
 
-	svc, st, qd, src := setupPipeline(t, apiSrv.URL)
-	src.Type = models.SourcePipelineRun
-	src.Config = map[string]string{
-		"Provider": "api", "Platform": "ado", "AdoOrg": apiSrv.URL, "AdoProject": "proj",
-		"DefinitionId": "12", "Days": "30",
-	}
-	if err := st.Save(*src); err != nil {
-		t.Fatal(err)
-	}
-
-	svc.Sync(context.Background(), src.ID)
-	saved, _ := st.Get(src.ID)
-	if saved.SyncStatus != "completed" {
-		t.Fatalf("status = %q (error: %v)", saved.SyncStatus, saved.SyncError)
-	}
-	if got := qd.count(models.CollectionPipelineRuns); got != 2 {
-		t.Fatalf("pipeline points = %d, want 2 (run + failed step)", got)
-	}
-	qd.mu.Lock()
-	var stepText string
-	for _, p := range qd.collections[models.CollectionPipelineRuns] {
-		if p["source_doc_id"] == "test-src_run_5_step_t1" {
-			stepText, _ = p["text"].(string)
+	for _, typ := range []string{models.SourcePipelineRun, models.SourcePullRequest} {
+		svc, st, _, src := setupPipeline(t, apiSrv.URL)
+		src.Type = typ
+		src.Config = map[string]string{
+			"Provider": "api", "Platform": "ado", "AdoOrg": apiSrv.URL, "AdoProject": "proj",
+			"AdoRepo": "web", "DefinitionId": "12",
 		}
-	}
-	qd.mu.Unlock()
-	if stepText != "[Run #5 > Compile | chunk 1/1]\nerror CS1002" {
-		t.Errorf("step chunk text = %q", stepText)
-	}
-
-	logsGone.Store(true)
-	svc.Sync(context.Background(), src.ID)
-	saved, _ = st.Get(src.ID)
-	if saved.SyncStatus != "failed" || saved.SyncErrorPhase == nil || *saved.SyncErrorPhase != "fetch" {
-		t.Fatalf("status = %q phase = %v, want failed at fetch", saved.SyncStatus, saved.SyncErrorPhase)
-	}
-	if got := qd.count(models.CollectionPipelineRuns); got != 2 {
-		t.Errorf("after failed resync points = %d, want the previous 2 kept", got)
+		if err := st.Save(*src); err != nil {
+			t.Fatal(err)
+		}
+		svc.Sync(context.Background(), src.ID)
+		if got := atomic.LoadInt32(&fetchCount); got != 0 {
+			t.Errorf("%s: provider called %d times, want 0", typ, got)
+		}
+		if saved, _ := st.Get(src.ID); saved.SyncStatus != "idle" || saved.LastSyncedAt != nil {
+			t.Errorf("%s: status = %q, last synced %v; want idle, never", typ, saved.SyncStatus, saved.LastSyncedAt)
+		}
 	}
 }
 

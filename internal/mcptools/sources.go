@@ -190,7 +190,7 @@ func handleManageRequest(ctx context.Context, args map[string]any, mgr SourceMan
 		if err := mgr.Save(ctx, "", &src); err != nil {
 			return nil, fmt.Errorf("saving source: %w", err)
 		}
-		return map[string]any{"source": viewOf(src), "next": "Call sync_source trigger with this id to index it."}, nil
+		return map[string]any{"source": viewOf(src), "next": nextStep(src, "index")}, nil
 
 	case "update":
 		src, err := lookup(mgr, req)
@@ -207,7 +207,7 @@ func handleManageRequest(ctx context.Context, args map[string]any, mgr SourceMan
 		if err := mgr.Save(ctx, oldCollection, src); err != nil {
 			return nil, fmt.Errorf("saving source: %w", err)
 		}
-		return map[string]any{"source": viewOf(*src), "next": "Call sync_source trigger with this id to re-index it."}, nil
+		return map[string]any{"source": viewOf(*src), "next": nextStep(*src, "re-index")}, nil
 
 	case "delete":
 		src, err := lookup(mgr, req)
@@ -410,4 +410,16 @@ func copyConfig(m map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
+}
+
+// nextStep tells the agent what to do with a saved source: sync it, or for
+// a live source, just use its tool.
+func nextStep(src models.SourceDefinition, verb string) string {
+	switch src.Type {
+	case models.SourcePipelineRun:
+		return "Nothing to sync: search_pipeline_run reads this pipeline live with this source_id."
+	case models.SourcePullRequest:
+		return "Nothing to sync: search_pull_request reads this repository's pull requests live with this source_id."
+	}
+	return "Call sync_source trigger with this id to " + verb + " it."
 }

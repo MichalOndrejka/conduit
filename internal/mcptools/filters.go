@@ -27,53 +27,18 @@ var (
 	fRepository = filterField{name: models.FilterRepository, desc: "Git repository name"}
 	fPath       = filterField{name: models.FilterPath, desc: "File or folder path within the repository, e.g. src/auth — " +
 		"a folder matches everything beneath it"}
-	fExtension = filterField{name: models.FilterExtension, desc: "File extension without the dot, e.g. cs, ts, md"}
-	fAuthor    = filterField{name: models.FilterAuthor, desc: `Commit author's name or email; "me" for the token owner`, person: true}
-	fWIType    = filterField{name: models.FilterWorkItemType, desc: "Work item type, e.g. Bug, Task, User Story"}
-	fState     = filterField{name: models.FilterState, desc: "Work item state, e.g. Active, Resolved, Closed"}
-	fIteration = filterField{name: models.FilterIterationPath, desc: `Iteration path, e.g. Project\Sprint 12 — matches that iteration and every child`}
-	fAssigned  = filterField{name: models.FilterAssignedTo, desc: `Assignee's display name or unique name (email); "me" for the token owner`, person: true}
-	fTag       = filterField{name: models.FilterTag, desc: "Work item tag"}
-	fResult    = filterField{name: models.FilterResult, desc: "Pipeline run result: succeeded, partiallySucceeded, failed or canceled"}
-	fBranch    = filterField{name: models.FilterBranch, desc: "Pipeline run source branch, as a full ref (refs/heads/main, " +
-		"refs/pull/42/merge) or short name (main, pull/42/merge)"}
+	fExtension  = filterField{name: models.FilterExtension, desc: "File extension without the dot, e.g. cs, ts, md"}
+	fAuthor     = filterField{name: models.FilterAuthor, desc: `Commit author's name or email; "me" for the token owner`, person: true}
+	fWIType     = filterField{name: models.FilterWorkItemType, desc: "Work item type, e.g. Bug, Task, User Story"}
+	fState      = filterField{name: models.FilterState, desc: "Work item state, e.g. Active, Resolved, Closed"}
+	fIteration  = filterField{name: models.FilterIterationPath, desc: `Iteration path, e.g. Project\Sprint 12 — matches that iteration and every child`}
+	fAssigned   = filterField{name: models.FilterAssignedTo, desc: `Assignee's display name or unique name (email); "me" for the token owner`, person: true}
+	fTag        = filterField{name: models.FilterTag, desc: "Work item tag"}
 	fWorkItemID = filterField{name: models.FilterID, desc: "Work item ID (Azure DevOps) or issue number (GitHub), e.g. 1234 " +
 		"(AB#1234 and #1234 work too): opens the item another result refers to — a Links entry, a commit message, " +
 		"a pull request's linked work items"}
-	fPRID = filterField{name: models.FilterID, desc: "Pull request ID (Azure DevOps) or number (GitHub), e.g. 45 " +
-		"(!45 and #45 work too)"}
 	fCommit = filterField{name: models.FilterCommit, desc: "Commit SHA, full or abbreviated (7 or more characters): " +
 		"opens the commit another result refers to"}
-	fRunCommit = filterField{name: models.FilterCommit, desc: "SHA of the commit the run built, full or abbreviated " +
-		"(7 or more characters)"}
-	pipelineFilters = append([]filterField{
-		{name: models.FilterType, desc: "Document kind: run (one per pipeline run), step (a failed step or job with its full log), " +
-			"test (a failed or flaky test), deployment, test_history (one per test that failed or was flaky in the window)"},
-		{name: models.FilterPipeline, desc: "Pipeline (Azure DevOps definition) or workflow name or id"},
-		fResult,
-		{name: models.FilterStatus, desc: "Run status at the last sync: completed, inProgress, notStarted (Azure DevOps), " +
-			"in_progress, queued (GitHub)"},
-		{name: models.FilterReason, desc: "What started the run: manual, ci, pullrequest (pr), schedule, or the provider's own " +
-			"value (individualCI, push, workflow_dispatch, …)"},
-		{name: models.FilterRequestedFor, desc: `Who the run was requested for / triggered by: name, email or login; "me" for the token owner`, person: true},
-		fBranch,
-		{name: models.FilterBuildNumber, desc: "Run number, e.g. 20261105.3 (Azure DevOps) or 42 (GitHub)"},
-		{name: models.FilterRerun, desc: `"true" for runs with more than one attempt (rerun failed jobs / stages)`},
-		{name: models.FilterFailedStage, desc: "Name of a stage that failed in any attempt (Azure DevOps)"},
-		{name: models.FilterFailedJob, desc: "Name of a job that failed in any attempt"},
-		{name: models.FilterFailedStep, desc: "Name of a step (task) that failed in any attempt"},
-		{name: models.FilterFailedTest, desc: "Full name of a test that failed or passed only on retry"},
-		{name: models.FilterFlaky, desc: `test_history documents: "true" for a test that passed only on retry at least once`},
-		{name: models.FilterAttempt, desc: "Step and test documents: the pipeline attempt (1, 2, …) the failed step or test belongs to"},
-		{name: models.FilterContainsCommit, desc: "SHA (7+ characters) of a commit the run built since the previous run: " +
-			"finds the first run that contained a change"},
-		{name: models.FilterEnvironment, desc: "Deployment environment, e.g. production"},
-		{name: models.FilterTag, desc: "Run tag (Azure DevOps)"},
-		fRepository,
-	}, dateFields("finish time (queue time while still running)")...)
-	fBuildID = filterField{name: models.FilterBuildID, desc: "Pipeline run id (Azure DevOps buildId, e.g. from a " +
-		"_build/results?buildId=1234 link, or GitHub Actions run id): returns that run's summary and every failed-step " +
-		"log and test document of it"}
 )
 
 func dateFields(what string) []filterField {
@@ -103,13 +68,6 @@ var collectionFilters = map[string][]filterField{
 	models.CollectionCommits: append([]filterField{fProject, fRepository, fCommit, fAuthor,
 		{name: models.FilterPath, desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}},
 		dateFields("author date")...),
-	models.CollectionPipelineRuns: append(append([]filterField{}, pipelineFilters...), fBuildID, fRunCommit),
-	models.CollectionPullRequests: append([]filterField{fPRID, fProject, fRepository,
-		{name: models.FilterAuthor, desc: `Pull request author's name, email (Azure DevOps) or login (GitHub); "me" for the token owner`, person: true},
-		{name: models.FilterReviewer, desc: `A reviewer's name, email (Azure DevOps) or login (GitHub); "me" for the token owner`, person: true},
-		{name: models.FilterState, desc: "Pull request status: active (open), completed (merged) or abandoned (closed unmerged)"},
-		{name: models.FilterBranch, desc: "Target branch, e.g. main"}},
-		dateFields("creation date")...),
 }
 
 // filtersSchema is the JSON Schema of the "filters" object for fields.

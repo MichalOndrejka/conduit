@@ -43,17 +43,24 @@
       <input type="checkbox" class="row-check h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600 shrink-0 cursor-pointer" value="{{.ID}}">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
-          <a href="/sources/{{.ID}}/items" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
+          <a href="/sources/{{.ID}}/{{if .Live}}edit{{else}}items{{end}}" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Type}}</span>
           {{if .Disabled}}
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-600 rounded px-1.5 py-0.5">Disabled</span>
           {{end}}
+          {{if .Live}}
+          <span class="text-[10px] uppercase tracking-wider text-emerald-300 border border-emerald-800 bg-emerald-950/50 rounded px-1.5 py-0.5">Live</span>
+          {{template "tip" "Read live from the provider by its MCP tool on every call; never synced or embedded."}}
+          {{else}}
           <span data-no-data-badge class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5{{if ne .VectorCount 0}} hidden{{end}}">No data embedded</span>
+          {{end}}
         </div>
+        {{if not .Live}}
         <div data-last-synced class="text-xs text-slate-500 mt-1">
           {{if .LastSyncedAt}}Last synced {{.LastSyncedAt.Format "2006-01-02 15:04"}} UTC{{else}}Never synced{{end}}
         </div>
-        {{$notEmbedded := and (eq .VectorCount 0) (ne .SyncStatus "syncing")}}
+        {{end}}
+        {{$notEmbedded := and (not .Live) (eq .VectorCount 0) (ne .SyncStatus "syncing")}}
         <div data-progress-wrap class="pt-1.5" style="opacity:{{if $notEmbedded}}1{{else}}0{{end}};transition:opacity .25s ease">
           <div data-progress class="text-xs {{if $notEmbedded}}text-amber-300{{else}}text-violet-400{{end}} mb-1 h-4">{{if $notEmbedded}}Not embedded yet — click Sync to index this source{{end}}</div>
           <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
@@ -68,7 +75,9 @@
         <button onclick="syncCtl('{{.ID}}','pause')" data-pause class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Pause</button>
         <button onclick="syncCtl('{{.ID}}','resume')" data-resume class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Resume</button>
         <button onclick="syncCtl('{{.ID}}','cancel')" data-cancel class="hidden text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Cancel</button>
+        {{if not .Live}}
         <button onclick="syncOne('{{.ID}}')" data-sync-btn class="text-xs rounded-lg px-3 py-1.5 {{if $notEmbedded}}bg-violet-600 text-white border border-violet-600 hover:bg-violet-500{{else}}border border-slate-700 hover:bg-slate-800{{end}}">Sync</button>
+        {{end}}
         <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
         <form method="post" action="/sources/{{.ID}}/toggle" class="contents">
           <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
@@ -148,7 +157,7 @@ function applyStatus(list) {
   for (const s of list) {
     present.add(s.id);
     const card = document.querySelector(`[data-source-id="${s.id}"]`);
-    if (!card) continue; // added elsewhere: appears on the next page load
+    if (!card || s.live) continue; // added elsewhere (appears on the next page load), or live: never syncs
     const progWrap = card.querySelector('[data-progress-wrap]');
     const prog = card.querySelector('[data-progress]');
     const bar = card.querySelector('[data-progress-bar]');

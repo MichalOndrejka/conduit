@@ -21,41 +21,12 @@ type sortField struct {
 	gap, unless string
 }
 
-func sortOn(name, desc string) sortField {
-	return sortField{name: name, key: models.SortKey(name), schema: "float", desc: desc}
-}
-
 // collectionSorts lists each collection's sort keys, the default (newest
 // first) one first. Collections without any list in storage order.
 var collectionSorts = map[string][]sortField{
 	models.CollectionCommits: {
 		{name: "authored", key: models.FilterDateKey, schema: "integer", desc: "Author date"},
 	},
-	models.CollectionPipelineRuns: {
-		{name: "finished", key: models.SortKey("finished"), schema: "float", desc: "Finish time",
-			gap: `Runs still queued or running at the last sync have no finish time, so this order leaves them out — ` +
-				`list them with filters.status "inProgress" (Azure DevOps) or "in_progress"/"queued" (GitHub) and order_by "queued".`,
-			unless: models.FilterStatus},
-		sortOn("queued", "Queue time"),
-		sortOn("started", "Start time"),
-		sortOn("duration", "Run duration in seconds"),
-		sortOn("attempts", "Number of attempts"),
-		sortOn("last_failed", "test_history: when the test last failed"),
-		sortOn("fail_count", "test_history: runs in which the test failed"),
-		sortOn("flaky_count", "test_history: runs in which the test passed only on retry"),
-	},
-	models.CollectionPullRequests: {
-		{name: "created", key: models.FilterDateKey, schema: "integer", desc: "Creation date"},
-	},
-}
-
-// listDefaults are filters a collection's list mode applies when the
-// request doesn't set that field, with the note that says so: a pipeline
-// listing is of runs unless asked for steps, tests, deployments or test
-// history.
-var listDefaults = map[string]struct{ field, value, note string }{
-	models.CollectionPipelineRuns: {models.FilterType, "run",
-		`Listing run documents only (the default) — pass filters.type "step", "test", "deployment" or "test_history" for those.`},
 }
 
 // ListIndexes are the sort keys of every collection, so startup can create
@@ -126,12 +97,6 @@ func parseListRequest(raw map[string]any, fields []filterField, sorts []sortFiel
 		return nil, fmt.Errorf("request.filters must be an object")
 	}
 	var notes []string
-	if d, ok := listDefaults[collection]; ok {
-		if _, set := given[d.field]; !set {
-			given[d.field] = d.value
-			notes = append(notes, d.note)
-		}
-	}
 	filters, err := parseFiltersFor(given, fields, me)
 	if err != nil {
 		return nil, err

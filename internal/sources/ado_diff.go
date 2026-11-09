@@ -10,6 +10,7 @@
 package sources
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -198,50 +199,60 @@ func (a *APISource) fetchCommitChanges(ctx context.Context, client *http.Client,
 }
 
 // fetchCommitDiff builds a unified diff of every file changed by commitID,
-// and lists the changed file paths (a rename's original path included). Any
-// file that can't be fetched fails the whole commit.
+// reading each blob on its own (the commit-history sync batches them
+// instead, see commitDocuments).
 func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, repoBase, commitID string) (diffText string, filesChanged int, paths []string, err error) {
 	changes, err := a.fetchCommitChanges(ctx, client, repoBase, commitID)
 	if err != nil {
 		return "", 0, nil, err
 	}
+	return commitDiff(changes, func(sha string) (string, error) { return a.blobText(ctx, client, repoBase, sha) })
+}
 
+// diffableChange reports whether c is a file change with blobs to diff.
+// Folder/tree entries show up in a commit's changes alongside real file
+// changes (e.g. a commit that adds a new directory) but have no blob — asking
+// for one by its tree objectId gets a 400 Bad Request from Azure DevOps.
+func diffableChange(c adoChange) bool {
+	return c.Item.Path != "" && !strings.EqualFold(c.ChangeType, "none") && !c.Item.IsFolder &&
+		!strings.EqualFold(c.Item.GitObjectType, "tree")
+}
+
+// commitDiff renders the unified diff of every file in changes, reading
+// blob contents through blob (an empty sha, the missing side of an add or
+// delete, reads as ""), and lists the changed paths (a rename's original
+// path included). Any blob that can't be read fails the whole commit.
+func commitDiff(changes []adoChange, blob func(sha string) (string, error)) (diffText string, filesChanged int, paths []string, err error) {
 	var b strings.Builder
 	for _, c := range changes {
-		// Folder/tree entries show up in a commit's changes alongside real
-		// file changes (e.g. a commit that adds a new directory) but have no
-		// blob to diff — fetching one by its tree objectId as if it were a
-		// blob gets rejected by Azure DevOps with 400 Bad Request.
-		if c.Item.Path == "" || strings.EqualFold(c.ChangeType, "none") || c.Item.IsFolder || strings.EqualFold(c.Item.GitObjectType, "tree") {
+		if !diffableChange(c) {
 			continue
 		}
 		paths = append(paths, c.Item.Path)
 		if c.SourceServerItem != "" && c.SourceServerItem != c.Item.Path {
 			paths = append(paths, c.SourceServerItem)
 		}
-		fileDiff, err := a.fileDiff(ctx, client, repoBase, c)
+		read := func(sha string) (string, error) {
+			if sha == "" {
+				return "", nil
+			}
+			return blob(sha)
+		}
+		oldText, err := read(c.Item.OriginalObjectID)
+		if err != nil {
+			return "", 0, nil, fmt.Errorf("diffing %s: %w", c.Item.Path, err)
+		}
+		newText, err := read(c.Item.ObjectID)
+		if err != nil {
+			return "", 0, nil, fmt.Errorf("diffing %s: %w", c.Item.Path, err)
+		}
+		fileDiff, err := blobDiff(c.Item.Path, c.Item.Path, oldText, newText, c.ChangeType)
 		if err != nil {
 			return "", 0, nil, fmt.Errorf("diffing %s: %w", c.Item.Path, err)
 		}
 		b.WriteString(fileDiff)
 	}
 	return b.String(), len(changes), paths, nil
-}
-
-// fileDiff fetches old/new blob content for one changed file and returns its
-// unified diff. Either sha may be empty (add or delete). Binary files can't be
-// embedded as text, so they're recorded by path and change type instead.
-func (a *APISource) fileDiff(ctx context.Context, client *http.Client, repoBase string, c adoChange) (string, error) {
-	path := c.Item.Path
-	oldText, err := a.blobText(ctx, client, repoBase, c.Item.OriginalObjectID)
-	if err != nil {
-		return "", err
-	}
-	newText, err := a.blobText(ctx, client, repoBase, c.Item.ObjectID)
-	if err != nil {
-		return "", err
-	}
-	return blobDiff(path, path, oldText, newText, c.ChangeType)
 }
 
 // blobDiff renders the unified diff between two versions of a file, with 3
@@ -334,8 +345,18 @@ func getWithRetry(ctx context.Context, client *http.Client, url string, prepare 
 // the same backoff as getWithRetry, so consume must reset any state it builds.
 // consume's own errors fail immediately unless they wrap errRetryable.
 func streamWithRetry(ctx context.Context, client *http.Client, url string, prepare func(*http.Request), consume func(io.Reader) error) error {
+	return streamRequestWithRetry(ctx, client, http.MethodGet, url, nil, prepare, consume)
+}
+
+// streamRequestWithRetry is streamWithRetry for any method; body (nil for
+// none) is sent again on every attempt.
+func streamRequestWithRetry(ctx context.Context, client *http.Client, method, url string, body []byte, prepare func(*http.Request), consume func(io.Reader) error) error {
 	return withRetry(ctx, func() (time.Duration, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		var reqBody io.Reader
+		if body != nil {
+			reqBody = bytes.NewReader(body)
+		}
+		req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 		if err != nil {
 			return 0, err
 		}

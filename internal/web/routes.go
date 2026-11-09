@@ -200,6 +200,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 type sourceRow struct {
 	*models.SourceDefinition
 	VectorCount int
+	Live        bool // read live by its tool: nothing synced or embedded
 }
 
 // renderIndex renders the Sources list, optionally with an import result banner.
@@ -215,11 +216,16 @@ func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, 
 	counts := s.counts.lookup(allSources, statusWait)
 	rows := make([]sourceRow, len(allSources))
 	for i := range allSources {
-		n, ok := counts[allSources[i].ID]
+		src := &allSources[i]
+		if models.IsLiveType(src.Type) {
+			rows[i] = sourceRow{SourceDefinition: src, Live: true}
+			continue
+		}
+		n, ok := counts[src.ID]
 		if !ok {
 			n = -1
 		}
-		rows[i] = sourceRow{SourceDefinition: &allSources[i], VectorCount: n}
+		rows[i] = sourceRow{SourceDefinition: src, VectorCount: n}
 	}
 	s.render(w, s.indexTmpl, "base", map[string]any{
 		"Active":        "sources",
@@ -237,6 +243,11 @@ func (s *Server) handleSourceItems(w http.ResponseWriter, r *http.Request) {
 	}
 	if src == nil {
 		http.Redirect(w, r, "/sources", http.StatusFound)
+		return
+	}
+	if models.IsLiveType(src.Type) {
+		// Nothing indexed to show: a live source is only its config.
+		http.Redirect(w, r, "/sources/"+src.ID+"/edit", http.StatusFound)
 		return
 	}
 	collection := sources.CollectionFor(src)

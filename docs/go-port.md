@@ -37,12 +37,13 @@ Two providers, picked per source by the `Provider` config key:
 - **`api` — Azure DevOps.** The generic API source (endpoint, auth, response
   mapping, pagination) behind the Azure DevOps form, with ADO-specific
   enrichment where one endpoint isn't enough: WIQL query + batch fetch for
-  work items, full diffs for commits, file content for repository files,
-  timeline logs and test results for pipeline runs.
+  work items, full diffs for commits, file content for repository files.
 - **`github` — GitHub.** `GitHubSource`, against the REST API of github.com,
   GitHub Enterprise Server (`…/api/v3`) or a `*.ghe.com` tenant: repository
-  files, commits with patches, issues with comments, Actions runs with failed
-  job logs.
+  files, commits with patches, issues with comments.
+
+Pipeline runs and pull requests aren't synced: `search_pipeline_run` and
+`search_pull_request` read them live from either provider.
 
 The manual (pasted content) provider was removed. See [Sources](sources.md).
 

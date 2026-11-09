@@ -150,15 +150,8 @@ func isFileContentBestEffort(cfg *models.SourceDefinition) bool {
 
 func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
 	cfg := a.src
-	// Pipeline-run sources are Azure DevOps-only and built from AdoOrg /
-	// AdoProject / DefinitionId, never from a hand-written Url.
-	if cfg.Type == models.SourcePipelineRun {
-		return a.fetchAdoPipelineRuns(ctx, a.httpClient(), progress)
-	}
-	// Pull-request sources read the repository named by AdoOrg / AdoProject /
-	// AdoRepo (or the Url's path) through the pull request API.
-	if cfg.Type == models.SourcePullRequest {
-		return a.fetchAdoPullRequests(ctx, progress)
+	if models.IsLiveType(cfg.Type) {
+		return nil, errLiveSource(cfg)
 	}
 	url := cfg.GetConfig("Url")
 	if url == "" {
@@ -186,13 +179,16 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		// is empty (ADO's own default with no versionDescriptor). Applied to
 		// url itself so the documents' web links open the same branch.
 		url = withAdoItemsBranch(url, cfg.GetConfig("Branch"))
+		// A repository's files come as one zip of the whole branch,
+		// filtered locally — never one request per file.
+		if _, ok := AdoItemsAPIBase(url); ok {
+			return a.fetchAdoRepoFiles(ctx, url, top, progress)
+		}
+		if !isFileContentBestEffort(cfg) {
+			return nil, fmt.Errorf("%s sources require an Azure DevOps items API Url (…/_apis/git/repositories/{repo}/items)", cfg.Type)
+		}
 	}
 	fetchURL := url
-	if fileContentType {
-		// ADO's items-list endpoint returns only the repo root without this —
-		// not user-configurable now that the "Extra query" field is gone.
-		fetchURL = withRecursionFull(fetchURL)
-	}
 
 	client := a.httpClient()
 	itemsPath := cfg.GetConfig("ItemsPath")
@@ -280,33 +276,6 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 			}
 		}
 	}
-	// File-content enrichment is automatic for code/test-code sources, and
-	// best-effort for documentation sources (which may point at a wiki
-	// instead of a repo) — never a user-configurable option, and never
-	// applied to any other source type.
-	if fileContentType {
-		if repoBase, ok := AdoItemsAPIBase(url); ok {
-			// PathFilter must run before the Top truncation below — otherwise
-			// a small Top (e.g. the preview's 5-item cap) can slice off every
-			// item that would have matched the filter, since ADO returns the
-			// full repo tree in an arbitrary order.
-			items = filterGitItems(items, parsePathFilter(cfg.GetConfig("PathFilter")))
-			if len(items) > top {
-				items = items[:top]
-			}
-			docs := a.itemsToDocuments(items, url)
-			if err := a.enrichWithFileContent(ctx, client, repoBase, items, docs, progress); err != nil {
-				return nil, err
-			}
-			return docs, nil
-		}
-		if !isFileContentBestEffort(cfg) {
-			return nil, fmt.Errorf("%s sources require an Azure DevOps items API Url (…/_apis/git/repositories/{repo}/items)", cfg.Type)
-		}
-		// Documentation and file-mode Requirements: not an ADO repo-items
-		// URL (e.g. a wiki) — fall through to plain metadata handling below.
-	}
-
 	if len(items) > top {
 		items = items[:top]
 	}
@@ -321,6 +290,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 // commitOutcome is one commit's enrichment result, computed off the main
 // goroutine and applied to its document afterwards.
 type commitOutcome struct {
+	id           string
 	fullComment  string // set only when the listed comment was truncated
 	diff         string
 	filesChanged int
@@ -329,10 +299,12 @@ type commitOutcome struct {
 
 // commitDocuments turns listed commits into documents, each carrying the
 // commit's full message and complete code diff fetched from Azure DevOps.
-// Commits are fetched with bounded concurrency since each needs several
-// sequential HTTP calls. Any commit that still can't be fetched after retries
-// fails the whole sync: indexing a partial result would silently miss
-// changes, whereas failing leaves the previous index intact.
+// Each commit's change list (and, if truncated, full message) is read with
+// bounded concurrency; the file versions the diffs need are then downloaded
+// in zips of many blobs (see batchCommitDiffs), not one request per file.
+// Any commit that still can't be fetched after retries fails the whole sync:
+// indexing a partial result would silently miss changes, whereas failing
+// leaves the previous index intact.
 func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, commitsURL string, items []any, progress ProgressCallback) ([]models.SourceDocument, error) {
 	repoBase, ok := AdoRepoAPIBase(commitsURL)
 	if !ok {
@@ -345,6 +317,12 @@ func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, co
 
 	n := len(items)
 	outcomes := make([]commitOutcome, n)
+	changes := make([][]adoChange, n)
+	for i := range items {
+		if outcomes[i].id = fieldString(items[i], idField); outcomes[i].id == "" {
+			return nil, fmt.Errorf("commit item %d has no %q field", i, idField)
+		}
+	}
 
 	workCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -364,50 +342,50 @@ func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, co
 		mu.Unlock()
 		cancel()
 	}
+	report := func(what string) {
+		mu.Lock()
+		completed++
+		if progress != nil {
+			progress(models.SyncProgress{
+				Phase: "fetching", Current: completed, Total: n,
+				Message: fmt.Sprintf("%s %d/%d", what, completed, n),
+			})
+		}
+		mu.Unlock()
+	}
 
 	for i := 0; i < n && workCtx.Err() == nil; i++ {
-		commitID := fieldString(items[i], idField)
-		if commitID == "" {
-			fail(fmt.Errorf("commit item %d has no %q field", i, idField))
-			break
-		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, commitID string) {
+		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-
-			var out commitOutcome
+			commitID := outcomes[i].id
 			if truncated, _ := navigate(items[i], "commentTruncated").(bool); truncated {
 				comment, err := a.fetchCommitComment(workCtx, client, repoBase, commitID)
 				if err != nil {
 					fail(fmt.Errorf("commit %s: fetching full message: %w", commitID, err))
 					return
 				}
-				out.fullComment = comment
+				outcomes[i].fullComment = comment
 			}
-			diff, filesChanged, paths, err := a.fetchCommitDiff(workCtx, client, repoBase, commitID)
+			ch, err := a.fetchCommitChanges(workCtx, client, repoBase, commitID)
 			if err != nil {
-				fail(fmt.Errorf("commit %s: %w", commitID, err))
+				fail(fmt.Errorf("commit %s: listing changes: %w", commitID, err))
 				return
 			}
-			out.diff, out.filesChanged, out.paths = diff, filesChanged, paths
-			outcomes[i] = out
-
-			mu.Lock()
-			completed++
-			if progress != nil {
-				progress(models.SyncProgress{
-					Phase: "fetching", Current: completed, Total: n,
-					Message: fmt.Sprintf("Fetching commit %d/%d", completed, n),
-				})
-			}
-			mu.Unlock()
-		}(i, commitID)
+			changes[i] = ch
+			report("Listing changes of commit")
+		}(i)
 	}
 	wg.Wait()
 	if firstErr != nil {
 		return nil, firstErr
+	}
+
+	completed = 0
+	if err := a.batchCommitDiffs(ctx, client, repoBase, changes, outcomes, func() { report("Diffing commit") }); err != nil {
+		return nil, err
 	}
 
 	for i, out := range outcomes {

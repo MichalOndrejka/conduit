@@ -1,10 +1,13 @@
 package sources
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -90,86 +93,92 @@ func TestMatchesPathFilterRecursiveGlob(t *testing.T) {
 	}
 }
 
-func TestFilterGitItemsDropsDirectoriesAndNonMatches(t *testing.T) {
-	items := []any{
-		map[string]any{"path": "/src", "gitObjectType": "tree"},
-		map[string]any{"path": "/src/Foo.cs", "gitObjectType": "blob", "objectId": "sha1"},
-		map[string]any{"path": "/README.md", "gitObjectType": "blob", "objectId": "sha2"},
+// repoZip builds the zip Azure DevOps serves for …/items?path=/&$format=zip.
+func repoZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	if _, err := zw.Create("src/"); err != nil { // a directory entry
+		t.Fatal(err)
 	}
-	kept := filterGitItems(items, parsePathFilter("*.cs"))
-	if len(kept) != 1 {
-		t.Fatalf("got %d kept items, want 1", len(kept))
+	for name, body := range files {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
 	}
-	m := kept[0].(map[string]any)
-	if m["path"] != "/src/Foo.cs" {
-		t.Errorf("kept item = %v", m)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
 	}
+	return buf.Bytes()
 }
 
-func TestFetchDocumentsFetchesRealFileContentForCodeSources(t *testing.T) {
+// A code source downloads the branch as one zip and filters it locally:
+// one request, whatever the number of files.
+func TestFetchDocumentsDownloadsRepositoryAsOneZip(t *testing.T) {
+	zipBody := repoZip(t, map[string]string{
+		"src/Foo.cs":   "public class Foo {}",
+		"README.md":    "# Readme",
+		"src/Big.cs":   strings.Repeat("x", maxRepoFileBytes+1),
+		"src/Logo.cs":  "\x00\x01binary",
+		"src/Other.cs": "class Other {}",
+	})
+	var requests []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/items"):
-			if r.URL.Query().Get("recursionLevel") != "Full" {
-				http.Error(w, "expected recursionLevel=Full to be auto-added", http.StatusBadRequest)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"value": []map[string]any{
-					{"path": "/src", "gitObjectType": "tree"},
-					{"path": "/src/Foo.cs", "gitObjectType": "blob", "objectId": "sha-foo"},
-					{"path": "/README.md", "gitObjectType": "blob", "objectId": "sha-readme"},
-				},
-			})
-		case strings.Contains(r.URL.Path, "/blobs/sha-foo"):
-			_, _ = w.Write([]byte("public class Foo {}"))
-		default:
-			http.Error(w, "unexpected request: "+r.URL.Path, http.StatusNotFound)
+		requests = append(requests, r.URL.String())
+		q := r.URL.Query()
+		if !strings.HasSuffix(r.URL.Path, "/items") || q.Get("$format") != "zip" || q.Get("path") != "/" ||
+			q.Get("versionDescriptor.version") != "dev" || q.Get("api-version") != "7.1" {
+			http.Error(w, "unexpected request: "+r.URL.String(), http.StatusBadRequest)
+			return
 		}
+		w.Header().Set("Content-Type", "application/zip")
+		_, _ = w.Write(zipBody)
 	}))
 	defer srv.Close()
 
 	s := &APISource{src: codeSrc(map[string]string{
-		"Url":        srv.URL + "/_apis/git/repositories/repo/items",
+		"Url":        srv.URL + "/_apis/git/repositories/repo/items?api-version=7.1",
+		"Branch":     "dev",
 		"PathFilter": "*.cs",
 	})}
-
 	docs, err := s.FetchDocuments(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 1 {
-		t.Fatalf("got %d docs, want 1 (README.md and the directory should be filtered out)", len(docs))
+	if len(requests) != 1 {
+		t.Errorf("made %d requests, want 1: %v", len(requests), requests)
 	}
-	if !strings.Contains(docs[0].Text, "public class Foo {}") {
-		t.Errorf("expected real file content in doc text, got %q", docs[0].Text)
+	var got []string
+	for _, d := range docs {
+		got = append(got, d.ID+" | "+d.Text)
 	}
-	if !strings.HasPrefix(docs[0].Text, "/src/Foo.cs") {
-		t.Errorf("expected doc text to start with the file path, got %q", docs[0].Text)
+	want := []string{
+		"src-1_capi_/src/Big.cs | /src/Big.cs\n\n(binary or large file skipped)",
+		"src-1_capi_/src/Foo.cs | /src/Foo.cs\n\npublic class Foo {}",
+		"src-1_capi_/src/Logo.cs | /src/Logo.cs\n\n(binary or large file skipped)",
+		"src-1_capi_/src/Other.cs | /src/Other.cs\n\nclass Other {}",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("docs:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if !strings.Contains(docs[1].Properties["web_url"], "path=%2Fsrc%2FFoo.cs") && !strings.Contains(docs[1].Properties["web_url"], "path=/src/Foo.cs") {
+		t.Errorf("web_url = %q", docs[1].Properties["web_url"])
 	}
 }
 
 // TestFetchDocumentsAppliesPathFilterBeforeTop guards against a regression
-// where Top truncated the raw item list before PathFilter ran: a small Top
-// (as the source preview uses) could slice off every matching file if ADO
-// happened to list non-matching files first, even though matches exist.
+// where Top truncated the file list before PathFilter ran: a small Top (as
+// the source preview uses) could slice off every matching file.
 func TestFetchDocumentsAppliesPathFilterBeforeTop(t *testing.T) {
+	zipBody := repoZip(t, map[string]string{
+		"src/A.cs": "a", "src/B.cs": "b", "doc/guide/intro.md": "# Intro",
+	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/items"):
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"value": []map[string]any{
-					{"path": "/src/A.cs", "gitObjectType": "blob", "objectId": "sha-a"},
-					{"path": "/src/B.cs", "gitObjectType": "blob", "objectId": "sha-b"},
-					{"path": "/src/C.cs", "gitObjectType": "blob", "objectId": "sha-c"},
-					{"path": "/doc/guide/intro.md", "gitObjectType": "blob", "objectId": "sha-md"},
-				},
-			})
-		case strings.Contains(r.URL.Path, "/blobs/sha-md"):
-			_, _ = w.Write([]byte("# Intro"))
-		default:
-			http.Error(w, "unexpected request: "+r.URL.Path, http.StatusNotFound)
-		}
+		_, _ = w.Write(zipBody)
 	}))
 	defer srv.Close()
 
@@ -178,16 +187,43 @@ func TestFetchDocumentsAppliesPathFilterBeforeTop(t *testing.T) {
 		"PathFilter": "doc/**/*.md",
 		"Top":        "1",
 	})}
-
 	docs, err := s.FetchDocuments(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 1 {
-		t.Fatalf("got %d docs, want 1 (matching file should survive Top truncation)", len(docs))
+	if len(docs) != 1 || !strings.Contains(docs[0].Text, "# Intro") {
+		t.Fatalf("docs = %+v", docs)
 	}
-	if !strings.Contains(docs[0].Text, "# Intro") {
-		t.Errorf("expected matching file's content, got %q", docs[0].Text)
+}
+
+// A download cut off part-way is restarted; a response that isn't a zip
+// fails the sync.
+func TestFetchDocumentsRepositoryZipErrors(t *testing.T) {
+	zipBody := repoZip(t, map[string]string{"src/A.cs": "a"})
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.Header().Set("Content-Length", strconv.Itoa(len(zipBody)))
+			_, _ = w.Write(zipBody[:10]) // connection drops part-way
+			return
+		}
+		_, _ = w.Write(zipBody)
+	}))
+	defer srv.Close()
+	s := &APISource{src: codeSrc(map[string]string{"Url": srv.URL + "/_apis/git/repositories/repo/items"})}
+	docs, err := s.FetchDocuments(context.Background(), nil)
+	if err != nil || len(docs) != 1 || calls != 2 {
+		t.Fatalf("docs %d, calls %d, err %v", len(docs), calls, err)
+	}
+
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"value":[]}`))
+	}))
+	defer bad.Close()
+	s = &APISource{src: codeSrc(map[string]string{"Url": bad.URL + "/_apis/git/repositories/repo/items"})}
+	if _, err := s.FetchDocuments(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "not a zip") {
+		t.Errorf("err = %v, want a not-a-zip error", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -42,14 +43,29 @@ type archiveFile struct {
 	skipped bool // binary or over maxRepoFileBytes
 }
 
-// readArchive downloads the tarball of ref and returns every file matching
-// patterns. A download that fails part-way is restarted from the beginning.
+// readArchive downloads the tarball of ref — shared with the other sources
+// of the sync batch that read the same tarball with the same token — and
+// returns every file matching patterns. A download that fails part-way is
+// restarted from the beginning.
 func (g *GitHubSource) readArchive(ctx context.Context, ref string, patterns []string, progress ProgressCallback) ([]archiveFile, error) {
-	client := *g.client
-	client.Timeout = archiveDownloadTimeout
+	tarURL := g.repoAPI() + "/tarball/" + refPath(ref)
+	name, release, err := fetchArchive(ctx, "github|"+tarURL+"|"+g.src.GetConfig("Token"), func(ctx context.Context) (string, error) {
+		client := *g.client
+		client.Timeout = archiveDownloadTimeout
+		return downloadToFile(ctx, &client, tarURL, "conduit-repo-*.tar.gz", g.prepare(""), checkTarGz)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("downloading %s/%s at %q: %w", g.owner, g.repo, ref, err)
+	}
+	defer release()
+	f, err := os.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
 	var files []archiveFile
-	err := streamWithRetry(ctx, &client, g.repoAPI()+"/tarball/"+refPath(ref), g.prepare(""), func(body io.Reader) error {
-		files = files[:0]
+	err = func(body io.Reader) error {
 		gz, err := gzip.NewReader(body)
 		if err != nil {
 			return fmt.Errorf("repository archive is not gzip: %w", err)
@@ -91,9 +107,9 @@ func (g *GitHubSource) readArchive(ctx context.Context, ref string, patterns []s
 					Message: fmt.Sprintf("Read %d files from repository archive", len(files))})
 			}
 		}
-	})
+	}(f)
 	if err != nil {
-		return nil, fmt.Errorf("downloading %s/%s at %q: %w", g.owner, g.repo, ref, err)
+		return nil, fmt.Errorf("reading the archive of %s/%s at %q: %w", g.owner, g.repo, ref, err)
 	}
 	return files, nil
 }
