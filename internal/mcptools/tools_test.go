@@ -94,6 +94,15 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 			q.scrollCalls++
 			result := map[string]any{"points": q.scrollPoints}
 			if q.scrollNeverExhausts {
+				// A full page of copies, as a large collection returns.
+				limit, _ := body["limit"].(float64)
+				page := make([]map[string]any, 0, int(limit))
+				for i := 0; i < int(limit); i++ {
+					idx := (q.scrollCalls-1)*int(limit) + i
+					p := q.scrollPoints[idx%len(q.scrollPoints)]
+					page = append(page, map[string]any{"id": fmt.Sprintf("%v-%d", p["id"], idx), "payload": p["payload"]})
+				}
+				result["points"] = page
 				result["next_page_offset"] = strconv.Itoa(q.scrollCalls)
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": result})
@@ -101,6 +110,21 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			q.lastRetrieveBody = body
+			if q.retrievePoints == nil {
+				// A pattern search fetches the matches its scan found: serve
+				// them from the scroll points.
+				ids, _ := body["ids"].([]any)
+				var out []map[string]any
+				for _, id := range ids {
+					for _, p := range q.scrollPoints {
+						if fmt.Sprint(p["id"]) == fmt.Sprint(id) || strings.HasPrefix(fmt.Sprint(id), fmt.Sprint(p["id"])+"-") {
+							out = append(out, map[string]any{"id": id, "payload": p["payload"]})
+						}
+					}
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"result": out})
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": q.retrievePoints})
 		default:
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
@@ -1171,5 +1195,53 @@ func TestRememberToolRollsBackOnUpsertFailure(t *testing.T) {
 	}
 	if len(qd.deleteCalls[0]) != 1 || qd.deleteCalls[0][0] != attemptedID {
 		t.Errorf("rollback deleted %v, want [%s]", qd.deleteCalls[0], attemptedID)
+	}
+}
+
+// A scan that stopped at the cap says so even when it found matches, so
+// has_more=false isn't read as "these are all the usages".
+func TestSearchToolPatternSearchTruncatedWithResultsSaysSo(t *testing.T) {
+	qd := &fakeQdrant{
+		scrollPoints:        []map[string]any{{"id": "1", "payload": map[string]any{"text": "calls FooBar()"}}},
+		scrollNeverExhausts: true,
+	}
+	s, ctx := setup(t, qd, nil)
+	// Every chunk matches: page 1 fills within the first batch, no cap reached.
+	result := callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	text := resultText(t, result)
+	if strings.Contains(text, `"truncated"`) {
+		t.Fatalf("page 1 found enough matches without reaching the cap: %s", text)
+	}
+	if qd.scrollCalls != 1 {
+		t.Errorf("scroll calls = %d, want 1", qd.scrollCalls)
+	}
+	fields, _ := json.Marshal(qd.lastScrollBody["with_payload"])
+	if string(fields) != `{"include":["text"]}` {
+		t.Errorf("scan requested payload %s, want only the text", fields)
+	}
+
+	// One match per 10,001 chunks: the cap stops the scan after 5 matches,
+	// one short of what page 1 needs to know whether more follow.
+	sparse := []map[string]any{{"id": "hit", "payload": map[string]any{"text": "FooBar here"}}}
+	for i := range 10000 {
+		sparse = append(sparse, map[string]any{"id": fmt.Sprintf("n%d", i), "payload": map[string]any{"text": "no match"}})
+	}
+	qd2 := &fakeQdrant{scrollPoints: sparse, scrollNeverExhausts: true}
+	s, ctx = setup(t, qd2, nil)
+	result = callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{
+		"mode": "pattern_search", "pattern": "FooBar", "page": float64(1),
+	}})
+	var out struct {
+		Results   []json.RawMessage `json:"results"`
+		Truncated bool              `json:"truncated"`
+		Note      string            `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(resultText(t, result)), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) != 5 || !out.Truncated || !strings.Contains(out.Note, "further matches may exist") {
+		t.Fatalf("results %d truncated %v note %q", len(out.Results), out.Truncated, out.Note)
 	}
 }

@@ -84,6 +84,7 @@ func main() {
 	embedding := rag.NewEmbeddingService(cfg)
 	sourceStore := store.NewSourceConfigStore(cfg.SourcesFilePath)
 	searchSvc := rag.NewSearchService(vectors, embedding, sourceStore)
+	searchSvc.SetConfig(cfg) // Settings changes (pattern scan limit) apply live
 	memorySvc := memory.NewService(vectors, embedding)
 
 	// Reset any source left in "syncing" by a previous crash or container restart.

@@ -348,14 +348,30 @@ func (v *VectorStore) Retrieve(ctx context.Context, collection string, ids []str
 	return resp.Result, nil
 }
 
+// ScrollFields is Scroll returning only the named payload fields (no
+// vectors) — far less to transfer when scanning a large collection.
+func (v *VectorStore) ScrollFields(
+	ctx context.Context, collection string, filter *Filter, limit int, offset json.RawMessage, fields []string,
+) ([]ScrolledPoint, json.RawMessage, error) {
+	return v.scroll(ctx, collection, filter, limit, offset, map[string]any{"include": fields}, false)
+}
+
 // Scroll pages through a collection. offset may be nil for the first page;
 // the returned next offset is nil when exhausted.
 func (v *VectorStore) Scroll(
 	ctx context.Context, collection string, filter *Filter, limit int, offset json.RawMessage, withVectors bool,
 ) ([]ScrolledPoint, json.RawMessage, error) {
+	return v.scroll(ctx, collection, filter, limit, offset, true, withVectors)
+}
+
+// scroll is Scroll with Qdrant's with_payload selector (true, or an
+// {"include": [...]} field list).
+func (v *VectorStore) scroll(
+	ctx context.Context, collection string, filter *Filter, limit int, offset json.RawMessage, withPayload any, withVectors bool,
+) ([]ScrolledPoint, json.RawMessage, error) {
 	body := map[string]any{
 		"limit":        limit,
-		"with_payload": true,
+		"with_payload": withPayload,
 		"with_vector":  withVectors,
 	}
 	if filter != nil {

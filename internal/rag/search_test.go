@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
@@ -253,7 +254,7 @@ func containsMatcher(pattern string) func(string) bool {
 }
 
 func TestPatternSearchLiteralMatchFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRetrieve(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": map[string]any{
 				"points": []map[string]any{
@@ -285,7 +286,7 @@ func TestPatternSearchLiteralMatchFound(t *testing.T) {
 }
 
 func TestPatternSearchRegexMatcherFound(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRetrieve(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": map[string]any{
 				"points": []map[string]any{
@@ -312,7 +313,7 @@ func TestPatternSearchRegexMatcherFound(t *testing.T) {
 }
 
 func TestPatternSearchNoMatchReturnsEmpty(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRetrieve(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"result": map[string]any{"points": []map[string]any{
 				{"id": "1", "payload": map[string]any{"text": "nothing relevant"}},
@@ -342,7 +343,7 @@ func TestPatternSearchPaginatesAcrossMatches(t *testing.T) {
 	// irrelevant points: page 1 (pageSize 5) should return matches 1-5 with
 	// hasMore=true, page 2 should return the remaining matches 6-7 with
 	// hasMore=false.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRetrieve(func(w http.ResponseWriter, r *http.Request) {
 		points := make([]map[string]any, 0, 14)
 		for i := 1; i <= 7; i++ {
 			points = append(points,
@@ -389,7 +390,7 @@ func TestPatternSearchPaginatesAcrossMatches(t *testing.T) {
 
 func TestPatternSearchExcludesDisabledSources(t *testing.T) {
 	var gotBody map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(withRetrieve(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"points": []map[string]any{}}})
 	}))
@@ -423,9 +424,12 @@ func TestPatternSearchExcludesDisabledSources(t *testing.T) {
 }
 
 func TestPatternSearchStopsAtScanCapWhenNoMatchFound(t *testing.T) {
-	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	calls, lastLimit := 0, 0.0
+	srv := httptest.NewServer(withRetrieve(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		lastLimit, _ = body["limit"].(float64)
 		points := make([]map[string]any, patternScrollBatch)
 		for i := range points {
 			points[i] = map[string]any{"id": fmt.Sprintf("p%d-%d", calls, i), "payload": map[string]any{"text": "no match"}}
@@ -442,6 +446,8 @@ func TestPatternSearchStopsAtScanCapWhenNoMatchFound(t *testing.T) {
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
+	cfg.Search.PatternScanLimit = 2500 // the Settings value, read on every call
+	svc.SetConfig(cfg)
 
 	results, hasMore, truncated, err := svc.PatternSearch(context.Background(), "conduit_code", containsMatcher("FooBar"), 1, nil)
 	if err != nil {
@@ -453,8 +459,53 @@ func TestPatternSearchStopsAtScanCapWhenNoMatchFound(t *testing.T) {
 	if hasMore || len(results) != 0 {
 		t.Errorf("results = %+v hasMore=%v, want none and hasMore=false", results, hasMore)
 	}
-	wantCalls := patternScanCap / patternScrollBatch
-	if calls != wantCalls {
-		t.Errorf("scroll calls = %d, want %d (scan cap / batch size)", calls, wantCalls)
+	if lastLimit != 500 {
+		t.Errorf("last batch asked for %v chunks, want the 500 left under the limit", lastLimit)
 	}
+	wantCalls := 3 // 1000 + 1000 + 500
+	if calls != wantCalls {
+		t.Errorf("scroll calls = %d, want %d (a 2,500-chunk limit in batches of 1,000)", calls, wantCalls)
+	}
+}
+
+// withRetrieve serves Qdrant's point retrieval (POST …/points with ids) from
+// the points h returned in earlier scroll responses, so a stub written for
+// scrolling also answers the fetch of a pattern-search page.
+func withRetrieve(h http.HandlerFunc) http.Handler {
+	var mu sync.Mutex
+	seen := map[string]map[string]any{}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/points") {
+			rec := httptest.NewRecorder()
+			h(rec, r)
+			var resp struct {
+				Result struct {
+					Points []map[string]any `json:"points"`
+				} `json:"result"`
+			}
+			if json.Unmarshal(rec.Body.Bytes(), &resp) == nil {
+				mu.Lock()
+				for _, p := range resp.Result.Points {
+					seen[fmt.Sprint(p["id"])] = p
+				}
+				mu.Unlock()
+			}
+			w.WriteHeader(rec.Code)
+			_, _ = w.Write(rec.Body.Bytes())
+			return
+		}
+		var req struct {
+			IDs []string `json:"ids"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		mu.Lock()
+		out := []map[string]any{}
+		for _, id := range req.IDs {
+			if p, ok := seen[id]; ok {
+				out = append(out, p)
+			}
+		}
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"result": out})
+	})
 }

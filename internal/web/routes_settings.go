@@ -68,6 +68,9 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		"Credentials":  s.secrets.ListAll(),
 		"PreprocTypes": types,
 		"Notice":       r.URL.Query().Get("notice"),
+		// What a search uses now (the config, or the default when unset).
+		"PatternScanLimit":    s.cfg.PatternScanLimit(),
+		"MaxPatternScanLimit": config.MaxPatternScanLimit,
 	})
 }
 
@@ -293,4 +296,23 @@ func atoiOr(s string, def int) int {
 func atoiStrict(s string) (int, bool) {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	return n, err == nil
+}
+
+// ── Save: search ────────────────────────────────────────────────────────────
+
+// handleSettingsSearch saves the search tunables. The search service reads
+// them on every call, so they apply without a restart.
+func (s *Server) handleSettingsSearch(w http.ResponseWriter, r *http.Request) {
+	_ = r.ParseForm()
+	limit, ok := atoiStrict(r.FormValue("pattern_scan_limit"))
+	if !ok || limit < 1 || limit > config.MaxPatternScanLimit {
+		http.Redirect(w, r, "/settings?notice=search_invalid", http.StatusSeeOther)
+		return
+	}
+	s.cfg.Search.PatternScanLimit = limit
+	if err := config.Save(s.cfg); err != nil {
+		httpError(w, err)
+		return
+	}
+	http.Redirect(w, r, "/settings?notice=search_saved", http.StatusSeeOther)
 }

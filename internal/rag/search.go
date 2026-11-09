@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
@@ -19,11 +20,20 @@ type SearchService struct {
 	store     *VectorStore
 	embedding *EmbeddingService
 	sources   SourceLister
+	cfg       *config.AppConfig // nil: defaults
 }
 
 func NewSearchService(store *VectorStore, embedding *EmbeddingService, sources SourceLister) *SearchService {
 	return &SearchService{store: store, embedding: embedding, sources: sources}
 }
+
+// SetConfig makes the service read its tunables (the pattern scan limit)
+// from cfg on every call, so a Settings change applies without a restart.
+func (s *SearchService) SetConfig(cfg *config.AppConfig) { s.cfg = cfg }
+
+// PatternScanLimit is how many chunks one PatternSearch call scans (see
+// config.AppConfig.PatternScanLimit; the default without a config).
+func (s *SearchService) PatternScanLimit() int { return s.cfg.PatternScanLimit() }
 
 // pageSize is the number of matches Search and PatternSearch return per
 // page. 5 balances giving the caller enough of the ranked list to actually
@@ -105,14 +115,9 @@ func (s *SearchService) GetChunk(ctx context.Context, collection, sourceDocID st
 	return PointToSearchResult(ScoredPoint{ID: p.ID, Payload: p.Payload}), true, nil
 }
 
-// patternScanCap bounds how many points PatternSearch will scroll through per
-// call, mirroring scrollForStructure's structureScanCap in internal/web —
-// keeps an unbounded collection from turning one tool call into a full scan.
-const patternScanCap = 5000
-
 // patternScrollBatch is the page size PatternSearch requests from Qdrant on
 // each Scroll call while looking for matches.
-const patternScrollBatch = 200
+const patternScrollBatch = 1000
 
 // PatternSearch scans a collection's chunk text for matches against match —
 // a literal-substring or regex predicate built by the caller — rather than
@@ -120,12 +125,13 @@ const patternScrollBatch = 200
 // pageSize matches per page (1-based; values below 1 are treated as 1) and
 // hasMore reports whether a further match exists.
 //
-// Unlike Search, there's no way to ask Qdrant to jump straight to a given
-// page of matches — the collection is client-side filtered, so every call
-// re-scrolls from the start up to page+1 matches (or patternScanCap points,
-// whichever comes first). truncated is true when the scan hit that cap
-// without collecting enough matches to answer the current page with
-// certainty — the caller should say so rather than claim hasMore is false.
+// The scan reads only each chunk's text, in batches of patternScrollBatch;
+// the full payload is then fetched for just the matches on the requested
+// page. There's no way to ask Qdrant to jump to a given page of matches —
+// the text is matched client-side — so every call re-scans from the start
+// up to page+1 matches (or PatternScanLimit chunks, whichever comes first).
+// truncated is true when the scan stopped at that cap: matches beyond it
+// weren't seen, whether or not this page has results.
 func (s *SearchService) PatternSearch(
 	ctx context.Context, collection string, match func(string) bool, page int, must []FieldCondition,
 ) (results []models.SearchResult, hasMore, truncated bool, err error) {
@@ -135,11 +141,13 @@ func (s *SearchService) PatternSearch(
 	filter := buildFilter(must, s.excludedSourceIDs())
 	need := page*pageSize + 1
 
-	var matches []models.SearchResult
+	var matchIDs []string
 	var offset json.RawMessage
 	scanned := 0
-	for {
-		points, next, err := s.store.Scroll(ctx, collection, filter, patternScrollBatch, offset, false)
+	limit := s.PatternScanLimit()
+	for len(matchIDs) < need {
+		batch := min(patternScrollBatch, limit-scanned)
+		points, next, err := s.store.ScrollFields(ctx, collection, filter, batch, offset, []string{models.PayloadText})
 		if err != nil {
 			return nil, false, false, err
 		}
@@ -147,31 +155,41 @@ func (s *SearchService) PatternSearch(
 			scanned++
 			text, _ := p.Payload[models.PayloadText].(string)
 			if match(text) {
-				matches = append(matches, PointToSearchResult(ScoredPoint{ID: p.ID, Payload: p.Payload}))
-				if len(matches) >= need {
+				matchIDs = append(matchIDs, IDString(p.ID))
+				if len(matchIDs) >= need {
 					break
 				}
 			}
 		}
-		if len(matches) >= need || next == nil {
-			truncated = false
+		if len(matchIDs) >= need || next == nil {
 			break
 		}
-		if scanned >= patternScanCap {
+		if scanned >= limit {
 			truncated = true
 			break
 		}
 		offset = next
 	}
 
-	hasMore = len(matches) > page*pageSize
+	hasMore = len(matchIDs) > page*pageSize
 	start := (page - 1) * pageSize
-	if start >= len(matches) {
+	if start >= len(matchIDs) {
 		return []models.SearchResult{}, false, truncated, nil
 	}
-	end := page * pageSize
-	if end > len(matches) {
-		end = len(matches)
+	pageIDs := matchIDs[start:min(page*pageSize, len(matchIDs))]
+	points, err := s.store.Retrieve(ctx, collection, pageIDs)
+	if err != nil {
+		return nil, false, false, err
 	}
-	return matches[start:end], hasMore, truncated, nil
+	byID := make(map[string]ScrolledPoint, len(points))
+	for _, p := range points {
+		byID[IDString(p.ID)] = p
+	}
+	results = make([]models.SearchResult, 0, len(pageIDs))
+	for _, id := range pageIDs {
+		if p, ok := byID[id]; ok { // gone since the scan (a re-sync): skip it
+			results = append(results, PointToSearchResult(ScoredPoint{ID: p.ID, Payload: p.Payload}))
+		}
+	}
+	return results, hasMore, truncated, nil
 }

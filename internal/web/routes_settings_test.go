@@ -327,3 +327,27 @@ func TestHandleSettingsVerifyUnknownServiceReturns404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestHandleSettingsSearchSavesAndValidates(t *testing.T) {
+	h := newHarness(t)
+	resp := h.postForm("/settings/search", url.Values{"pattern_scan_limit": {"200000"}})
+	if loc := resp.Header.Get("Location"); resp.StatusCode != http.StatusSeeOther || loc != "/settings?notice=search_saved" {
+		t.Fatalf("status %d, Location %q", resp.StatusCode, loc)
+	}
+	if h.cfg.Search.PatternScanLimit != 200000 {
+		t.Errorf("saved limit = %d", h.cfg.Search.PatternScanLimit)
+	}
+	if body := bodyString(t, h.get("/settings")); !strings.Contains(body, `name="pattern_scan_limit"`) || !strings.Contains(body, `value="200000"`) {
+		t.Error("settings page doesn't show the saved scan limit")
+	}
+
+	for _, bad := range []string{"", "0", "-5", "abc", "1.5", "999999999"} {
+		resp := h.postForm("/settings/search", url.Values{"pattern_scan_limit": {bad}})
+		if loc := resp.Header.Get("Location"); loc != "/settings?notice=search_invalid" {
+			t.Errorf("%q: Location = %q, want search_invalid", bad, loc)
+		}
+	}
+	if h.cfg.Search.PatternScanLimit != 200000 {
+		t.Errorf("an invalid value changed the limit to %d", h.cfg.Search.PatternScanLimit)
+	}
+}

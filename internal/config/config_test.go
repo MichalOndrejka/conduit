@@ -336,3 +336,37 @@ func TestSaveOverwritesExistingFile(t *testing.T) {
 		t.Errorf("expected .tmp file to be renamed away, got stat err = %v", err)
 	}
 }
+
+func TestPatternScanLimitDefaultsSettingAndEnv(t *testing.T) {
+	path := useConfigFile(t)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PatternScanLimit() != DefaultPatternScanLimit {
+		t.Errorf("default = %d, want %d", cfg.PatternScanLimit(), DefaultPatternScanLimit)
+	}
+
+	// A config file written before the setting existed keeps the default.
+	if err := os.WriteFile(path, []byte(`{"search":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = Load(); cfg.PatternScanLimit() != DefaultPatternScanLimit {
+		t.Errorf("unset in file = %d, want the default", cfg.PatternScanLimit())
+	}
+
+	if err := os.WriteFile(path, []byte(`{"search":{"pattern_scan_limit":120000}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, _ = Load(); cfg.PatternScanLimit() != 120000 {
+		t.Errorf("from file = %d, want 120000", cfg.PatternScanLimit())
+	}
+
+	t.Setenv("PATTERN_SCAN_LIMIT", "999999999")
+	if cfg, _ = Load(); cfg.PatternScanLimit() != MaxPatternScanLimit {
+		t.Errorf("env over the max = %d, want %d", cfg.PatternScanLimit(), MaxPatternScanLimit)
+	}
+	if (*AppConfig)(nil).PatternScanLimit() != DefaultPatternScanLimit {
+		t.Error("a nil config must give the default")
+	}
+}

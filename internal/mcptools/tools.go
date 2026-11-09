@@ -99,13 +99,23 @@ func (q patternSearchRequest) resolve(ctx context.Context, search *rag.SearchSer
 		return nil, err
 	}
 	payload := map[string]any{"results": results, "page": q.Page, "has_more": hasMore}
+	if truncated {
+		// Said even when this page has results: matches past the scanned
+		// chunks weren't seen, so has_more=false doesn't mean "that's all".
+		payload["truncated"] = true
+	}
 	if len(results) == 0 {
 		payload["results"] = []any{}
+	}
+	switch {
+	case truncated && len(results) > 0:
+		payload["note"] = fmt.Sprintf("The scan stopped after %d chunks, so further matches may exist beyond them — "+
+			"narrow with filters (repository, path, …) to cover everything.", search.PatternScanLimit())
+	case truncated:
+		payload["note"] = fmt.Sprintf("No match for page %d within the first %d chunks scanned — the collection is "+
+			"larger than one call scans. Narrow with filters (repository, path, …) and search again.", q.Page, search.PatternScanLimit())
+	case len(results) == 0:
 		switch {
-		case truncated:
-			payload["note"] = fmt.Sprintf(
-				"No match confirmed for page %d within the first several thousand chunks scanned — the collection "+
-					"may be larger than this tool scans in one call. Try narrowing the pattern.", q.Page)
 		case q.Page == 1:
 			payload["note"] = "No matches found for this pattern."
 		default:

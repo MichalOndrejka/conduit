@@ -36,11 +36,18 @@ type PreprocessingConfig struct {
 	Concurrency  int             `json:"concurrency"` // max in-flight summarize calls during a sync
 }
 
+// SearchConfig tunes the search tools.
+type SearchConfig struct {
+	// PatternScanLimit caps how many chunks one pattern_search call scans.
+	PatternScanLimit int `json:"pattern_scan_limit"`
+}
+
 type AppConfig struct {
 	Embedding       EmbeddingConfig     `json:"embedding"`
 	Qdrant          QdrantConfig        `json:"qdrant"`
 	Chunking        ChunkingConfig      `json:"chunking"`
 	Preprocessing   PreprocessingConfig `json:"preprocessing"`
+	Search          SearchConfig        `json:"search"`
 	SourcesFilePath string              `json:"sources_file_path"`
 }
 
@@ -91,6 +98,7 @@ func defaults() AppConfig {
 				"test-code": false, "documentation": true,
 			},
 		},
+		Search:          SearchConfig{PatternScanLimit: DefaultPatternScanLimit},
 		SourcesFilePath: "conduit-sources.json",
 	}
 }
@@ -153,6 +161,11 @@ func Load() (*AppConfig, error) {
 			cfg.Preprocessing.Concurrency = n
 		}
 	}
+	if v := os.Getenv("PATTERN_SCAN_LIMIT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			cfg.Search.PatternScanLimit = min(n, MaxPatternScanLimit)
+		}
+	}
 	if v := os.Getenv("CONDUIT_DATA_DIR"); v != "" {
 		if err := os.MkdirAll(v, 0o755); err != nil {
 			return nil, err
@@ -194,4 +207,21 @@ func Save(cfg *AppConfig) error {
 		return os.WriteFile(path, data, 0o644)
 	}
 	return nil
+}
+
+// DefaultPatternScanLimit is how many chunks one pattern_search call scans
+// when the config doesn't say: about 90 MB of text at the default chunk size.
+const DefaultPatternScanLimit = 50000
+
+// MaxPatternScanLimit bounds the setting, so one tool call can't be made to
+// pull an unbounded amount of text out of Qdrant.
+const MaxPatternScanLimit = 5_000_000
+
+// PatternScanLimit is the effective pattern_search scan limit: the
+// configured value capped at MaxPatternScanLimit, or the default when unset.
+func (c *AppConfig) PatternScanLimit() int {
+	if c == nil || c.Search.PatternScanLimit <= 0 {
+		return DefaultPatternScanLimit
+	}
+	return min(c.Search.PatternScanLimit, MaxPatternScanLimit)
 }

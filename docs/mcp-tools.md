@@ -109,7 +109,9 @@ No embedding call is made — it's a direct point lookup, so it always returns t
 - **`regex`** (optional, default `false`).
 - **`filters`** (optional) — the same filters as `semantic_search`.
 
-Use this instead of `semantic_search` when you need an exact match rather than a similarity ranking — e.g. finding every usage of a method or identifier. It's a client-side scan of chunk text, not a Qdrant full-text index, so `score` is always `0`.
+Use this instead of `semantic_search` when you need an exact match rather than a similarity ranking — e.g. finding every usage of a method or identifier. It's a client-side scan of chunk text, not a Qdrant full-text index, so `score` is always `0`. Literal patterns are case-sensitive; use `regex: true` with `(?i)` to ignore case.
+
+One call scans up to **50,000 chunks** by default (about 90 MB of text at the default chunk size; set `search.pattern_scan_limit` on the Settings page, see [configuration.md](configuration.md#search)), reading only each chunk's text in batches of 1,000, then fetches the full results for just the matches on the requested page. Filters run inside Qdrant before the scan, so `repository` / `path` filters let it cover any collection completely. When the scan stops at the cap, the response has `"truncated": true` and a `note` — **even when the page has results**, because further matches may exist beyond the chunks scanned and `has_more: false` then doesn't mean "that's all".
 
 ## Which tool to use
 

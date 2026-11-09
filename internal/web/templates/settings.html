@@ -122,6 +122,20 @@
 </form>
 
 
+<!-- Search -->
+<form method="post" action="/settings/search" id="form-search" class="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+  <h2 class="text-sm font-semibold text-white uppercase tracking-wider mb-4">Search</h2>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div>
+      <label class="block text-xs font-medium text-slate-400 mb-1">Pattern search scan limit (chunks) {{template "tip" "How many chunks one pattern_search call reads before it stops and reports truncated. Only each chunk's text is transferred — about 1.8 KB per chunk at the default chunk size, so 50,000 chunks is roughly 90 MB. Raise it for large repositories; lower it if pattern searches are slow. Applies to the next search, no restart needed."}}</label>
+      <input name="pattern_scan_limit" type="number" min="1" max="{{.MaxPatternScanLimit}}" step="1" required value="{{.PatternScanLimit}}" class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm">
+    </div>
+  </div>
+  <div class="flex gap-2 mt-5">
+    <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save</button>
+  </div>
+</form>
+
 <!-- Danger zone -->
 <div class="mt-8">
   <h2 class="text-xs font-semibold uppercase tracking-wider text-red-400 mb-3">Danger zone</h2>
@@ -284,6 +298,8 @@ checkEmbeddingDims();
     qdrant_saved: ['ok', 'Vector store settings saved.'],
     qdrant_invalid: ['error', 'URL is required and must be a valid http:// or https:// address — settings not saved.'],
     preprocessing_saved: ['ok', 'Preprocessing settings saved.'],
+    search_saved: ['ok', 'Search settings saved. They apply to the next search.'],
+    search_invalid: ['error', 'Pattern search scan limit must be a whole number from 1 to {{.MaxPatternScanLimit}} — settings not saved.'],
     sources_deleted: ['ok', 'All sources and their indexed data have been deleted.'],
     experiences_deleted: ['ok', 'All experiences have been deleted.'],
     source_embeddings_cleaned: ['warn', 'Source embeddings cleared. All sources are marked for re-index.'],

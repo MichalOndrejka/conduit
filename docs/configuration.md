@@ -35,6 +35,9 @@ The `localhost` URL defaults below become `host.docker.internal` when Conduit ru
     },
     "concurrency": 4
   },
+  "search": {
+    "pattern_scan_limit": 50000
+  },
   "sources_file_path": "conduit-sources.json"
 }
 ```
@@ -131,6 +134,14 @@ Like embedding, preprocessing talks to any OpenAI-compatible chat endpoint (e.g.
 
 ---
 
+## Search
+
+### `pattern_scan_limit`
+
+How many chunks one `pattern_search` call scans before it stops and reports `"truncated": true` (see [mcp-tools.md](mcp-tools.md#mode-pattern_search--exact-literalregex-match)). Default `50000` — about 90 MB of text at the default chunk size, since only each chunk's text is transferred. Raise it so unfiltered searches cover a large repository; lower it if pattern searches are slow. At most `5000000`. Editable on the **Settings** page; it applies to the next search without a restart.
+
+---
+
 ## `sources_file_path`
 
 Path to the JSON file where source definitions are persisted. Defaults to `conduit-sources.json` in the current working directory. Use `CONDUIT_DATA_DIR` to redirect both this file and `config.json` to a shared data directory.
@@ -154,6 +165,7 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | `PREPROCESSING_MODEL` | Overrides `preprocessing.model`. |
 | `PREPROCESSING_BASE_URL` | Overrides `preprocessing.base_url`. |
 | `PREPROCESSING_CONCURRENCY` | Overrides `preprocessing.concurrency` — max in-flight preprocessing/chat calls during a sync. Default: `4`. |
+| `PATTERN_SCAN_LIMIT` | Overrides `search.pattern_scan_limit` — chunks one `pattern_search` call scans. Default: `50000`, at most `5000000`. |
 | `CONDUIT_HOST` | Address the HTTP server binds to. Default: `127.0.0.1`, or `0.0.0.0` in a container so the port mapping works. Requests must be addressed to `localhost`, `127.0.0.1`, `::1` or this value, and cross-site browser POSTs are rejected (DNS-rebinding/CSRF protection). |
 | `PORT` | HTTP listen port. Default: `8000`. |
 
