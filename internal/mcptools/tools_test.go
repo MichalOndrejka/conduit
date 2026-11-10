@@ -1226,3 +1226,25 @@ func TestSearchToolPatternSearchTruncatedWithResultsSaysSo(t *testing.T) {
 		t.Fatalf("results %d truncated %v note %q", len(out.Results), out.Truncated, out.Note)
 	}
 }
+
+// Every retrieve response reminds the agent to save corrections, with or
+// without hits: it is read at each task start, when the description is far
+// back in context.
+func TestRetrieveExperienceRemindsToRememberCorrections(t *testing.T) {
+	for name, qd := range map[string]*fakeQdrant{
+		"hits":    {searchPoints: []map[string]any{{"id": "e1", "score": 0.9, "payload": map[string]any{"text": "s", "prop_guidance": "g"}}}},
+		"no hits": {},
+	} {
+		s, ctx := setup(t, qd, nil)
+		result := callTool(t, s, ctx, "experience_retrieve", map[string]any{"query": "q"})
+		var payload struct {
+			Remember string `json:"remember"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, result)), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(payload.Remember, "experience_remember") || !strings.Contains(payload.Remember, "corrects you") {
+			t.Errorf("%s: remember = %q, want the correction reminder", name, payload.Remember)
+		}
+	}
+}

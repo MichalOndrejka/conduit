@@ -337,7 +337,8 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 				"It recalls relevant past experience: guidance on how to handle similar situations, "+
 				"known mistakes and their fixes, user preferences, and decisions from previous sessions. "+
 				"Returns guidance strings that should be followed for the current task. "+
-				"Pass a query describing the current situation or task."),
+				"Pass a query describing the current situation or task. "+
+				"Every time the user corrects you during the task, save the correction with experience_remember."),
 		mcp.WithString("query", mcp.Required(),
 			mcp.Description("Description of the current situation or task")),
 		mcp.WithNumber("top_k",
@@ -359,12 +360,13 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 				tc.Hits = append(tc.Hits, rag.Truncate(r.Situation, 200))
 			}
 		}
-		var payload any
+		payload := map[string]any{"experience": results}
 		if len(results) == 0 {
 			payload = map[string]any{"experience": []any{}, "note": "No relevant experience found."}
-		} else {
-			payload = map[string]any{"experience": results}
 		}
+		// Read with every task start, so the reminder is in context when a
+		// correction comes — the description alone is many turns back by then.
+		payload["remember"] = rememberReminder
 		data, err := json.Marshal(payload)
 		if err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
@@ -374,14 +376,23 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 
 	rememberTool := mcp.NewTool("experience_remember",
 		mcp.WithDescription(
-			"ALWAYS use this tool to store any information worth retaining across sessions. "+
-				"situation: describe the trigger — what kind of task, prompt, or context should surface this rule. "+
-				"guidance: the exact instruction to follow — what to do, avoid, or apply in that situation. "+
-				"Call this proactively whenever you learn something the user would want enforced in future conversations."),
+			"ALWAYS call this tool EVERY TIME the user corrects you — right away, in the same turn, before continuing "+
+				"the task. A correction is anything that tells you that you got it wrong or should do it differently: "+
+				"\"no, …\", \"that's wrong\", \"don't …\", \"use X instead\", \"I said …\", a rejected or reverted change, "+
+				"a fixed answer, or a correction of a fact, name, preference or convention. Never let a correction go "+
+				"unsaved, even a small one: the user should never have to correct the same thing twice in any future "+
+				"session. Also call it when the user states a rule or preference (\"we always…\", \"never…\", "+
+				"\"from now on…\", \"remember…\"). One lesson per call. "+
+				"situation: when the lesson applies, in the words a future request would use "+
+				"(e.g. \"writing a SQL migration for the billing database\"). "+
+				"guidance: what to do instead, imperative and specific, including what was wrong "+
+				"(e.g. \"Add a down migration; never drop a column in the same release that stops using it\"). "+
+				"Store it here even if you also keep your own notes: experience_retrieve surfaces it for every agent "+
+				"and session using Conduit."),
 		mcp.WithString("situation", mcp.Required(),
-			mcp.Description("The trigger: task, prompt, or context that should surface this rule")),
+			mcp.Description("When the lesson applies: the kind of task, request or context, in the words a future request would use")),
 		mcp.WithString("guidance", mcp.Required(),
-			mcp.Description("The exact instruction to follow in that situation")),
+			mcp.Description("What to do instead next time — the user's correction as a specific, imperative instruction")),
 	)
 	s.AddTool(rememberTool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		situation, err := req.RequireString("situation")
@@ -442,3 +453,7 @@ func recordSearch(ctx context.Context, collection string, args map[string]any, q
 	}
 	tc.HasMore, _ = payload["has_more"].(bool)
 }
+
+// rememberReminder rides on every experience_retrieve response.
+const rememberReminder = "Every time the user corrects you during this task, call experience_remember right away " +
+	"with the correction, so it is never needed twice."
