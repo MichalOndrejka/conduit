@@ -30,7 +30,7 @@ func pullRequestRequestSchema() map[string]any {
 			"iterations or commits.",
 		"oneOf": []any{
 			variant("list", map[string]any{
-				"source_id": str("A configured Azure DevOps or GitHub source of the repository (ids from sync_source status mode)"),
+				"source_id": str("A configured Azure DevOps or GitHub source of the repository (ids from source_sync status mode)"),
 				"status":    map[string]any{"type": "string", "enum": []string{"active", "completed", "abandoned", "all"}, "description": "Default active"},
 				"author":    str(`Optional: "me" (the token's owner), an email (Azure DevOps) or a login (GitHub)`),
 				"reviewer": str(`Optional: "me", an email (Azure DevOps) or a login (GitHub). On GitHub this matches pull ` +
@@ -62,7 +62,7 @@ func RegisterPullRequestTool(s *server.MCPServer, srcs SourceLister, store secre
 		mcp.WithDescription(`Find and read Azure DevOps and GitHub pull requests, live from the provider, for code `+
 			`review and questions about changes. Read-only; nothing is indexed, so every answer is current. `+
 			`{"mode":"list","source_id":...} finds pull requests of a configured repository (a Pull Requests `+
-			`source, or any source of the repository; ids from sync_source status mode) by status, author, reviewer `+
+			`source, or any source of the repository; ids from source_sync status mode) by status, author, reviewer `+
 			`("me" works) and target branch, newest first. Every other mode takes the pull request's web URL, which is `+
 			`matched to a configured source of the same organization or server for credentials. `+
 			`Typical review: request={"mode":"get","url":...} for the title, description, branches, reviewers and votes, `+
@@ -138,7 +138,7 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 				"pull_requests": prs, "page": page, "has_more": hasMore,
 			}, nil
 		}
-		return nil, fmt.Errorf("no source has id %q — sync_source status mode lists them", id)
+		return nil, fmt.Errorf("no source has id %q — source_sync status mode lists them", id)
 	}
 
 	switch mode {

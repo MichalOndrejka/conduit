@@ -19,12 +19,12 @@ func TestStatsPageWithoutRecorder(t *testing.T) {
 func TestStatsPageNothingRecordedYet(t *testing.T) {
 	h := newHarness(t)
 	h.server.SetStats(stats.New())
-	h.server.SetToolNames([]string{"search_source_code", "sync_source"})
+	h.server.SetToolNames([]string{"search_source_code", "source_sync"})
 	body := bodyString(t, h.get("/"))
 	// The whole dashboard shows, just empty; the tool charts list every
 	// registered tool at zero.
 	for _, want := range []string{"Tool Calls", "Hits", "Misses", "Latency", "Syncs", "API Requests", ">Sources<", ">Experience<",
-		"Calls by tool", "Empty results by tool", "search_source_code", "sync_source", "No syncs yet", "Entries Remembered", "Memories Recalled", "Recall Miss"} {
+		"Calls by tool", "Empty results by tool", "search_source_code", "source_sync", "No syncs yet", "Entries Remembered", "Memories Recalled", "Recall Miss"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("empty dashboard lacks %q", want)
 		}

@@ -75,10 +75,10 @@ func syncRequestSchema() map[string]any {
 	}
 }
 
-// RegisterSyncTool registers the sync_source tool. Called once at startup,
+// RegisterSyncTool registers the source_sync tool. Called once at startup,
 // alongside RegisterTools.
 func RegisterSyncTool(s *server.MCPServer, sources SourceLister, runner SyncRunner) {
-	tool := mcp.NewTool("sync_source",
+	tool := mcp.NewTool("source_sync",
 		mcp.WithDescription(`Start syncs of Conduit's sources and check their status. `+
 			`A sync re-fetches a source from its system and replaces its indexed documents, so search results reflect `+
 			`the source as of its last successful sync (last_synced_at). `+

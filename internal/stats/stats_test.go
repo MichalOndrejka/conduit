@@ -53,7 +53,7 @@ func TestToolMiddlewareRecordsCallsAndHandlerDetails(t *testing.T) {
 	call("search_workitem", search)
 	call("search_workitem", search)
 	call("search_broken", map[string]any{"request": map[string]any{"mode": "pattern_search"}})
-	call("sync_source", map[string]any{"request": map[string]any{"mode": "status"}})
+	call("source_sync", map[string]any{"request": map[string]any{"mode": "status"}})
 
 	events := r.Events()
 	var tools []*ToolCall

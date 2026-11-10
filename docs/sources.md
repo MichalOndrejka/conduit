@@ -101,7 +101,7 @@ Source Code, Test Code and Documentation sources (and Requirements / Test Cases 
 
 These sources download the branch's whole tree as **one zip** (`…/items?path=/&recursionLevel=Full&$format=zip&download=true`) to a temporary file, then apply **File filter** (`PathFilter`) and **Max items** (`Top`) locally. A sync costs one request for the files, whatever the repository size; a download cut off part-way is restarted. Each matching file becomes one document, ID `{source}_capi_{path}`, holding its path and full content; files over 200 KB or binary are noted as skipped. The form's preview downloads the whole zip too.
 
-Within one sync batch (**Sync selected**, or `sync_source trigger` with several IDs), sources that read the same archive — the same repository, branch and credential, e.g. a Source Code and a Test Code source of one repository — share a single download: the first downloads, the others wait for it and read the same file. This holds for GitHub tarballs too. The files are deleted when the batch ends; nothing is kept between syncs, and a source synced on its own downloads for itself. A download that ends early (even when the response itself ended cleanly) is detected by reading the archive back and restarted.
+Within one sync batch (**Sync selected**, or `source_sync trigger` with several IDs), sources that read the same archive — the same repository, branch and credential, e.g. a Source Code and a Test Code source of one repository — share a single download: the first downloads, the others wait for it and read the same file. This holds for GitHub tarballs too. The files are deleted when the batch ends; nothing is kept between syncs, and a source synced on its own downloads for itself. A download that ends early (even when the response itself ended cleanly) is detected by reading the archive back and restarted.
 
 The generic API config keys aren't tied to Azure DevOps — the backend runs any single-endpoint JSON API this way — but the web UI no longer exposes a form for building one from scratch; non-ADO API sources must be added directly to `conduit-sources.json`. Examples expressible as pure configuration:
 
@@ -153,7 +153,7 @@ These require dedicated provider code, which the Go backend deliberately does no
 
 ## Pipeline Runs
 
-Pipeline Runs sources (`pipeline-run`) are **never synced**. One source names one pipeline — an Azure DevOps build definition (YAML or classic) or a GitHub Actions workflow — and the credentials to read it. [`search_pipeline_run`](mcp-tools.md#search_pipeline_run) asks the provider on every call, so its answers are always current, and nothing about runs is stored in Qdrant. The Sources page marks such a source **Live**; it has no Sync button, and `sync_source trigger` answers `live_not_synced` for it.
+Pipeline Runs sources (`pipeline-run`) are **never synced**. One source names one pipeline — an Azure DevOps build definition (YAML or classic) or a GitHub Actions workflow — and the credentials to read it. [`search_pipeline_run`](mcp-tools.md#search_pipeline_run) asks the provider on every call, so its answers are always current, and nothing about runs is stored in Qdrant. The Sources page marks such a source **Live**; it has no Sync button, and `source_sync trigger` answers `live_not_synced` for it.
 
 What a call reads (Azure DevOps; GitHub reads the equivalents):
 

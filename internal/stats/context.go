@@ -52,7 +52,7 @@ func (r *Recorder) ToolMiddleware(next server.ToolHandlerFunc) server.ToolHandle
 	}
 }
 
-// requestMode is a tool's request.mode (search tools, sync_source, …) or
+// requestMode is a tool's request.mode (search tools, source_sync, …) or
 // top-level mode argument.
 func requestMode(args map[string]any) string {
 	if req, ok := args["request"].(map[string]any); ok {

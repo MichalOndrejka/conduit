@@ -75,7 +75,7 @@ func (q listRequest) resolve(ctx context.Context, search *rag.SearchService, col
 			payload["note"] = fmt.Sprintf("No further documents beyond page %d — this was the last page.", q.Page-1)
 		case q.OrderBy != "":
 			payload["note"] = "Nothing matched these filters, or no document carries " + q.OrderBy +
-				" yet: sources synced before Conduit stored it need a re-sync (sync_source trigger)."
+				" yet: sources synced before Conduit stored it need a re-sync (source_sync trigger)."
 		default:
 			payload["note"] = "Nothing matched these filters — the source may not be synced yet."
 		}
@@ -193,6 +193,6 @@ func listModeNote(sorts []sortField) string {
 		`pass request={"mode":"list","filters":{...},"page":1}: whole documents (one result each, its first chunk; ` +
 		`walk the rest with retrieve_chunk), ` + order + `, 20 per page. ` +
 		`Conduit is a cache of the source systems: every response carries as_of, when each source in the results ` +
-		`last synced. If the question is about right now and as_of is older than that matters, call sync_source ` +
+		`last synced. If the question is about right now and as_of is older than that matters, call source_sync ` +
 		`(mode trigger, then status until completed) and ask again.`
 }

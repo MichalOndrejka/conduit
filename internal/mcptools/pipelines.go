@@ -20,7 +20,7 @@ const logPageLines = 500
 func pipelineRequestSchema() map[string]any {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 	num := func(desc string) map[string]any { return map[string]any{"type": "number", "description": desc} }
-	sourceID := str("A configured pipeline-run source (ids from sync_source status mode). May be omitted when exactly " +
+	sourceID := str("A configured pipeline-run source (ids from source_sync status mode). May be omitted when exactly " +
 		"one pipeline-run source is enabled")
 	runID := num("The run's id: Azure DevOps buildId, GitHub Actions run id")
 	runURL := str("Instead of source_id + run_id: the run's web link, e.g. " +
@@ -213,7 +213,7 @@ func pipelineSource(all []models.SourceDefinition, id string) (*models.SourceDef
 				return &all[i], nil
 			}
 		}
-		return nil, fmt.Errorf("no source has id %q — sync_source status mode lists them", id)
+		return nil, fmt.Errorf("no source has id %q — source_sync status mode lists them", id)
 	}
 	var found []*models.SourceDefinition
 	var names []string

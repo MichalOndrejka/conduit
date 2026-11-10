@@ -1,5 +1,5 @@
 // Package sourcemgmt holds the source-config rules shared by the web UI and
-// the manage_source MCP tool: which source types and config keys exist, how
+// the source_manage MCP tool: which source types and config keys exist, how
 // a config is validated, and how saving or deleting a source keeps its
 // indexed vectors consistent.
 package sourcemgmt

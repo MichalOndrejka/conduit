@@ -119,10 +119,10 @@ func manageRequestSchema() map[string]any {
 	}
 }
 
-// RegisterSourcesTool registers the manage_source tool. Called once at
+// RegisterSourcesTool registers the source_manage tool. Called once at
 // startup, alongside RegisterSyncTool.
 func RegisterSourcesTool(s *server.MCPServer, mgr SourceManager, runner SyncRunner) {
-	tool := mcp.NewTool("manage_source",
+	tool := mcp.NewTool("source_manage",
 		mcp.WithDescription(`Configure Conduit's Azure DevOps and GitHub sources — the systems its search tools index. `+
 			`Pass request={"mode":"list"} for every source (id, name, type, provider, disabled, sync_status), `+
 			`the stored credential names and the source types. `+
@@ -130,7 +130,7 @@ func RegisterSourcesTool(s *server.MCPServer, mgr SourceManager, runner SyncRunn
 			`{"mode":"create","name":...,"type":...,"config":{...}} adds a source (config.Provider "github" for GitHub); `+
 			`{"mode":"update","source_id":...,...} changes name, type, disabled or merges config keys. `+
 			`Credentials are referenced by name only: ask the user which stored credential to use and never ask for `+
-			`or pass a token or password. Saving doesn't index anything — call sync_source trigger afterwards. `+
+			`or pass a token or password. Saving doesn't index anything — call source_sync trigger afterwards. `+
 			`{"mode":"delete","source_id":...} reports what would be removed; repeat with "confirm":true to delete `+
 			`the source and its indexed data.`),
 		func(t *mcp.Tool) {
@@ -421,5 +421,5 @@ func nextStep(src models.SourceDefinition, verb string) string {
 	case models.SourcePullRequest:
 		return "Nothing to sync: search_pull_request reads this repository's pull requests live with this source_id."
 	}
-	return "Call sync_source trigger with this id to " + verb + " it."
+	return "Call source_sync trigger with this id to " + verb + " it."
 }

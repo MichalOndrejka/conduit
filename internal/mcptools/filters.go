@@ -157,7 +157,7 @@ func parseFiltersFor(raw any, fields []filterField, me []string) ([]rag.FieldCon
 				}
 				if len(me) == 0 {
 					return nil, fmt.Errorf(`request.filters.%s: "me" is unknown — no source has recorded its token owner yet; `+
-						`sync a source (sync_source trigger) or pass a name or email`, k)
+						`sync a source (source_sync trigger) or pass a name or email`, k)
 				}
 				expanded = append(expanded, me...)
 			}
