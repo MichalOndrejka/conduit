@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/mcptools"
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/providers/registry"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/setup"
@@ -83,6 +85,11 @@ func main() {
 	vectors := rag.NewVectorStore(cfg)
 	embedding := rag.NewEmbeddingService(cfg)
 	sourceStore := store.NewSourceConfigStore(cfg.SourcesFilePath)
+	// Providers sit next to the sources file; their tokens live in the secrets store.
+	providerStore := store.NewProviderStore(filepath.Join(filepath.Dir(cfg.SourcesFilePath), "conduit-providers.json"))
+	sourceMgr := sourcemgmt.New(sourceStore, vectors, providerStore, secretsStore)
+	resolver := sourceMgr.Resolver()
+	liveSources := registry.EffectiveLister{Sources: sourceStore, Resolver: resolver}
 	searchSvc := rag.NewSearchService(vectors, embedding, sourceStore)
 	searchSvc.SetConfig(cfg) // Settings changes (pattern scan limit) apply live
 	memorySvc := memory.NewService(vectors, embedding)
@@ -151,7 +158,7 @@ func main() {
 	chunker := rag.NewTextChunker(cfg)
 	indexer := rag.NewDocumentIndexer(vectors, embedding, chunker)
 	syncSvc := syncsvc.New(
-		cfg, sourceStore, secretsStore, indexer,
+		cfg, sourceStore, resolver, indexer,
 		syncctl.NewProgressStore(), syncctl.NewControlStore(),
 	)
 
@@ -175,14 +182,15 @@ func main() {
 	mcpServer := server.NewMCPServer("Conduit", version, server.WithToolHandlerMiddleware(statsRec.ToolMiddleware))
 	mcptools.RegisterTools(mcpServer, searchSvc, memorySvc)
 	mcptools.RegisterSyncTool(mcpServer, sourceStore, syncSvc)
-	mcptools.RegisterPullRequestTool(mcpServer, sourceStore, secretsStore)
-	mcptools.RegisterPipelineTool(mcpServer, sourceStore, secretsStore)
-	mcptools.RegisterSourcesTool(mcpServer, sourcemgmt.New(sourceStore, vectors, secretsStore), syncSvc)
+	mcptools.RegisterPullRequestTool(mcpServer, liveSources, resolver)
+	mcptools.RegisterPipelineTool(mcpServer, liveSources, resolver)
+	mcptools.RegisterSourcesTool(mcpServer, sourceMgr, syncSvc)
+	mcptools.RegisterExploreTool(mcpServer, sourceMgr)
 	mcpHTTP := server.NewStreamableHTTPServer(mcpServer, server.WithEndpointPath("/mcp"))
 
 	// ── HTTP wiring ─────────────────────────────────────────────────────────
 	mux := http.NewServeMux()
-	webServer := web.NewServer(cfg, sourceStore, vectors, memorySvc, secretsStore, syncSvc, healthMon)
+	webServer := web.NewServer(cfg, sourceStore, vectors, memorySvc, sourceMgr, syncSvc, healthMon)
 	webServer.SetStats(statsRec)
 	webServer.SetToolNames(mcptools.ToolNames(mcpServer))
 	webServer.Routes(mux)

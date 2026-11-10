@@ -5,25 +5,15 @@
     <h1 class="text-2xl font-semibold text-white">Sources</h1>
   </div>
   <div class="flex gap-2">
-    <a href="/export" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Export</a>
-    <form method="post" action="/import" enctype="multipart/form-data" id="import-form">
-      <input type="file" name="file" accept="application/json,.json" id="import-file" class="hidden"
-             onchange="document.getElementById('import-form').submit()">
-      <button type="button" onclick="document.getElementById('import-file').click()"
-              class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Import</button>
-    </form>
     <a href="/map" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Vector map</a>
-    <a href="/sources/create" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">New source</a>
+    <a href="/providers" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Add sources</a>
   </div>
 </div>
 
-{{if or .ImportMessage .ImportError}}
-<script>showToast({{.ImportMessage}} || {{.ImportError}}, {{if .ImportError}}'error'{{else}}'ok'{{end}});</script>
-{{end}}
 
 {{if not .Sources}}
 <div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
-  No sources configured yet. <a href="/sources/create" class="text-violet-400 hover:underline">Create one</a>.
+  No sources configured yet. <a href="/providers" class="text-violet-400 hover:underline">Add a provider</a>, then tick what to index.
 </div>
 {{else}}
 <div class="flex items-center gap-3 mb-3 text-sm text-slate-400">
@@ -45,6 +35,12 @@
         <div class="flex items-center gap-2">
           <a href="/sources/{{.ID}}/{{if .Live}}edit{{else}}items{{end}}" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Type}}</span>
+          {{if .Legacy}}
+          <span class="text-[10px] uppercase tracking-wider text-red-300 border border-red-800 bg-red-950/50 rounded px-1.5 py-0.5">No provider</span>
+          {{template "tip" "Created before providers, or its provider was deleted: it can no longer be read. Delete it and tick it again in a provider's tree."}}
+          {{else}}
+          <a href="/providers/{{.ProviderID}}" class="text-xs text-slate-500 hover:text-violet-400 truncate">{{.Provider}}</a>
+          {{end}}
           {{if .Disabled}}
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-600 rounded px-1.5 py-0.5">Disabled</span>
           {{end}}

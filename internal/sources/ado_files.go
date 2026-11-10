@@ -67,6 +67,14 @@ func matchesPathFilter(p string, patterns []string) bool {
 	name := path.Base(p)
 	trimmed := strings.TrimPrefix(p, "/")
 	for _, pat := range patterns {
+		// A "/"-rooted pattern (a file or folder ticked in the browse
+		// tree) matches from the repository root only, never a basename.
+		if rooted, ok := strings.CutPrefix(pat, "/"); ok {
+			if ok, _ := doublestar.Match(rooted, trimmed); ok {
+				return true
+			}
+			continue
+		}
 		if ok, _ := doublestar.Match(pat, name); ok {
 			return true
 		}

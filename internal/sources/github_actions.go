@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -62,18 +64,64 @@ type githubAnnotation struct {
 	Message         string `json:"message"`
 }
 
-// githubPipelineClient reads one repository's workflow runs; workflow ("" when
-// resolved from a run URL) scopes listings.
+// githubPipelineClient reads one repository's workflow runs: of every
+// workflow, or of the one a listing names.
 type githubPipelineClient struct {
-	g        *GitHubSource
-	workflow string
+	g *GitHubSource
 }
 
 func (c *githubPipelineClient) cacheScope() string { return "github|" + c.g.repoAPI() }
 
+// pipelines lists the repository's workflows.
+func (c *githubPipelineClient) pipelines(ctx context.Context) ([]PipelineDefinition, error) {
+	var out []PipelineDefinition
+	err := c.g.pages(ctx, c.g.repoAPI()+"/actions/workflows", func(data []byte) (int, bool, error) {
+		var page struct {
+			Workflows []struct {
+				ID      int64  `json:"id"`
+				Name    string `json:"name"`
+				Path    string `json:"path"`
+				State   string `json:"state"`
+				HTMLURL string `json:"html_url"`
+			} `json:"workflows"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			return 0, false, fmt.Errorf("listing workflows: %w", err)
+		}
+		for _, w := range page.Workflows {
+			out = append(out, PipelineDefinition{
+				ID: strconv.FormatInt(w.ID, 10), Name: w.Name, File: path.Base(w.Path), State: w.State, WebURL: w.HTMLURL,
+			})
+		}
+		return len(page.Workflows), true, nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listing workflows: %w", err)
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out, nil
+}
+
 func (c *githubPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error) {
-	if c.workflow == "" {
-		return nil, fmt.Errorf("no workflow to list — use a pipeline-run source")
+	listURL := c.g.repoAPI() + "/actions/runs"
+	what := "the repository"
+	if want := strings.TrimSpace(f.Pipeline); want != "" {
+		workflow := want
+		// A workflow ID or file name goes straight to GitHub; a name is
+		// looked up first.
+		if _, err := strconv.ParseInt(want, 10, 64); err != nil && !strings.HasSuffix(want, ".yml") && !strings.HasSuffix(want, ".yaml") {
+			defs, err := c.pipelines(ctx)
+			if err != nil {
+				return nil, err
+			}
+			d, err := matchPipeline(defs, want)
+			if err != nil {
+				return nil, err
+			}
+			workflow = d.ID
+		}
+		listURL = c.g.repoAPI() + "/actions/workflows/" + url.PathEscape(workflow) + "/runs"
+		what = "workflow " + strconv.Quote(want)
 	}
 	q := url.Values{}
 	q.Set("per_page", strconv.Itoa(f.Top))
@@ -95,9 +143,9 @@ func (c *githubPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([
 	var page struct {
 		WorkflowRuns []githubRun `json:"workflow_runs"`
 	}
-	listURL := fmt.Sprintf("%s/actions/workflows/%s/runs?%s", c.g.repoAPI(), url.PathEscape(c.workflow), q.Encode())
+	listURL += "?" + q.Encode()
 	if _, err := c.g.getJSON(ctx, listURL, &page); err != nil {
-		return nil, fmt.Errorf("listing runs of workflow %q: %w", c.workflow, err)
+		return nil, fmt.Errorf("listing runs of %s: %w", what, err)
 	}
 	out := make([]PipelineRunSummary, 0, len(page.WorkflowRuns))
 	for i := range page.WorkflowRuns {

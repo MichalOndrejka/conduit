@@ -1,0 +1,71 @@
+{{define "title"}}{{.Source.Name}} — Conduit{{end}}
+{{define "content"}}
+{{$s := .Source}}
+<div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
+  <a href="/sources" class="hover:text-violet-400">Sources</a>
+  <span>/</span>
+  <span class="text-slate-400">{{$s.Name}}</span>
+</div>
+<div class="flex items-center gap-2 mb-6">
+  <h1 class="text-2xl font-semibold text-white truncate">{{$s.Name}}</h1>
+  <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.TypeLabel}}</span>
+  {{if .Live}}
+  <span class="text-[10px] uppercase tracking-wider text-emerald-300 border border-emerald-800 bg-emerald-950/50 rounded px-1.5 py-0.5">Live</span>
+  {{template "tip" "Read live from the provider by its MCP tool on every call; never synced or embedded."}}
+  {{end}}
+</div>
+
+{{if .Error}}
+<script>showToast({{.Error}}, 'error');</script>
+{{end}}
+
+<form method="post" class="space-y-6 max-w-3xl">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+    <div class="flex items-center justify-between gap-3 mb-3">
+      <h2 class="text-sm font-medium text-slate-300">Selection {{template "tip" "What this source covers. Change it by ticking or unticking in the provider's tree."}}</h2>
+      {{if .Provider}}
+      <a href="/providers/{{.Provider.ID}}" class="text-xs text-violet-400 hover:underline">Change in {{.Provider.Name}} →</a>
+      {{end}}
+    </div>
+    <dl class="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-1.5 text-sm">
+      <dt class="text-slate-500">Provider</dt>
+      <dd class="text-slate-200">{{if .Provider}}{{.Provider.Name}} <span class="text-slate-500">({{.ProviderLabel}})</span>{{else}}<span class="text-red-300">none</span> {{template "tip" "Created before providers, or its provider was deleted: it can no longer be read. Delete it and tick it again in a provider's tree."}}{{end}}</dd>
+      {{range .Scope}}
+      <dt class="text-slate-500">{{.Label}}</dt>
+      <dd class="text-slate-200 font-mono break-all">{{.Value}}</dd>
+      {{end}}
+    </dl>
+  </div>
+
+  <div>
+    <label class="block text-sm font-medium text-slate-300 mb-1">Name <span class="text-red-400">*</span> {{template "tip" "Display name, also the source_name filter of the search tools."}}</label>
+    <input name="name" required value="{{$s.Name}}"
+           class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">
+  </div>
+
+  {{if .Fields}}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {{range .Fields}}
+    <div>
+      <label class="block text-sm font-medium text-slate-300 mb-1">{{.Label}} {{template "tip" .Tip}}</label>
+      <input name="{{.Key}}" value="{{.Value}}" placeholder="{{.Placeholder}}" {{if .Number}}type="number" min="1"{{end}}
+             class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+    </div>
+    {{end}}
+  </div>
+  {{end}}
+
+  <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+    <input type="checkbox" name="enabled" {{if not $s.Disabled}}checked{{end}} class="h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600">
+    Enabled {{template "tip" "A disabled source is skipped by Sync and by the live tools' defaults."}}
+  </label>
+
+  <div class="flex gap-3">
+    <button type="submit" name="action" value="save" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">Save changes</button>
+    {{if and (not .Live) (not .Legacy)}}
+    <button type="submit" name="action" value="save_sync" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Save &amp; sync</button>
+    {{end}}
+    <a href="/sources" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
+  </div>
+</form>
+{{end}}

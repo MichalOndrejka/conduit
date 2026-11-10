@@ -19,6 +19,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncctl"
 	"github.com/MichalOndrejka/conduit/internal/syncsvc"
@@ -129,6 +130,7 @@ type harness struct {
 	client  *http.Client
 	sources *store.SourceConfigStore
 	secrets *secrets.Store
+	mgr     *sourcemgmt.Manager
 	cfg     *config.AppConfig
 	qd      *fakeQdrant
 	health  *health.Monitor
@@ -198,11 +200,13 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 	memSvc := memory.NewService(vectors, embedding)
 	chunker := rag.NewTextChunker(cfg)
 	indexer := rag.NewDocumentIndexer(vectors, embedding, chunker)
-	syncSvc := syncsvc.New(cfg, sourceStore, secretsStore, indexer, syncctl.NewProgressStore(), syncctl.NewControlStore())
+	providerStore := store.NewProviderStore(filepath.Join(dataDir, "conduit-providers.json"))
+	mgr := sourcemgmt.New(sourceStore, vectors, providerStore, secretsStore)
+	syncSvc := syncsvc.New(cfg, sourceStore, mgr.Resolver(), indexer, syncctl.NewProgressStore(), syncctl.NewControlStore())
 
 	healthMon := health.Start(cfg, vectors, embedding)
 
-	srv := NewServer(cfg, sourceStore, vectors, memSvc, secretsStore, syncSvc, healthMon)
+	srv := NewServer(cfg, sourceStore, vectors, memSvc, mgr, syncSvc, healthMon)
 	mux := http.NewServeMux()
 	srv.Routes(mux)
 	httpSrv := httptest.NewServer(mux)
@@ -214,7 +218,7 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 
 	return &harness{
 		t: t, http: httpSrv, client: client,
-		sources: sourceStore, secrets: secretsStore, cfg: cfg, qd: qd, health: healthMon, server: srv,
+		sources: sourceStore, secrets: secretsStore, mgr: mgr, cfg: cfg, qd: qd, health: healthMon, server: srv,
 	}
 }
 

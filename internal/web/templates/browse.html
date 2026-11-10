@@ -1,0 +1,221 @@
+{{define "title"}}{{.Provider.Name}} — Conduit{{end}}
+{{define "content"}}
+{{$c := .Provider}}
+<div class="flex items-start justify-between mb-6 flex-wrap gap-3">
+  <div class="min-w-0">
+    <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
+      <a href="/providers" class="hover:text-violet-400">Providers</a>
+      <span>/</span>
+      <span class="text-slate-400">{{$c.Name}}</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <h1 class="text-2xl font-semibold text-white truncate">{{$c.Name}}</h1>
+      {{template "tip" "Tick what to index. Ticking a folder includes everything in it, also files added later. Pull Requests and Runs are read live and never synced. Selections save immediately; nothing is fetched until you press Sync. Unticking the last part of a source deletes it and its embedded data."}}
+      <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.ProviderLabel}}</span>
+    </div>
+    <div class="text-xs text-slate-500 mt-1 font-mono truncate">{{$c.BaseURL}}</div>
+  </div>
+  <div class="flex gap-2 shrink-0">
+    <a href="/providers/{{$c.ID}}/edit" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Edit provider</a>
+    <button type="button" id="sync-btn" onclick="syncProvider()"
+            class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed">Sync</button>
+  </div>
+</div>
+
+{{if not .HasToken}}
+<div class="mb-4 rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-2 text-sm text-amber-300">No token is stored for this provider. <a href="/providers/{{$c.ID}}/edit" class="underline">Set one</a> to browse.</div>
+{{end}}
+
+<div class="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6 items-start">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-3 min-w-0">
+    <div id="tree" class="text-sm"></div>
+  </div>
+
+  <aside class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 lg:sticky lg:top-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-medium text-slate-300">Selected sources</h2>
+      <span id="source-count" class="text-xs text-slate-500">{{len .Sources}}</span>
+    </div>
+    <ul id="source-list" class="space-y-2 text-xs">
+      {{range .Sources}}
+      <li class="break-words"><a href="/sources/{{.ID}}/edit" class="text-slate-200 hover:text-violet-400">{{.Name}}</a>{{if .Detail}}<div class="text-slate-500 font-mono break-all">{{.Detail}}</div>{{end}}</li>
+      {{else}}
+      <li class="text-slate-500">Nothing selected yet.</li>
+      {{end}}
+    </ul>
+    <a href="/sources" class="block mt-4 text-xs text-violet-400 hover:underline">Sync status on the Sources page →</a>
+  </aside>
+</div>
+
+<script>
+var PROVIDER = {{$c.ID}};
+var LABELS = {};
+{{range .TypeLabels}}LABELS[{{.Value}}] = {{.Label}};
+{{end}}
+var rendered = []; // {node, row} for every row on the page, to refresh their states
+
+function api(path, body) {
+  var opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+  return fetch('/api/providers/' + PROVIDER + path, opts).then(function (r) { return r.json(); });
+}
+
+function message(container, text, cls) {
+  var p = document.createElement('div');
+  p.className = 'px-2 py-1.5 text-xs ' + cls;
+  p.textContent = text;
+  container.appendChild(p);
+}
+
+function load(parentRef, container, depth) {
+  container.innerHTML = '';
+  message(container, 'Loading…', 'text-slate-500');
+  var q = parentRef ? '?ref=' + encodeURIComponent(JSON.stringify(parentRef)) : '';
+  return api('/discover' + q).then(function (res) {
+    container.innerHTML = '';
+    if (!res.ok) { message(container, res.error || 'Listing failed.', 'text-red-300'); return; }
+    if (!res.nodes || res.nodes.length === 0) { message(container, 'Nothing here.', 'text-slate-500'); return; }
+    res.nodes.forEach(function (n) { container.appendChild(renderNode(n, depth)); });
+  }).catch(function (err) {
+    container.innerHTML = '';
+    message(container, 'Listing failed: ' + err, 'text-red-300');
+  });
+}
+
+function renderNode(node, depth) {
+  var wrap = document.createElement('div');
+  var row = document.createElement('div');
+  row.className = 'flex items-center gap-2 rounded-lg px-2 py-1 hover:bg-slate-800/60';
+  row.style.paddingLeft = (8 + depth * 18) + 'px';
+
+  var chevron = document.createElement('button');
+  chevron.type = 'button';
+  chevron.className = 'w-4 shrink-0 text-slate-500 hover:text-white text-xs';
+  chevron.textContent = node.has_children ? '▸' : '';
+  row.appendChild(chevron);
+
+  var name = document.createElement('span');
+  name.className = 'min-w-[7rem] truncate ' + (node.ref.kind === 'file' ? 'text-slate-300' : 'text-white');
+  name.textContent = (node.ref.kind === 'folder' || node.ref.kind === 'pipelinefolder' ? '📁 ' : '') + node.name;
+  row.appendChild(name);
+
+  if (node.detail) {
+    var detail = document.createElement('span');
+    detail.className = 'min-w-0 truncate text-xs text-slate-500';
+    detail.textContent = node.detail;
+    row.appendChild(detail);
+  }
+
+  var toggles = document.createElement('div');
+  toggles.className = 'ml-auto flex flex-wrap justify-end gap-1 pl-2';
+  (node.offers || []).forEach(function (t) {
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.dataset.type = t;
+    b.textContent = LABELS[t] || t;
+    b.onclick = function () { toggle(node, t, b); };
+    toggles.appendChild(b);
+  });
+  row.appendChild(toggles);
+  wrap.appendChild(row);
+
+  var children = document.createElement('div');
+  children.className = 'hidden';
+  wrap.appendChild(children);
+  if (node.has_children) {
+    var loaded = false;
+    var expand = function () {
+      var open = children.classList.toggle('hidden') === false;
+      chevron.textContent = open ? '▾' : '▸';
+      if (open && !loaded) { loaded = true; load(node.ref, children, depth + 1); }
+    };
+    chevron.onclick = expand;
+    name.classList.add('cursor-pointer');
+    name.onclick = expand;
+  }
+
+  rendered.push({ node: node, row: row });
+  applyState(row, node.state || {});
+  return wrap;
+}
+
+function applyState(row, state) {
+  row.querySelectorAll('button[data-type]').forEach(function (b) {
+    var s = state[b.dataset.type] || '';
+    b.dataset.state = s;
+    var base = 'rounded-md px-2 py-0.5 text-[11px] border transition-colors ';
+    if (s === 'on') {
+      b.className = base + 'bg-violet-600 border-violet-600 text-white hover:bg-violet-500';
+      b.title = 'Selected — click to remove';
+    } else if (s === 'inherited') {
+      b.className = base + 'border-violet-800 text-violet-300 cursor-default';
+      b.title = 'Included through a selected parent';
+    } else {
+      b.className = base + 'border-slate-700 text-slate-400 hover:border-violet-600 hover:text-violet-300';
+      b.title = 'Click to embed as ' + (LABELS[b.dataset.type] || b.dataset.type);
+    }
+  });
+}
+
+function toggle(node, type, button) {
+  var state = button.dataset.state;
+  if (state === 'inherited') return;
+  var on = state !== 'on';
+  if (!on && !confirm('Remove "' + node.name + '" from ' + LABELS[type] + '? Embedded data that is no longer selected is deleted.')) return;
+  button.disabled = true;
+  api('/select', { ref: node.ref, name: node.name, type: type, on: on }).then(function (res) {
+    if (!res.ok) showToast(res.error || 'Selection failed.', 'error');
+    return refreshStates();
+  }).finally(function () { button.disabled = false; });
+}
+
+function refreshStates() {
+  var nodes = rendered.map(function (r) { return r.node; });
+  return api('/states', { nodes: nodes }).then(function (res) {
+    if (!res.ok) { showToast(res.error || 'Refreshing failed.', 'error'); return; }
+    res.states.forEach(function (st, i) { rendered[i].node.state = st; applyState(rendered[i].row, st); });
+    renderSources(res.sources || []);
+  });
+}
+
+function renderSources(sources) {
+  var list = document.getElementById('source-list');
+  list.innerHTML = '';
+  document.getElementById('source-count').textContent = sources.length;
+  document.getElementById('sync-btn').disabled = !sources.some(function (s) { return !s.live; });
+  if (sources.length === 0) {
+    var li = document.createElement('li');
+    li.className = 'text-slate-500';
+    li.textContent = 'Nothing selected yet.';
+    list.appendChild(li);
+    return;
+  }
+  sources.forEach(function (s) {
+    var li = document.createElement('li');
+    li.className = 'break-words';
+    var a = document.createElement('a');
+    a.href = '/sources/' + s.id + '/edit';
+    a.className = 'text-slate-200 hover:text-violet-400';
+    a.textContent = s.name;
+    li.appendChild(a);
+    if (s.detail) {
+      var d = document.createElement('div');
+      d.className = 'text-slate-500 font-mono break-all';
+      d.textContent = s.detail;
+      li.appendChild(d);
+    }
+    list.appendChild(li);
+  });
+}
+
+function syncProvider() {
+  var btn = document.getElementById('sync-btn');
+  btn.disabled = true;
+  fetch('/providers/' + PROVIDER + '/sync', { method: 'POST' }).then(function (r) { return r.json(); }).then(function (res) {
+    showToast(res.ok ? 'Syncing ' + res.started + ' source' + (res.started === 1 ? '' : 's') + ' — follow progress on the Sources page.' : 'Sync failed.', res.ok ? 'ok' : 'error');
+  }).finally(function () { btn.disabled = false; });
+}
+
+document.getElementById('sync-btn').disabled = true; // until the selection loads (refreshStates)
+load(null, document.getElementById('tree'), 0).then(refreshStates);
+</script>
+{{end}}

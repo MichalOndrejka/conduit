@@ -1,7 +1,6 @@
 package store
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -134,164 +133,14 @@ func TestGetReturnsIndependentCopies(t *testing.T) {
 	}
 }
 
-// ── RenameCredentialReferences ───────────────────────────────────────────────
 
-func TestRenameCredentialReferencesUpdatesMatchingFields(t *testing.T) {
-	s, _ := newStore(t)
-	mustSave(t, s, models.SourceDefinition{ID: "s1", Config: map[string]string{
-		"Password": "old-cred", "Token": "old-cred", "Pat": "unrelated", "ApiKeyValue": "old-cred",
-	}})
-	mustSave(t, s, models.SourceDefinition{ID: "s2", Config: map[string]string{"Password": "other-cred"}})
 
-	if err := s.RenameCredentialReferences("old-cred", "new-cred"); err != nil {
-		t.Fatal(err)
-	}
 
-	s1, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s1.Config["Password"] != "new-cred" || s1.Config["Token"] != "new-cred" || s1.Config["ApiKeyValue"] != "new-cred" {
-		t.Errorf("s1.Config = %+v, want Password/Token/ApiKeyValue renamed to new-cred", s1.Config)
-	}
-	if s1.Config["Pat"] != "unrelated" {
-		t.Errorf("s1.Config[Pat] = %q, want untouched (didn't match old name)", s1.Config["Pat"])
-	}
 
-	s2, err := s.Get("s2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s2.Config["Password"] != "other-cred" {
-		t.Errorf("s2.Config[Password] = %q, want untouched (different credential)", s2.Config["Password"])
-	}
-}
 
-func TestRenameCredentialReferencesNoopWhenNoMatch(t *testing.T) {
-	s, _ := newStore(t)
-	mustSave(t, s, models.SourceDefinition{ID: "s1", Config: map[string]string{"Password": "unrelated"}})
 
-	if err := s.RenameCredentialReferences("no-such-cred", "new-cred"); err != nil {
-		t.Fatal(err)
-	}
-	s1, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if s1.Config["Password"] != "unrelated" {
-		t.Errorf("Config[Password] = %q, want untouched", s1.Config["Password"])
-	}
-}
 
-// ── Import ───────────────────────────────────────────────────────────────────
 
-func TestImportFlatArray(t *testing.T) {
-	s, _ := newStore(t)
-	data := []byte(`[{"id":"s1","name":"Imported","type":"work-item"}]`)
-
-	n, err := s.Import(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("Import() imported %d, want 1", n)
-	}
-	got, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || got.Name != "Imported" {
-		t.Fatalf("Get(s1) = %+v, want the imported source", got)
-	}
-}
-
-func TestImportWrapperFormat(t *testing.T) {
-	s, _ := newStore(t)
-	data := []byte(`{"sources":[{"id":"s1","name":"Wrapped"}]}`)
-
-	n, err := s.Import(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("Import() imported %d, want 1", n)
-	}
-	got, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || got.Name != "Wrapped" {
-		t.Fatalf("Get(s1) = %+v, want the wrapped source", got)
-	}
-}
-
-func TestImportReassignsCollidingIDs(t *testing.T) {
-	s, _ := newStore(t)
-	mustSave(t, s, models.SourceDefinition{ID: "s1", Name: "Existing"})
-
-	n, err := s.Import([]byte(`[{"id":"s1","name":"Incoming"}]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("Import() imported %d, want 1", n)
-	}
-
-	all, err := s.ListAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 2 {
-		t.Fatalf("ListAll() has %d sources, want 2 (existing kept, import got a fresh id)", len(all))
-	}
-	var existing, incoming *models.SourceDefinition
-	for i := range all {
-		switch all[i].Name {
-		case "Existing":
-			existing = &all[i]
-		case "Incoming":
-			incoming = &all[i]
-		}
-	}
-	if existing == nil || existing.ID != "s1" {
-		t.Errorf("existing source's ID changed: %+v", existing)
-	}
-	if incoming == nil || incoming.ID == "s1" || incoming.ID == "" {
-		t.Errorf("incoming source should have a fresh non-empty ID, got %+v", incoming)
-	}
-}
-
-func TestImportResetsSyncState(t *testing.T) {
-	s, _ := newStore(t)
-	errMsg := "boom"
-	data, err := json.Marshal(models.SourceDefinition{
-		ID: "s1", Name: "Imported", SyncStatus: "failed", SyncError: &errMsg,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := s.Import([]byte("[" + string(data) + "]")); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.SyncStatus != "idle" {
-		t.Errorf("SyncStatus = %q, want reset to idle", got.SyncStatus)
-	}
-	if got.SyncError != nil {
-		t.Errorf("SyncError = %v, want cleared", got.SyncError)
-	}
-}
-
-func TestImportInvalidJSONErrors(t *testing.T) {
-	s, _ := newStore(t)
-	if _, err := s.Import([]byte(`not json at all`)); err == nil {
-		t.Fatal("expected error for malformed import data")
-	}
-}
 
 // ── ReconcileStaleSync / ResetAllSyncStatus ─────────────────────────────────
 
@@ -340,57 +189,8 @@ func TestResetAllSyncStatusClearsErrorAndTimestamp(t *testing.T) {
 	}
 }
 
-// ── ExportStripped ────────────────────────────────────────────────────────────
 
-func TestExportStrippedReplacesManualContent(t *testing.T) {
-	s, _ := newStore(t)
-	mustSave(t, s, models.SourceDefinition{ID: "manual", Config: map[string]string{
-		"Provider": "manual", "Content": "secret uploaded text",
-	}})
-	mustSave(t, s, models.SourceDefinition{ID: "upload", Config: map[string]string{
-		"DocType": "upload", "Content": "another secret upload",
-	}})
-	mustSave(t, s, models.SourceDefinition{ID: "api", Config: map[string]string{
-		"Provider": "api", "Content": "should be kept as-is",
-	}})
 
-	out, err := s.ExportStripped()
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]models.SourceDefinition{}
-	for _, src := range out {
-		byID[src.ID] = src
-	}
-	if byID["manual"].Config["Content"] != models.DocumentPlaceholder {
-		t.Errorf("manual Content = %q, want placeholder", byID["manual"].Config["Content"])
-	}
-	if byID["upload"].Config["Content"] != models.DocumentPlaceholder {
-		t.Errorf("upload Content = %q, want placeholder", byID["upload"].Config["Content"])
-	}
-	if byID["api"].Config["Content"] != "should be kept as-is" {
-		t.Errorf("api Content = %q, want unchanged", byID["api"].Config["Content"])
-	}
-}
-
-func TestExportStrippedDoesNotMutateStore(t *testing.T) {
-	s, _ := newStore(t)
-	mustSave(t, s, models.SourceDefinition{ID: "manual", Config: map[string]string{
-		"Provider": "manual", "Content": "secret uploaded text",
-	}})
-
-	if _, err := s.ExportStripped(); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := s.Get("manual")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Config["Content"] != "secret uploaded text" {
-		t.Errorf("stored Content = %q after ExportStripped, want original content untouched", got.Config["Content"])
-	}
-}
 
 // ── File-format edge cases ───────────────────────────────────────────────────
 
@@ -499,5 +299,43 @@ func TestOnChangeReportsTheChangedSource(t *testing.T) {
 	}
 	if len(got) != 3 || got[0] != "a" || got[1] != "a" || got[2] != "" {
 		t.Errorf("changes = %q, want [a a \"\"] (\"\" = any source)", got)
+	}
+}
+
+func TestParseSourcesFormats(t *testing.T) {
+	for name, data := range map[string]string{
+		"flat":    `[{"id":"s1","name":"A","provider_id":"p1"}]`,
+		"wrapper": `{"providers":[{"id":"p1"}],"sources":[{"id":"s1","name":"A","provider_id":"p1"}]}`,
+		"camel":   `[{"id":"s1","name":"A","provider_id":"p1","syncStatus":"failed"}]`,
+	} {
+		srcs, err := ParseSources([]byte(data))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(srcs) != 1 || srcs[0].ID != "s1" || srcs[0].ProviderID != "p1" || srcs[0].Config == nil {
+			t.Errorf("%s: %+v", name, srcs)
+		}
+	}
+	if _, err := ParseSources([]byte(`not json at all`)); err == nil {
+		t.Error("malformed data parsed")
+	}
+}
+
+func TestAddAllReassignsCollidingIDs(t *testing.T) {
+	s, path := newStore(t)
+	mustSave(t, s, models.SourceDefinition{ID: "s1", Name: "Existing"})
+	if err := s.AddAll([]models.SourceDefinition{{ID: "s1", Name: "Incoming"}, {Name: "No ID"}, {ID: "s9", Name: "Kept"}}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := NewSourceConfigStore(path).ListAll()
+	if err != nil || len(all) != 4 {
+		t.Fatalf("ListAll = %+v, %v", all, err)
+	}
+	ids := map[string]string{}
+	for _, src := range all {
+		ids[src.Name] = src.ID
+	}
+	if ids["Existing"] != "s1" || ids["Incoming"] == "s1" || ids["Incoming"] == "" || ids["No ID"] == "" || ids["Kept"] != "s9" {
+		t.Errorf("ids = %v", ids)
 	}
 }

@@ -62,9 +62,9 @@
         <span class="text-lg font-semibold text-white">Conduit</span>
       </a>
       <nav class="space-y-1 text-sm flex-1">
+        <a href="/providers" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "providers"}}bg-slate-800 text-white{{end}}">Providers</a>
         <a href="/sources" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "sources"}}bg-slate-800 text-white{{end}}">Sources</a>
         <a href="/experience" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "experience"}}bg-slate-800 text-white{{end}}">Experience</a>
-        <a href="/credentials" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "credentials"}}bg-slate-800 text-white{{end}}">Credentials</a>
         <a href="/settings" class="block rounded-lg px-3 py-2 hover:bg-slate-800 {{if eq .Active "settings"}}bg-slate-800 text-white{{end}}">Settings</a>
       </nav>
       <button id="theme-toggle" type="button"

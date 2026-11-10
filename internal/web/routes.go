@@ -16,7 +16,6 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
-	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/sources"
 	"github.com/MichalOndrejka/conduit/internal/stats"
@@ -51,7 +50,6 @@ type Server struct {
 	mgr     *sourcemgmt.Manager
 	vectors *rag.VectorStore
 	memory  *memory.Service
-	secrets *secrets.Store
 	sync    *syncsvc.Service
 	health  *health.Monitor
 	stats   *stats.Recorder // nil: the Stats page says stats are off
@@ -63,10 +61,10 @@ type Server struct {
 	itemsTmpl         *template.Template
 	experienceTmpl    *template.Template
 	experienceNewTmpl *template.Template
-	sourceNewTmpl     *template.Template
-	sourceFormTmpl    *template.Template
-	credsTmpl         *template.Template
-	credsNewTmpl      *template.Template
+	providersTmpl      *template.Template
+	providerFormTmpl   *template.Template
+	browseTmpl         *template.Template
+	sourceSettingsTmpl *template.Template
 	mapTmpl           *template.Template
 	settingsTmpl      *template.Template
 	statsTmpl         *template.Template
@@ -77,7 +75,7 @@ func NewServer(
 	sourceStore *store.SourceConfigStore,
 	vectors *rag.VectorStore,
 	mem *memory.Service,
-	secretsStore *secrets.Store,
+	mgr *sourcemgmt.Manager,
 	syncSvc *syncsvc.Service,
 	healthMon *health.Monitor,
 ) *Server {
@@ -87,20 +85,19 @@ func NewServer(
 	s := &Server{
 		cfg:               cfg,
 		sources:           sourceStore,
-		mgr:               sourcemgmt.New(sourceStore, vectors, secretsStore),
+		mgr:               mgr,
 		vectors:           vectors,
 		memory:            mem,
-		secrets:           secretsStore,
 		sync:              syncSvc,
 		health:            healthMon,
 		indexTmpl:         page("index.html"),
 		itemsTmpl:         page("items.html"),
 		experienceTmpl:    page("experience.html"),
 		experienceNewTmpl: page("experience_new.html"),
-		sourceNewTmpl:     page("source_new.html"),
-		sourceFormTmpl:    page("source_form.html"),
-		credsTmpl:         page("credentials.html"),
-		credsNewTmpl:      page("credential_new.html"),
+		providersTmpl:      page("providers.html"),
+		providerFormTmpl:   page("provider_form.html"),
+		browseTmpl:         page("browse.html"),
+		sourceSettingsTmpl: page("source_settings.html"),
 		mapTmpl:           page("map.html"),
 		settingsTmpl:      page("settings.html"),
 		statsTmpl:         page("stats.html"),
@@ -129,14 +126,27 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /experience/create", s.handleExperienceAdd)
 	mux.HandleFunc("POST /experience/{id}/delete", s.handleExperienceDelete)
 
+	// Providers, their browse tree and source settings (see routes_providers.go)
+	mux.HandleFunc("GET /providers", s.handleProviders)
+	mux.HandleFunc("GET /providers/create", s.handleProviderCreateGet)
+	mux.HandleFunc("POST /providers/create", s.handleProviderCreatePost)
+	mux.HandleFunc("GET /providers/{id}", s.handleBrowse)
+	mux.HandleFunc("GET /providers/{id}/edit", s.handleProviderEditGet)
+	mux.HandleFunc("POST /providers/{id}/edit", s.handleProviderEditPost)
+	mux.HandleFunc("POST /providers/{id}/delete", s.handleProviderDelete)
+	mux.HandleFunc("POST /providers/{id}/test", s.handleProviderTest)
+	mux.HandleFunc("POST /providers/{id}/sync", s.handleProviderSync)
+	mux.HandleFunc("GET /api/providers/{id}/discover", s.handleDiscover)
+	mux.HandleFunc("POST /api/providers/{id}/states", s.handleStates)
+	mux.HandleFunc("POST /api/providers/{id}/select", s.handleSelect)
+	// Sources are added by ticking a provider's tree; Credentials became
+	// Providers.
+	mux.HandleFunc("GET /sources/create", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/providers", http.StatusFound) })
+	mux.HandleFunc("GET /credentials", func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, "/providers", http.StatusMovedPermanently) })
+
 	// Source management + sync (see routes_manage.go)
-	mux.HandleFunc("GET /sources/create", s.handleSourceCreateGet)
-	mux.HandleFunc("POST /sources/create", s.handleSourceCreatePost)
-	mux.HandleFunc("GET /sources/{id}/edit", s.handleSourceEditGet)
-	mux.HandleFunc("POST /sources/{id}/edit", s.handleSourceEditPost)
-	mux.HandleFunc("POST /sources/preview", s.handleSourcePreview)
-	mux.HandleFunc("POST /sources/ado/workitemtypes", s.handleAdoWorkItemTypes)
-	mux.HandleFunc("POST /sources/github/issuetypes", s.handleGitHubIssueTypes)
+	mux.HandleFunc("GET /sources/{id}/edit", s.handleSourceSettingsGet)
+	mux.HandleFunc("POST /sources/{id}/edit", s.handleSourceSettingsPost)
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
 	mux.HandleFunc("POST /sources/{id}/toggle", s.handleSourceToggle)
 	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)
@@ -146,14 +156,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sources/{id}/sync/resume", s.handleSyncResume)
 	mux.HandleFunc("POST /sources/{id}/sync/cancel", s.handleSyncCancel)
 	mux.HandleFunc("GET /export", s.handleExport)
+	mux.HandleFunc("POST /import/preview", s.handleImportPreview)
 	mux.HandleFunc("POST /import", s.handleImport)
-
-	// Credentials
-	mux.HandleFunc("GET /credentials", s.handleCredentials)
-	mux.HandleFunc("GET /credentials/create", s.handleCredentialCreateGet)
-	mux.HandleFunc("POST /credentials/create", s.handleCredentialCreate)
-	mux.HandleFunc("POST /credentials/{name}/edit", s.handleCredentialEdit)
-	mux.HandleFunc("POST /credentials/{name}/delete", s.handleCredentialDelete)
 
 	// Vector map (PCA) — reached from the Sources page
 	mux.HandleFunc("GET /map", s.handleMap)
@@ -191,7 +195,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 // ── UI pages ────────────────────────────────────────────────────────────────
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	s.renderIndex(w, r, "", "")
+	s.renderIndex(w, r)
 }
 
 // sourceRow pairs a source definition with its indexed vector count, so the
@@ -201,10 +205,14 @@ type sourceRow struct {
 	*models.SourceDefinition
 	VectorCount int
 	Live        bool // read live by its tool: nothing synced or embedded
+	// Provider names the source's provider; Legacy marks a source from before
+	// providers (or whose provider was deleted), which must be recreated.
+	Provider string
+	Legacy   bool
 }
 
-// renderIndex renders the Sources list, optionally with an import result banner.
-func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, importErr string) {
+// renderIndex renders the Sources list.
+func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request) {
 	allSources, err := s.sources.ListAll()
 	if err != nil {
 		httpError(w, err)
@@ -214,11 +222,18 @@ func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, 
 		return strings.ToLower(allSources[i].Name) < strings.ToLower(allSources[j].Name)
 	})
 	counts := s.counts.lookup(allSources, statusWait)
+	provNames := map[string]string{}
+	if provs, err := s.mgr.ListProviders(); err == nil {
+		for _, p := range provs {
+			provNames[p.ID] = p.Name
+		}
+	}
 	rows := make([]sourceRow, len(allSources))
 	for i := range allSources {
 		src := &allSources[i]
 		if models.IsLiveType(src.Type) {
 			rows[i] = sourceRow{SourceDefinition: src, Live: true}
+			rows[i].Provider, rows[i].Legacy = provNames[src.ProviderID], provNames[src.ProviderID] == ""
 			continue
 		}
 		n, ok := counts[src.ID]
@@ -226,12 +241,11 @@ func (s *Server) renderIndex(w http.ResponseWriter, r *http.Request, importMsg, 
 			n = -1
 		}
 		rows[i] = sourceRow{SourceDefinition: src, VectorCount: n}
+		rows[i].Provider, rows[i].Legacy = provNames[src.ProviderID], provNames[src.ProviderID] == ""
 	}
 	s.render(w, s.indexTmpl, "base", map[string]any{
 		"Active":        "sources",
 		"Sources":       rows,
-		"ImportMessage": importMsg,
-		"ImportError":   importErr,
 	})
 }
 

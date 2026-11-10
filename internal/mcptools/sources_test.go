@@ -2,304 +2,202 @@ package mcptools
 
 import (
 	"context"
-	"maps"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
-	"github.com/MichalOndrejka/conduit/internal/sources"
+	"github.com/MichalOndrejka/conduit/internal/rag"
+	"github.com/MichalOndrejka/conduit/internal/secrets"
+	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
+	"github.com/MichalOndrejka/conduit/internal/store"
 )
 
-// fakeManager is an in-memory SourceManager that records Save/Delete calls.
-type fakeManager struct {
-	byID      map[string]models.SourceDefinition
-	order     []string
-	creds     []string
-	savedFrom string // oldCollection passed to the last Save
-	deleted   []string
-}
-
-func newFakeManager(creds ...string) *fakeManager {
-	m := &fakeManager{byID: map[string]models.SourceDefinition{}, creds: creds}
-	m.put(models.SourceDefinition{ID: "wi", Name: "Work items", Type: models.SourceWorkItemQuery, SyncStatus: "completed",
-		Config: map[string]string{"Provider": "api", "Url": "https://ado.example/_apis/wit/wiql", "AuthType": "basic", "Password": "ado-pat"}})
-	m.put(models.SourceDefinition{ID: "docs", Name: "Docs", Type: models.SourceDocumentation,
-		Config: map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "handbook", "PathFilter": "*.md"}})
+// newSourceManager returns a real manager with one Azure DevOps provider
+// "ado" at adoURL, over a Qdrant stub that accepts every request.
+func newSourceManager(t *testing.T, adoURL string) *sourcemgmt.Manager {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("CONDUIT_SECRET_KEY", "")
+	sec, err := secrets.New(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qdrant := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"result":{"count":7},"status":"ok"}`))
+	}))
+	t.Cleanup(qdrant.Close)
+	cfg := &config.AppConfig{}
+	cfg.Qdrant.URL = qdrant.URL
+	m := sourcemgmt.New(store.NewSourceConfigStore(filepath.Join(dir, "s.json")), rag.NewVectorStore(cfg),
+		store.NewProviderStore(filepath.Join(dir, "p.json")), sec)
+	if err := m.SaveProvider(&models.Provider{ID: "ado", Name: "Contoso", Kind: "ado", BaseURL: adoURL}, "pat"); err != nil {
+		t.Fatal(err)
+	}
 	return m
 }
 
-func (m *fakeManager) put(src models.SourceDefinition) {
-	if _, ok := m.byID[src.ID]; !ok {
-		m.order = append(m.order, src.ID)
-	}
-	m.byID[src.ID] = src
-}
-
-func (m *fakeManager) ListAll() ([]models.SourceDefinition, error) {
-	out := []models.SourceDefinition{}
-	for _, id := range m.order {
-		if src, ok := m.byID[id]; ok {
-			out = append(out, src)
-		}
-	}
-	return out, nil
-}
-
-func (m *fakeManager) Get(id string) (*models.SourceDefinition, error) {
-	src, ok := m.byID[id]
-	if !ok {
-		return nil, nil
-	}
-	src.Config = copyConfig(src.Config)
-	return &src, nil
-}
-
-func (m *fakeManager) Save(_ context.Context, oldCollection string, src *models.SourceDefinition) error {
-	m.savedFrom = oldCollection
-	m.put(*src)
-	return nil
-}
-
-func (m *fakeManager) Delete(_ context.Context, id string) error {
-	m.deleted = append(m.deleted, id)
-	delete(m.byID, id)
-	return nil
-}
-
-func (m *fakeManager) CredentialNames() []string { return m.creds }
-
-func (m *fakeManager) IndexedChunks(context.Context, *models.SourceDefinition) int { return 42 }
-
-func manage(t *testing.T, m *fakeManager, runner *fakeRunner, req map[string]any) (map[string]any, error) {
+func manage(t *testing.T, m SourceManager, runner *fakeRunner, req map[string]any) (map[string]any, error) {
 	t.Helper()
 	return handleManageRequest(context.Background(), map[string]any{"request": req}, m, runner)
 }
 
-func validCreate() map[string]any {
-	return map[string]any{
-		"mode": "create", "name": " Bugs ", "type": models.SourceWorkItemQuery,
-		"config": map[string]any{"Url": "https://ado.example/_apis/wit/wiql", "AuthType": "basic", "Password": "ado-pat", "Top": float64(200)},
-	}
-}
-
-func TestManageListIncludesCredentialNamesAndTypes(t *testing.T) {
-	out, err := manage(t, newFakeManager("ado-pat", "jira"), newFakeRunner(), map[string]any{"mode": "list"})
+// roundTrip re-decodes v as an MCP client would see it.
+func roundTrip(t *testing.T, v any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srcs := out["sources"].([]sourceSummary)
-	if len(srcs) != 2 || srcs[0].ID != "wi" || srcs[1].Provider != "github" || srcs[1].SyncStatus != "idle" {
-		t.Errorf("sources = %+v", srcs)
-	}
-	if creds := out["credentials"].([]string); strings.Join(creds, ",") != "ado-pat,jira" {
-		t.Errorf("credentials = %v", creds)
-	}
-	if types := out["types"].([]map[string]string); len(types) == 0 || types[0]["type"] == "" {
-		t.Errorf("types = %v", types)
-	}
-}
-
-func TestManageListCredentialsNeverNil(t *testing.T) {
-	out, _ := manage(t, newFakeManager(), newFakeRunner(), map[string]any{"mode": "list"})
-	if creds := out["credentials"].([]string); creds == nil {
-		t.Error("credentials must be [] not null when none are stored")
-	}
-}
-
-func TestManageGetReturnsConfig(t *testing.T) {
-	m := newFakeManager()
-	out, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "get", "source_id": "docs"})
-	if err != nil {
+	var out map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out["source"].(sourceView).Config["GitHubRepo"]; got != "handbook" {
-		t.Errorf("GitHubRepo = %q, want handbook", got)
-	}
-	if _, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "get", "source_id": "nope"}); err == nil {
-		t.Error("expected an error for an unknown id")
-	}
+	return out
 }
 
-func TestManageCreateSavesAPISource(t *testing.T) {
-	m := newFakeManager("ado-pat")
-	out, err := manage(t, m, newFakeRunner(), validCreate())
-	if err != nil {
-		t.Fatal(err)
-	}
-	v := out["source"].(sourceView)
-	saved := m.byID[v.ID]
-	if v.ID == "" || saved.Name != "Bugs" || saved.SyncStatus != "idle" || m.savedFrom != "" {
-		t.Errorf("saved = %+v (oldCollection %q)", saved, m.savedFrom)
-	}
-	if saved.Config["Provider"] != "api" || saved.Config["Top"] != "200" || saved.Config["Password"] != "ado-pat" {
-		t.Errorf("config = %v", saved.Config)
-	}
-}
-
-func TestManageCreateSavesGitHubSource(t *testing.T) {
-	m := newFakeManager("gh-pat")
-	out, err := manage(t, m, newFakeRunner(), map[string]any{
-		"mode": "create", "name": "CI runs", "type": models.SourcePipelineRun,
-		"config": map[string]any{
-			"Provider": "github", "GitHubUrl": "https://ghe.example.com", "GitHubOwner": "acme",
-			"GitHubRepo": "app", "Token": "gh-pat", "Workflow": "ci.yml", "Runs": float64(14),
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved := m.byID[out["source"].(sourceView).ID]
-	if saved.Config["Provider"] != "github" || saved.Config["Workflow"] != "ci.yml" || saved.Config["Runs"] != "14" {
-		t.Errorf("config = %v", saved.Config)
-	}
-}
-
-func TestManageCreateRejectsAPIKeysOnGitHub(t *testing.T) {
-	m := newFakeManager()
-	_, err := manage(t, m, newFakeRunner(), map[string]any{
-		"mode": "create", "name": "x", "type": models.SourceCodeRepo,
-		"config": map[string]any{"Provider": "github", "GitHubOwner": "a", "GitHubRepo": "b", "Url": "https://x"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "Url") {
-		t.Errorf("err = %v, want Url rejected for a GitHub source", err)
-	}
-}
-
-func TestManageUpdateSwitchingProviderDropsOldKeys(t *testing.T) {
-	m := newFakeManager("gh-pat")
-	_, err := manage(t, m, newFakeRunner(), map[string]any{
-		"mode": "update", "source_id": "wi",
-		"config": map[string]any{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Token": "gh-pat"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Token": "gh-pat"}
-	if got := m.byID["wi"].Config; !maps.Equal(got, want) {
-		t.Errorf("config = %v, want %v (Azure DevOps keys dropped)", got, want)
-	}
-}
-
-func TestManageCreateRejectsSecretValueInCredentialField(t *testing.T) {
-	m := newFakeManager("ado-pat")
-	req := validCreate()
-	req["config"].(map[string]any)["Password"] = "s3cr3t-token-value"
-	_, err := manage(t, m, newFakeRunner(), req)
-	if err == nil {
-		t.Fatal("expected a credential that isn't stored to be rejected")
-	}
-	if strings.Contains(err.Error(), "s3cr3t") {
-		t.Errorf("error echoes the value back: %v", err)
-	}
-	if !strings.Contains(err.Error(), "ado-pat") {
-		t.Errorf("error should list stored credential names: %v", err)
-	}
-	if len(m.byID) != 2 {
-		t.Error("nothing must be saved")
-	}
-}
-
-func TestManageCreateRejectsBadInput(t *testing.T) {
-	cases := map[string]func(map[string]any){
-		"bad provider": func(r map[string]any) { r["config"].(map[string]any)["Provider"] = "manual" },
-		"unknown key":  func(r map[string]any) { r["config"].(map[string]any)["Workflow"] = "ci.yml" },
-		"bad url":      func(r map[string]any) { r["config"].(map[string]any)["Url"] = "ftp://x" },
-		"bad type":     func(r map[string]any) { r["type"] = "jira" },
-		"missing name": func(r map[string]any) { delete(r, "name") },
-		"non-string":   func(r map[string]any) { r["config"].(map[string]any)["Headers"] = []any{"a"} },
-	}
-	for name, mutate := range cases {
-		m := newFakeManager("ado-pat")
-		req := validCreate()
-		mutate(req)
-		if _, err := manage(t, m, newFakeRunner(), req); err == nil {
-			t.Errorf("%s: expected an error", name)
+// fakeAdo serves one project with one repository.
+func fakeAdo(t *testing.T) *httptest.Server {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/_apis/projects":
+			_, _ = w.Write([]byte(`{"value":[{"name":"P"}]}`))
+		case "/P/_apis/git/repositories":
+			_, _ = w.Write([]byte(`{"value":[{"name":"api","defaultBranch":"refs/heads/main"}]}`))
+		default:
+			http.NotFound(w, r)
 		}
-		if len(m.byID) != 2 {
-			t.Errorf("%s: nothing must be saved", name)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// An agent explores the provider, selects what it found, changes a setting,
+// and deletes the source again.
+func TestExploreSelectUpdateDelete(t *testing.T) {
+	m := newSourceManager(t, fakeAdo(t).URL)
+	runner := newFakeRunner()
+	ctx := context.Background()
+
+	root, err := handleExplore(ctx, map[string]any{}, m) // the only provider
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := roundTrip(t, root)["nodes"].([]any)
+	project := nodes[0].(map[string]any)
+	if project["name"] != "P" || project["has_children"] != true {
+		t.Fatalf("root = %+v", nodes)
+	}
+	groups, err := handleExplore(ctx, map[string]any{"provider_id": "ado", "node": project["ref"]}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reposGroup := roundTrip(t, groups)["nodes"].([]any)[0].(map[string]any)
+	repos, err := handleExplore(ctx, map[string]any{"node": reposGroup["ref"]}, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := roundTrip(t, repos)["nodes"].([]any)[0].(map[string]any)
+
+	out, err := manage(t, m, runner, map[string]any{"mode": "select", "provider_id": "ado", "node": repo["ref"], "type": models.SourceCodeRepo})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := out["source"].(sourceView)
+	if src.Name != "P/api — Source Code" || src.ProviderID != "ado" || !strings.Contains(out["next"].(string), "sync_source") {
+		t.Fatalf("select = %+v", out)
+	}
+	again, _ := handleExplore(ctx, map[string]any{"node": reposGroup["ref"]}, m)
+	sel := roundTrip(t, again)["nodes"].([]any)[0].(map[string]any)["selected"].(map[string]any)
+	if sel[models.SourceCodeRepo] != "on" {
+		t.Errorf("selected = %+v, want code on", sel)
+	}
+
+	out, err = manage(t, m, runner, map[string]any{"mode": "update", "source_id": src.ID, "name": "API code",
+		"settings": map[string]any{"Branch": "dev", "PathFilter": "/src/**"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := out["source"].(sourceView); v.Name != "API code" || v.Config["Branch"] != "dev" || v.Config["PathFilter"] != "/src/**" {
+		t.Errorf("update = %+v", v)
+	}
+	if _, err := manage(t, m, runner, map[string]any{"mode": "update", "source_id": src.ID, "settings": map[string]any{"Repo": "x"}}); err == nil {
+		t.Error("update changed a selection key")
+	}
+
+	list, _ := manage(t, m, runner, map[string]any{"mode": "list"})
+	l := roundTrip(t, list)
+	if p := l["providers"].([]any)[0].(map[string]any); p["id"] != "ado" || p["has_token"] != true || p["kind"] != "ado" {
+		t.Errorf("providers = %+v", l["providers"])
+	}
+	if strings.Contains(string(mustJSON(t, list)), "pat") {
+		t.Error("list leaks the token")
+	}
+
+	preview, _ := manage(t, m, runner, map[string]any{"mode": "delete", "source_id": src.ID})
+	if preview["would_delete"].(map[string]any)["indexed_chunks"] != 7 {
+		t.Errorf("preview = %+v", preview)
+	}
+	runner.syncing = map[string]bool{src.ID: true}
+	if _, err := manage(t, m, runner, map[string]any{"mode": "delete", "source_id": src.ID, "confirm": true}); err == nil {
+		t.Error("deleted a syncing source")
+	}
+	runner.syncing = map[string]bool{}
+	if _, err := manage(t, m, runner, map[string]any{"mode": "delete", "source_id": src.ID, "confirm": true}); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := m.Get(src.ID); s != nil {
+		t.Error("source still there after delete")
+	}
+}
+
+func TestManageDeselectNeedsConfirm(t *testing.T) {
+	m := newSourceManager(t, "https://dev.azure.com/contoso")
+	runner := newFakeRunner()
+	group := map[string]any{"kind": "pipelines", "project": "P"}
+	if _, err := manage(t, m, runner, map[string]any{"mode": "select", "provider_id": "ado", "node": group, "type": models.SourcePipelineRun}); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := manage(t, m, runner, map[string]any{"mode": "deselect", "provider_id": "ado", "node": group, "type": models.SourcePipelineRun})
+	if _, ok := out["note"]; !ok {
+		t.Fatalf("deselect without confirm = %+v, want a note", out)
+	}
+	if all, _ := m.ListAll(); len(all) != 1 {
+		t.Fatal("deselect without confirm changed something")
+	}
+	out, err := manage(t, m, runner, map[string]any{"mode": "deselect", "provider_id": "ado", "node": group, "type": models.SourcePipelineRun, "confirm": true})
+	if err != nil || out["deleted"] != true {
+		t.Fatalf("deselect = %+v, %v", out, err)
+	}
+}
+
+func TestManageRejectsBadInput(t *testing.T) {
+	m := newSourceManager(t, "https://dev.azure.com/contoso")
+	runner := newFakeRunner()
+	for name, req := range map[string]map[string]any{
+		"mode":         {"mode": "create"},
+		"no node":      {"mode": "select", "provider_id": "ado", "type": models.SourceCodeRepo},
+		"bad provider": {"mode": "select", "provider_id": "x", "node": map[string]any{"kind": "repo", "project": "P", "repo": "r"}, "type": models.SourceCodeRepo},
+		"wrong type":   {"mode": "select", "provider_id": "ado", "node": map[string]any{"kind": "workitemtype", "project": "P", "id": "Bug"}, "type": models.SourceCodeRepo},
+		"no source":    {"mode": "get", "source_id": "nope"},
+	} {
+		if _, err := manage(t, m, runner, req); err == nil {
+			t.Errorf("%s: want an error", name)
 		}
 	}
 }
 
-func TestManageUpdateMergesConfigAndPassesOldCollection(t *testing.T) {
-	m := newFakeManager("ado-pat")
-	_, err := manage(t, m, newFakeRunner(), map[string]any{
-		"mode": "update", "source_id": "wi", "type": models.SourceRequirements,
-		"config": map[string]any{"Top": "50", "AuthType": ""},
-	})
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	data, err := json.Marshal(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := m.byID["wi"]
-	if got.Type != models.SourceRequirements || got.Config["Top"] != "50" || got.Config["Url"] == "" {
-		t.Errorf("updated = %+v", got)
-	}
-	if _, ok := got.Config["AuthType"]; ok {
-		t.Error(`"" should remove the key`)
-	}
-	if want := sources.CollectionFor(&models.SourceDefinition{Type: models.SourceWorkItemQuery}); m.savedFrom != want {
-		t.Errorf("oldCollection = %q, want %q", m.savedFrom, want)
-	}
-}
-
-// A source whose credential was deleted from the library can still be
-// renamed: only credential fields the edit changes are checked.
-func TestManageUpdateKeepsUnchangedMissingCredential(t *testing.T) {
-	m := newFakeManager() // "ado-pat" not stored
-	if _, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "update", "source_id": "wi", "name": "WI"}); err != nil {
-		t.Fatalf("rename rejected: %v", err)
-	}
-	if m.byID["wi"].Name != "WI" {
-		t.Error("rename not saved")
-	}
-}
-
-func TestManageUpdateRefusesSyncing(t *testing.T) {
-	m := newFakeManager("ado-pat")
-	runner := newFakeRunner()
-	runner.syncing["wi"] = true
-	if _, err := manage(t, m, runner, map[string]any{"mode": "update", "source_id": "wi", "name": "x"}); err == nil {
-		t.Error("expected a syncing source to be refused")
-	}
-	if m.byID["wi"].Name != "Work items" {
-		t.Error("nothing must be saved")
-	}
-}
-
-func TestManageDeleteNeedsConfirm(t *testing.T) {
-	m := newFakeManager()
-	out, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "delete", "source_id": "wi"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(m.deleted) != 0 {
-		t.Fatal("deleted without confirm")
-	}
-	if w := out["would_delete"].(map[string]any); w["indexed_chunks"] != 42 || w["name"] != "Work items" {
-		t.Errorf("would_delete = %v", w)
-	}
-	if _, err := manage(t, m, newFakeRunner(), map[string]any{"mode": "delete", "source_id": "wi", "confirm": true}); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Join(m.deleted, ",") != "wi" {
-		t.Errorf("deleted = %v", m.deleted)
-	}
-}
-
-func TestManageDeleteRefusesSyncing(t *testing.T) {
-	m := newFakeManager()
-	runner := newFakeRunner()
-	runner.syncing["wi"] = true
-	if _, err := manage(t, m, runner, map[string]any{"mode": "delete", "source_id": "wi", "confirm": true}); err == nil {
-		t.Error("expected a syncing source to be refused")
-	}
-	if len(m.deleted) != 0 {
-		t.Error("nothing must be deleted")
-	}
-}
-
-func TestManageRejectsUnknownMode(t *testing.T) {
-	if _, err := manage(t, newFakeManager(), newFakeRunner(), map[string]any{"mode": "drop"}); err == nil {
-		t.Error("expected an error for an unknown mode")
-	}
+	return data
 }

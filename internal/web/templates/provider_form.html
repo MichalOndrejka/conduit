@@ -1,0 +1,91 @@
+{{define "title"}}{{if .IsNew}}New provider{{else}}{{.Provider.Name}}{{end}} — Conduit{{end}}
+{{define "content"}}
+{{$p := .Provider}}
+<div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
+  <a href="/providers" class="hover:text-violet-400">Providers</a>
+  <span>/</span>
+  <span class="text-slate-400">{{if .IsNew}}New{{else}}{{$p.Name}}{{end}}</span>
+</div>
+<h1 class="text-2xl font-semibold text-white mb-6">{{if .IsNew}}New provider{{else}}Edit {{$p.Name}}{{end}}</h1>
+
+{{if .Error}}
+<script>showToast({{.Error}}, 'error');</script>
+{{end}}
+
+<form method="post" class="space-y-6 max-w-3xl" autocomplete="off">
+  <input type="hidden" name="kind" id="f-kind" value="{{.Kind}}">
+
+  <div>
+    <label class="block text-sm font-medium text-slate-300 mb-1">Name <span class="text-red-400">*</span></label>
+    <input name="name" required value="{{$p.Name}}" placeholder="e.g. Contoso Azure DevOps"
+           class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">
+  </div>
+
+  <!-- Kind — browser-style tabs (.tab / .tab-panel, input.css), like every
+       choice that swaps out the inputs underneath it. -->
+  <div>
+    <div class="tabs" role="tablist">
+      {{range .Kinds}}
+      <label class="tab">
+        <input type="radio" name="KindTab" value="{{.Kind}}" class="sr-only" {{if eq .Kind $.Kind}}checked{{end}} onchange="setKind('{{.Kind}}')">
+        {{.Label}}
+      </label>
+      {{end}}
+    </div>
+
+    {{range .Kinds}}
+    <div id="kind-{{.Kind}}" class="tab-panel p-5 space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">URL <span class="text-red-400">*</span> {{template "tip" .Hint}}</label>
+        <input name="base_url_{{.Kind}}" value="{{if and (eq .Kind $p.Kind) $p.BaseURL}}{{$p.BaseURL}}{{else}}{{.DefaultURL}}{{end}}" placeholder="{{.DefaultURL}}"
+               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      <div>
+        {{if eq .Kind "ado"}}
+        <label class="block text-sm font-medium text-slate-300 mb-1">Personal access token {{if $.IsNew}}<span class="text-red-400">*</span>{{end}} {{template "tip" "Read scopes are enough: Code, Work Items, Build, Test Management, Wiki and Project & Team (Read). Stored encrypted; never shown again."}}</label>
+        {{else}}
+        <label class="block text-sm font-medium text-slate-300 mb-1">Token {{template "tip" "A fine-grained or classic personal access token with read access to contents, issues, pull requests, actions and metadata. Without one, only public repositories can be read, at a low rate limit. Stored encrypted; never shown again."}}</label>
+        {{end}}
+        <input name="token_{{.Kind}}" type="password" {{if and $.IsNew (eq .Kind "ado")}}data-required{{end}}
+               placeholder="{{if $.HasToken}}Stored — leave blank to keep it{{end}}"
+               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      {{if eq .Kind "ado"}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">API version {{template "tip" "REST API version requests ask for. Empty = 7.1 (Azure DevOps Services and Server 2022+). Older servers need e.g. 6.0 (Server 2020) or 5.1 (Server 2019)."}}</label>
+        <input name="api_version" value="{{$p.APIVersion}}" placeholder="7.1"
+               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+      </div>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+
+  <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer select-none">
+    <input type="checkbox" name="skip_tls_verify" {{if $p.SkipTLSVerify}}checked{{end}} class="h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600">
+    Skip TLS certificate verification {{template "tip" "For self-hosted servers whose certificate is signed by a private CA that isn't mounted into the container."}}
+  </label>
+
+  <div class="flex gap-3">
+    <button type="submit" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">
+      {{if .IsNew}}Create and browse{{else}}Save changes{{end}}
+    </button>
+    <a href="/providers" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</a>
+  </div>
+</form>
+
+<script>
+function setKind(kind) {
+  document.getElementById('f-kind').value = kind;
+  document.querySelectorAll('[id^="kind-"]').forEach(function (panel) {
+    var on = panel.id === 'kind-' + kind;
+    panel.classList.toggle('hidden', !on);
+    panel.querySelectorAll('input').forEach(function (x) {
+      x.disabled = !on;
+      if (x.hasAttribute('data-required')) x.required = on;
+    });
+  });
+}
+setKind({{.Kind}});
+</script>
+{{end}}

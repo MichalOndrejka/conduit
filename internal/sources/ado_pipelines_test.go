@@ -20,7 +20,6 @@ func pipelineSrc(orgURL string, cfg map[string]string) *models.SourceDefinition 
 		"AdoOrg":       orgURL,
 		"AdoProject":   "proj",
 		"Url":          orgURL + "/proj",
-		"DefinitionId": "12",
 	}
 	for k, v := range cfg {
 		merged[k] = v
@@ -74,6 +73,12 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 		q := r.URL.Query()
 		path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/")
 		switch {
+		case path == "build/definitions":
+			writeJSON(w, map[string]any{"value": []any{
+				map[string]any{"id": 12, "name": "api-ci", "path": `\Team\CI`},
+				map[string]any{"id": 13, "name": "api-nightly", "path": `\Team\CI\Nightly`},
+				map[string]any{"id": 14, "name": "web-ci", "path": `\Other`},
+			}})
 		case path == "build/builds":
 			writeJSON(w, map[string]any{"value": []any{build(3, "20261014.3", "failed", "refs/heads/main"),
 				build(4, "20261014.4", "succeeded", "refs/heads/main")}})
@@ -248,10 +253,13 @@ func TestAdoPipelineList(t *testing.T) {
 		t.Fatalf("runs = %+v", runs)
 	}
 	req := stub.requests[0]
-	for _, want := range []string{"definitions=12", "%24top=5", "resultFilter=failed", "branchName=refs%2Fheads%2Fmain", "queryOrder=queueTimeDescending"} {
+	for _, want := range []string{"%24top=5", "resultFilter=failed", "branchName=refs%2Fheads%2Fmain", "queryOrder=queueTimeDescending"} {
 		if !strings.Contains(req, want) {
 			t.Errorf("list request %s lacks %s", req, want)
 		}
+	}
+	if strings.Contains(req, "definitions=") {
+		t.Errorf("project-wide list request %s names definitions", req)
 	}
 
 	// The source's Runs field sets the default; a request's top wins, capped.
@@ -398,11 +406,43 @@ func TestAdoPipelineLogErrors(t *testing.T) {
 	}
 }
 
+// A folder scopes listings to its pipelines (subfolders included); a named
+// pipeline narrows to one, by id or name, and must be in scope.
+func TestAdoPipelineFolderScope(t *testing.T) {
+	stub := &pipelineStub{}
+	p := adoPipeline(t, stub, map[string]string{"PipelineFolder": `Team\CI`})
+	defs, err := p.Pipelines(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defs) != 2 || defs[0].Name != "api-ci" || defs[1].Folder != `Team\CI\Nightly` {
+		t.Fatalf("pipelines = %+v, want the folder's two", defs)
+	}
+
+	stub.requests = nil
+	if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C13") {
+		t.Errorf("folder list request %s, want definitions=12,13", last)
+	}
+	stub.requests = nil
+	if _, err := p.List(context.Background(), PipelineRunFilter{Pipeline: "API-NIGHTLY"}); err != nil {
+		t.Fatal(err)
+	}
+	if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=13") {
+		t.Errorf("named list request %s, want definitions=13", last)
+	}
+	if _, err := p.List(context.Background(), PipelineRunFilter{Pipeline: "web-ci"}); err == nil || !strings.Contains(err.Error(), "api-ci (12)") {
+		t.Errorf("out-of-scope pipeline: err = %v, want the pipelines in scope listed", err)
+	}
+}
+
 func TestPipelineProviderForErrors(t *testing.T) {
 	for name, src := range map[string]*models.SourceDefinition{
-		"no definition": pipelineSrc("https://ado.example/org", map[string]string{"DefinitionId": ""}),
-		"not pipeline":  {Name: "Code", Type: models.SourceCodeRepo, Config: map[string]string{"Provider": "api"}},
-		"no workflow":   {Name: "GH", Type: models.SourcePipelineRun, Config: map[string]string{"Provider": "github", "GitHubOwner": "a", "GitHubRepo": "b"}},
+		"no project":   pipelineSrc("https://ado.example/org", map[string]string{"AdoProject": "", "Url": ""}),
+		"not pipeline": {Name: "Code", Type: models.SourceCodeRepo, Config: map[string]string{"Provider": "api"}},
+		"no repo":      {Name: "GH", Type: models.SourcePipelineRun, Config: map[string]string{"Provider": "github", "GitHubOwner": "a"}},
 	} {
 		if _, err := PipelineProviderFor(src, fakeSecrets{}); err == nil {
 			t.Errorf("%s: want an error", name)

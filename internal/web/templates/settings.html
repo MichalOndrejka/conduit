@@ -136,6 +136,151 @@
   </div>
 </form>
 
+<!-- Configuration: export / import of providers and sources -->
+<div class="mt-6 rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
+  <div class="flex items-center justify-between gap-4 flex-wrap">
+    <div>
+      <h2 class="text-sm font-semibold text-white uppercase tracking-wider">Configuration {{template "tip" "Providers and their sources, in one file. Tokens are never exported: set each imported provider's token afterwards. Importing shows what will change before anything is written."}}</h2>
+      <div class="text-xs text-slate-500 mt-1">{{.ProviderCount}} provider{{if ne .ProviderCount 1}}s{{end}} · {{.SourceCount}} source{{if ne .SourceCount 1}}s{{end}}</div>
+    </div>
+    <div class="flex gap-2">
+      <a href="/export" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Export</a>
+      <input type="file" id="import-file" accept="application/json,.json" class="hidden" onchange="previewImport(this.files[0])">
+      <button type="button" onclick="document.getElementById('import-file').click()"
+              class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Import…</button>
+    </div>
+  </div>
+</div>
+
+<!-- Import preview: what the chosen file would add, skip or rename. -->
+<div id="import-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+  <div class="absolute inset-0 bg-black/60" onclick="closeImport()"></div>
+  <div class="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+    <div class="flex items-center justify-between p-5 pb-3 border-b border-slate-800 shrink-0">
+      <h2 class="text-sm font-medium text-slate-300">Import <span id="import-name" class="font-mono text-slate-400"></span></h2>
+      <button type="button" onclick="closeImport()" class="text-xs text-slate-500 hover:text-white">Close</button>
+    </div>
+    <div id="import-body" class="space-y-5 text-sm p-5 overflow-y-auto"></div>
+    <div class="flex justify-end gap-2 p-5 pt-3 border-t border-slate-800 shrink-0">
+      <button type="button" onclick="closeImport()" class="rounded-lg border border-slate-700 px-4 py-2 text-sm hover:bg-slate-800">Cancel</button>
+      <button type="button" id="import-confirm" onclick="applyImport()"
+              class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed">Import</button>
+    </div>
+  </div>
+</div>
+
+<script>
+var importFile = null;
+var IMPORT_MARK = {
+  add:         { sign: '+', cls: 'text-emerald-300' },
+  rename:      { sign: '+', cls: 'text-emerald-300' },
+  exists:      { sign: '=', cls: 'text-slate-500' },
+  duplicate:   { sign: '=', cls: 'text-slate-500' },
+  no_provider: { sign: '!', cls: 'text-amber-300' },
+  invalid:     { sign: '!', cls: 'text-red-300' }
+};
+
+function importForm() {
+  var fd = new FormData();
+  fd.append('file', importFile);
+  return fd;
+}
+
+function previewImport(file) {
+  if (!file) return;
+  importFile = file;
+  document.getElementById('import-file').value = ''; // the same file can be picked again
+  document.getElementById('import-name').textContent = file.name;
+  var body = document.getElementById('import-body');
+  body.innerHTML = '<p class="text-slate-500">Reading the file…</p>';
+  document.getElementById('import-confirm').disabled = true;
+  document.getElementById('import-modal').classList.remove('hidden');
+  fetch('/import/preview', { method: 'POST', body: importForm() })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (!res.ok) { body.innerHTML = ''; line(body, res.error || 'Import failed.', 'text-red-300'); return; }
+      renderPlan(res.plan);
+    })
+    .catch(function (err) { body.innerHTML = ''; line(body, 'Import failed: ' + err, 'text-red-300'); });
+}
+
+function line(parent, text, cls) {
+  var el = document.createElement('div');
+  el.className = cls || '';
+  el.textContent = text;
+  parent.appendChild(el);
+  return el;
+}
+
+function section(body, title, items, render) {
+  if (!items.length) return;
+  var wrap = document.createElement('div');
+  var h = document.createElement('h3');
+  h.className = 'text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2';
+  h.textContent = title;
+  wrap.appendChild(h);
+  var list = document.createElement('ul');
+  list.className = 'space-y-1';
+  items.forEach(function (it) {
+    var mark = IMPORT_MARK[it.action] || IMPORT_MARK.invalid;
+    var li = document.createElement('li');
+    li.className = 'flex items-baseline gap-2';
+    var sign = document.createElement('span');
+    sign.className = 'font-mono w-3 shrink-0 ' + mark.cls;
+    sign.textContent = mark.sign;
+    li.appendChild(sign);
+    var main = document.createElement('span');
+    main.className = 'min-w-0 break-words ' + (it.action === 'add' || it.action === 'rename' ? 'text-slate-200' : 'text-slate-400');
+    main.textContent = render(it);
+    if (it.type) main.title = it.type;
+    li.appendChild(main);
+    if (it.note || it.needs_token) {
+      var note = document.createElement('span');
+      note.className = 'ml-auto shrink-0 text-xs text-right ' + mark.cls;
+      note.textContent = [it.note, it.needs_token ? 'needs token' : ''].filter(Boolean).join(' · ');
+      li.appendChild(note);
+    }
+    list.appendChild(li);
+  });
+  wrap.appendChild(list);
+  body.appendChild(wrap);
+}
+
+function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+function renderPlan(plan) {
+  var body = document.getElementById('import-body');
+  body.innerHTML = '';
+  section(body, 'Providers', plan.providers, function (p) { return p.name + ' (' + p.kind + ')'; });
+  section(body, 'Sources', plan.sources, function (s) { return s.name + (s.provider ? ' · ' + s.provider : ''); });
+  if (!plan.providers.length && !plan.sources.length) line(body, 'The file holds no providers or sources.', 'text-slate-500');
+  var btn = document.getElementById('import-confirm');
+  var parts = [];
+  if (plan.add_providers) parts.push(plural(plan.add_providers, 'provider'));
+  if (plan.add_sources) parts.push(plural(plan.add_sources, 'source'));
+  btn.disabled = parts.length === 0;
+  btn.textContent = parts.length ? 'Import ' + parts.join(', ') : 'Nothing to import';
+}
+
+function applyImport() {
+  var btn = document.getElementById('import-confirm');
+  btn.disabled = true;
+  fetch('/import', { method: 'POST', body: importForm() })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (!res.ok) { showToast(res.error || 'Import failed.', 'error'); btn.disabled = false; return; }
+      window.location = res.redirect;
+    })
+    .catch(function (err) { showToast('Import failed: ' + err, 'error'); btn.disabled = false; });
+}
+
+function closeImport() {
+  document.getElementById('import-modal').classList.add('hidden');
+  importFile = null;
+}
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeImport(); });
+</script>
+
 <!-- Danger zone -->
 <div class="mt-8">
   <h2 class="text-xs font-semibold uppercase tracking-wider text-red-400 mb-3">Danger zone</h2>

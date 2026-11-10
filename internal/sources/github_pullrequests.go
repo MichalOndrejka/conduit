@@ -103,6 +103,10 @@ func githubWho(who string) (string, error) {
 // requested reviewer and merged state. Reviewer matches pull requests whose
 // review is still requested from that user.
 func (c *githubPRClient) List(ctx context.Context, f PRListFilter) ([]PRSummary, bool, error) {
+	if want := strings.TrimSpace(f.Repository); want != "" && !strings.EqualFold(want, c.g.repo) &&
+		!strings.EqualFold(want, c.g.owner+"/"+c.g.repo) {
+		return nil, false, fmt.Errorf("this source covers %s/%s, not %q", c.g.owner, c.g.repo, want)
+	}
 	terms := []string{"repo:" + c.g.owner + "/" + c.g.repo, "is:pr"}
 	switch f.Status {
 	case "", PRStatusActive:

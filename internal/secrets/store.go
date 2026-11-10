@@ -242,49 +242,16 @@ func (s *Store) Has(name string) bool {
 	return ok
 }
 
-// secretFields mirrors sources_using in app/store/secrets_store.py.
-var secretFields = []string{"Pat", "Token", "Password", "ApiKeyValue"}
-
-// SourcesUsing returns the names of sources whose config references cred name.
-func (s *Store) SourcesUsing(name string, sources []models.SourceDefinition) []string {
-	s.mu.RLock()
-	_, ok := s.cache[name]
-	s.mu.RUnlock()
-	if !ok {
-		return nil
+// Set stores value under name, creating or replacing the entry.
+func (s *Store) Set(name, value string) error {
+	if err := validateName(name); err != nil {
+		return err
 	}
-	var result []string
-	for _, src := range sources {
-		for _, f := range secretFields {
-			if src.Config[f] == name {
-				result = append(result, src.Name)
-				break
-			}
-		}
+	if value == "" {
+		return errors.New("credential value cannot be empty")
 	}
-	return result
-}
-
-// MissingReference names a source whose config references a credential name
-// that has no matching entry in the store (e.g. after importing sources
-// whose credentials haven't been set up yet).
-type MissingReference struct {
-	SourceName     string
-	CredentialName string
-}
-
-// MissingReferences returns every source/credential-name pair where a
-// source's config references a credential that isn't in the store.
-func (s *Store) MissingReferences(sources []models.SourceDefinition) []MissingReference {
-	var result []MissingReference
-	for _, src := range sources {
-		for _, f := range secretFields {
-			name := src.Config[f]
-			if name == "" || s.Has(name) {
-				continue
-			}
-			result = append(result, MissingReference{SourceName: src.Name, CredentialName: name})
-		}
-	}
-	return result
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.cache[name] = entry{Value: value}
+	return s.save()
 }

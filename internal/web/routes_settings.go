@@ -61,11 +61,15 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 			Checked:   checked,
 		})
 	}
+	provs, _ := s.mgr.ListProviders()
+	srcs, _ := s.sources.ListAll()
 	s.render(w, s.settingsTmpl, "base", map[string]any{
+		"ProviderCount": len(provs),
+		"SourceCount":   len(srcs),
 		"Active":       "settings",
 		"Cfg":          s.cfg,
 		"ConfigPath":   config.Path(),
-		"Credentials":  s.secrets.ListAll(),
+		
 		"PreprocTypes": types,
 		"Notice":       r.URL.Query().Get("notice"),
 		// What a search uses now (the config, or the default when unset).

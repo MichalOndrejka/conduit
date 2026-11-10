@@ -22,6 +22,8 @@ func pipelineRequestSchema() map[string]any {
 	num := func(desc string) map[string]any { return map[string]any{"type": "number", "description": desc} }
 	sourceID := str("A configured pipeline-run source (ids from sync_source status mode). May be omitted when exactly " +
 		"one pipeline-run source is enabled")
+	pipeline := str("Optional: one pipeline of the source's scope — its id, name (or unique name prefix) or, on GitHub, " +
+		"its workflow file (ci.yml); pipelines mode lists them. Omit for runs of every pipeline in scope")
 	runID := num("The run's id: Azure DevOps buildId, GitHub Actions run id")
 	runURL := str("Instead of source_id + run_id: the run's web link, e.g. " +
 		"https://dev.azure.com/org/Project/_build/results?buildId=1234 or https://github.com/owner/repo/actions/runs/567")
@@ -30,10 +32,12 @@ func pipelineRequestSchema() map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": append([]string{"mode"}, required...)}
 	}
 	return map[string]any{
-		"description": "List a pipeline's latest runs, read one run's failures, or read one failed step's log.",
+		"description": "List the pipelines in a source's scope or their latest runs, read one run's failures, or read one failed step's log.",
 		"oneOf": []any{
+			variant("pipelines", map[string]any{"source_id": sourceID}),
 			variant("list", map[string]any{
 				"source_id": sourceID,
+				"pipeline":  pipeline,
 				"top": num(fmt.Sprintf("How many runs, newest first (default: the source's Runs setting, else %d; at most %d)",
 					sources.DefaultPipelineRuns, sources.MaxPipelineRuns)),
 				"result": str("Optional: Azure DevOps succeeded, partiallySucceeded, failed or canceled; GitHub success, " +
@@ -64,10 +68,14 @@ func pipelineRequestSchema() map[string]any {
 func RegisterPipelineTool(s *server.MCPServer, srcs SourceLister, store secrets.Reader) {
 	tool := mcp.NewTool("search_pipeline_run",
 		mcp.WithDescription(`Read pipeline runs (Azure DevOps builds, GitHub Actions workflow runs) live from the `+
-			`provider. Read-only; nothing is indexed, so every answer is current. `+
-			`{"mode":"list"} returns the latest runs of a configured pipeline, newest first (5 by default), with result, `+
+			`provider. Read-only; nothing is indexed, so every answer is current. A pipeline-run source covers an `+
+			`Azure DevOps project (or some of its pipeline folders) or a GitHub repository's workflows: `+
+			`{"mode":"pipelines"} lists the pipelines in its scope with id, name, folder and web_url. `+
+			`{"mode":"list"} returns the latest runs, newest first (5 by default), of every pipeline in scope or of the `+
+			`one "pipeline" names (id, name or workflow file), with result, `+
 			`status, reason, branch, commit, requester, timing and web_url — filter by result, status, branch, reason `+
-			`or requested_for (e.g. last failed build on main: {"mode":"list","result":"failed","branch":"main","top":1}). `+
+			`or requested_for (e.g. last failed build of api-ci on main: `+
+			`{"mode":"list","pipeline":"api-ci","result":"failed","branch":"main","top":1}). `+
 			`{"mode":"get","run_id":...} (or "url": a run link with buildId=… or …/actions/runs/…) explains one run: `+
 			`timeline issues (errors and warnings), every failed step of every attempt — so a run rerun to green still `+
 			`shows attempt 1's failures — with its log_id, failed and flaky tests with error message and stack trace `+
@@ -109,6 +117,21 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 
 	mode := str("mode")
 	switch mode {
+	case "pipelines":
+		src, err := pipelineSource(all, str("source_id"))
+		if err != nil {
+			return nil, err
+		}
+		p, err := sources.PipelineProviderFor(src, store)
+		if err != nil {
+			return nil, err
+		}
+		defs, err := p.Pipelines(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"source": sourceRef(src), "pipelines": defs, "total": len(defs)}, nil
+
 	case "list":
 		src, err := pipelineSource(all, str("source_id"))
 		if err != nil {
@@ -119,7 +142,8 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 			return nil, err
 		}
 		runs, err := p.List(ctx, sources.PipelineRunFilter{
-			Top: int(num("top")), Result: str("result"), Status: str("status"), Branch: str("branch"),
+			Pipeline: str("pipeline"),
+			Top:      int(num("top")), Result: str("result"), Status: str("status"), Branch: str("branch"),
 			Reason: str("reason"), RequestedFor: str("requested_for"),
 		})
 		if err != nil {
@@ -133,7 +157,7 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 
 	case "get", "log":
 	default:
-		return nil, fmt.Errorf(`request.mode must be "list", "get" or "log", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "pipelines", "list", "get" or "log", got %q`, mode)
 	}
 
 	var (

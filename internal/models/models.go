@@ -4,8 +4,6 @@ package models
 
 import "time"
 
-const DocumentPlaceholder = "__DOCUMENT_REQUIRED__"
-
 // ── Collection names ────────────────────────────────────────────────────────
 
 const (
@@ -58,10 +56,40 @@ type CredentialInfo struct {
 	Name string `json:"name"`
 }
 
+// Provider is one account on a source system — an Azure DevOps organization,
+// collection or server, or a GitHub instance — with the token Conduit
+// authenticates with. Sources reference a provider by ID and add only what
+// they select inside it (project, repository, folder, …).
+type Provider struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Kind is a providers registry kind: "ado" or "github".
+	Kind string `json:"kind"`
+	// BaseURL is the provider's root: https://dev.azure.com (every
+	// organization the token sees), an organization or collection URL
+	// (https://dev.azure.com/org, https://tfs.corp/DefaultCollection), an
+	// Azure DevOps Server (https://tfs.corp/tfs), or a GitHub server
+	// (https://github.com, https://github.corp).
+	BaseURL string `json:"base_url"`
+	// SkipTLSVerify disables certificate checks, for self-hosted instances
+	// with a private CA that isn't mounted into the container.
+	SkipTLSVerify bool `json:"skip_tls_verify,omitempty"`
+	// APIVersion overrides the Azure DevOps REST API version, for older
+	// servers ("" = 7.1).
+	APIVersion string `json:"api_version,omitempty"`
+	// The token is never stored here: it lives encrypted in the secrets
+	// store under ProviderTokenName(ID).
+}
+
+// ProviderTokenName is the secrets-store entry holding a provider's token.
+func ProviderTokenName(providerID string) string { return "provider-token:" + providerID }
+
 type SourceDefinition struct {
-	ID             string            `json:"id"`
-	Type           string            `json:"type"`
-	Name           string            `json:"name"`
+	ID   string `json:"id"`
+	Type string `json:"type"`
+	Name string `json:"name"`
+	// ProviderID is the provider whose token reads this source.
+	ProviderID     string            `json:"provider_id"`
 	Disabled       bool              `json:"disabled"` // zero value (false) keeps existing sources enabled
 	LastSyncedAt   *time.Time        `json:"last_synced_at"`
 	SyncStatus     string            `json:"sync_status"` // idle | syncing | completed | failed

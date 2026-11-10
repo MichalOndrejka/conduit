@@ -1,20 +1,26 @@
-// Package sourcemgmt holds the source-config rules shared by the web UI and
-// the manage_source MCP tool: which source types and config keys exist, how
-// a config is validated, and how saving or deleting a source keeps its
-// indexed vectors consistent.
+// Package sourcemgmt holds the provider and source rules shared by the web
+// UI and the MCP tools: which source types exist, how providers are saved
+// with their tokens, how ticks in a provider's tree become sources
+// (selection.go), how a source's settings are validated, and how saving or
+// deleting a source keeps its indexed vectors consistent.
 package sourcemgmt
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
 	"slices"
-	"strconv"
+	"sort"
 	"strings"
+	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/providers"
+	"github.com/MichalOndrejka/conduit/internal/providers/registry"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sources"
@@ -25,14 +31,14 @@ import (
 // a Qdrant collection (not provider-specific).
 type TypeInfo struct{ Value, Label, Description string }
 
-// Types drives the UI's type-picker tiles and the MCP tool's type list.
+// Types lists the source types, in the order the UI shows them.
 var Types = []TypeInfo{
-	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks from a work-tracking system."},
+	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks — Azure DevOps work items or GitHub issues."},
 	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
-	{models.SourcePipelineRun, "Pipeline Runs", "A build pipeline whose runs, failed-step logs and failed tests are read live. Not synced."},
-	{models.SourcePullRequest, "Pull Requests", "A repository whose pull requests, diffs and comment threads are read live. Not synced."},
+	{models.SourcePipelineRun, "Pipeline Runs", "The pipelines of a project or pipeline folder (GitHub: a repository's workflows), whose runs, failed-step logs and failed tests are read live. Not synced."},
+	{models.SourcePullRequest, "Pull Requests", "The repositories of a project, or some of them (GitHub: one repository), whose pull requests, diffs and comment threads are read live. Not synced."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},
 	{models.SourceDocumentation, "Documentation", "Wiki pages or documentation files from a repository."},
@@ -50,206 +56,200 @@ func Label(t string) string {
 
 // ValidType reports whether t is one of Types.
 func ValidType(t string) bool {
-	for _, st := range Types {
-		if st.Value == t {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(Types, func(st TypeInfo) bool { return st.Value == t })
 }
 
-// APIConfigKeys are the generic API source's config fields. Credential
-// fields (CredentialKeys) store credential *names*, never secret values.
-var APIConfigKeys = []string{
-	"Url", "HttpMethod", "Body", "Headers", "AuthType",
-	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
-	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
-	"NextUrlPath", "Top", "VerifySSL",
-	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"FetchMode", "DefinitionId", "Runs",
-}
-
-// PresetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
-// DevOps) store so an existing source re-opens in the right tab, pre-filled.
-// The backend ignores them — execution is driven entirely by APIConfigKeys,
-// so any platform is "just a generic HTTP source" (see internal/sources/source.go).
-var PresetConfigKeys = []string{
-	"Platform", "AdoOrg", "AdoProject", "AdoApiVersion", "AdoResource", "AdoRepo", "AdoQuery",
-}
-
-// GitHubConfigKeys are the GitHub source's config fields (see
-// internal/sources/github.go). Token names a stored credential.
-var GitHubConfigKeys = []string{
-	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "PathFilter",
-	"Top", "FetchMode", "WorkItemTypes", "Labels", "Workflow", "Runs", "VerifySSL",
-}
-
-// Providers are the values of the Provider config key: "api" runs the
-// generic API source behind the Azure DevOps form, "github" the GitHub
-// source.
-var Providers = []string{"api", "github"}
-
-// ConfigKeys returns the config fields of provider.
-func ConfigKeys(provider string) []string {
-	if provider == "github" {
-		return GitHubConfigKeys
-	}
-	return append(append([]string{}, APIConfigKeys...), PresetConfigKeys...)
-}
-
-// CredentialKeys are the config fields that name a stored credential.
-var CredentialKeys = []string{"Token", "Password", "ApiKeyValue"}
-
-var authTypes = []string{"none", "bearer", "basic", "apikey"}
-
-// Validate checks provider-specific fields, returning a user-facing error
-// message, or "" if the config is valid.
-func Validate(srcType string, cfg map[string]string) string {
-	switch cfg["Provider"] {
-	case "github":
-		return validateGitHub(srcType, cfg)
-	case "api":
-		if cfg["Platform"] == "ado" && cfg["AdoProject"] == "" {
-			return "Project is required for Azure DevOps sources."
-		}
-		if a := cfg["AuthType"]; a != "" && !slices.Contains(authTypes, strings.ToLower(a)) {
-			return "Auth type must be none, bearer, basic or apikey."
-		}
-		if srcType == models.SourcePipelineRun {
-			if cfg["Platform"] != "ado" {
-				return "Pipeline Runs sources require the Azure DevOps provider."
-			}
-			if n, err := strconv.Atoi(strings.TrimSpace(cfg["DefinitionId"])); err != nil || n <= 0 {
-				return "Pipeline definition ID must be a positive number."
-			}
-			if msg := validateRuns(cfg); msg != "" {
-				return msg
-			}
-		}
-		u, err := url.Parse(cfg["Url"])
-		if cfg["Url"] == "" || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-			return "URL must be a valid http(s) URL."
-		}
-		if top := cfg["Top"]; top != "" {
-			if n, err := strconv.Atoi(top); err != nil || n <= 0 {
-				return "Max items must be a positive number."
-			}
-		}
-		if srcType == models.SourcePullRequest {
-			if cfg["Platform"] != "ado" {
-				return "Pull Requests sources require the Azure DevOps provider."
-			}
-			if strings.TrimSpace(cfg["AdoRepo"]) == "" {
-				return "Repository is required for Pull Requests sources."
-			}
-		}
-		if srcType == models.SourceGitCommits {
-			if _, ok := sources.AdoRepoAPIBase(cfg["Url"]); !ok {
-				return "Commit History sources require an Azure DevOps commits API URL (…/_apis/git/repositories/{repo}/commits) — diffs are always fetched for this source type."
-			}
-		}
-		if srcType == models.SourceCodeRepo || srcType == models.SourceTestCodeRepo {
-			if _, ok := sources.AdoItemsAPIBase(cfg["Url"]); !ok {
-				return fmt.Sprintf("%s sources require an Azure DevOps items API URL (…/_apis/git/repositories/{repo}/items) — file content is always fetched for this source type.", Label(srcType))
-			}
-		}
-		if body := cfg["Body"]; body != "" && !json.Valid([]byte(body)) {
-			return "POST body must be valid JSON."
-		}
-		for _, line := range strings.Split(cfg["Headers"], "\n") {
-			line = strings.TrimSpace(line)
-			if line != "" && !strings.Contains(line, ":") {
-				return `Headers must be one "Name: value" pair per line.`
-			}
-		}
-	case "", "custom":
-		// Legacy configs (imported, Python era) run as API sources unchecked.
-	default:
-		return fmt.Sprintf("Provider must be one of %s.", strings.Join(Providers, ", "))
-	}
-	return ""
-}
-
-func validateGitHub(srcType string, cfg map[string]string) string {
-	if _, _, err := sources.GitHubBases(cfg["GitHubUrl"]); err != nil {
-		return "GitHub server URL must be a valid http(s) URL."
-	}
-	if strings.TrimSpace(cfg["GitHubOwner"]) == "" {
-		return "Owner is required for GitHub sources."
-	}
-	if strings.TrimSpace(cfg["GitHubRepo"]) == "" {
-		return "Repository is required for GitHub sources."
-	}
-	if top := cfg["Top"]; top != "" {
-		if n, err := strconv.Atoi(top); err != nil || n <= 0 {
-			return "Max items must be a positive number."
-		}
-	}
-	if srcType == models.SourcePipelineRun {
-		if strings.TrimSpace(cfg["Workflow"]) == "" {
-			return "Workflow is required: its file name (e.g. ci.yml) or numeric ID."
-		}
-		return validateRuns(cfg)
-	}
-	return ""
-}
-
-// validateRuns checks the optional Runs field: how many runs a listing
-// returns by default.
-func validateRuns(cfg map[string]string) string {
-	v := strings.TrimSpace(cfg["Runs"])
-	if v == "" {
-		return ""
-	}
-	if n, err := strconv.Atoi(v); err != nil || n <= 0 || n > sources.MaxPipelineRuns {
-		return fmt.Sprintf("Runs must be a number from 1 to %d.", sources.MaxPipelineRuns)
-	}
-	return ""
-}
-
-// Manager saves and deletes sources while keeping their indexed vectors
-// consistent.
+// Manager saves providers and sources while keeping tokens, selections and
+// indexed vectors consistent.
 type Manager struct {
-	sources *store.SourceConfigStore
-	vectors *rag.VectorStore
-	secrets *secrets.Store
+	sources   *store.SourceConfigStore
+	vectors   *rag.VectorStore
+	providers *store.ProviderStore
+	secrets   *secrets.Store
+	resolver  *registry.Resolver
+	selMu     sync.Mutex // serializes selection edits (read-modify-write of a source)
 }
 
-func New(sourceStore *store.SourceConfigStore, vectors *rag.VectorStore, secretsStore *secrets.Store) *Manager {
-	return &Manager{sources: sourceStore, vectors: vectors, secrets: secretsStore}
+func New(sourceStore *store.SourceConfigStore, vectors *rag.VectorStore, providerStore *store.ProviderStore, secretsStore *secrets.Store) *Manager {
+	return &Manager{
+		sources: sourceStore, vectors: vectors, providers: providerStore, secrets: secretsStore,
+		resolver: &registry.Resolver{Providers: providerStore, Secrets: secretsStore},
+	}
 }
+
+// Resolver compiles sources for their fetchers and resolves provider tokens.
+func (m *Manager) Resolver() *registry.Resolver { return m.resolver }
+
+// ── Providers ───────────────────────────────────────────────────────────────
+
+// ListProviders returns the saved providers, by name.
+func (m *Manager) ListProviders() ([]models.Provider, error) {
+	all, err := m.providers.ListAll()
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(all, func(i, j int) bool { return strings.ToLower(all[i].Name) < strings.ToLower(all[j].Name) })
+	return all, nil
+}
+
+// ProviderFor returns a saved provider and its integration.
+func (m *Manager) ProviderFor(id string) (*models.Provider, providers.Integration, error) {
+	return m.resolver.Provider(id)
+}
+
+// Conn resolves a provider's token for a provider request.
+func (m *Manager) Conn(p *models.Provider) providers.Conn { return m.resolver.Conn(p) }
+
+// HasToken reports whether a token is stored for the provider.
+func (m *Manager) HasToken(id string) bool {
+	return m.secrets != nil && m.secrets.Has(models.ProviderTokenName(id))
+}
+
+// SaveProvider validates and stores p (a new one when p.ID is ""), and its
+// token unless token is "" (an edit keeping the stored token).
+func (m *Manager) SaveProvider(p *models.Provider, token string) error {
+	p.Name = strings.TrimSpace(p.Name)
+	p.BaseURL = strings.TrimRight(strings.TrimSpace(p.BaseURL), "/")
+	p.APIVersion = strings.TrimSpace(p.APIVersion)
+	token = strings.TrimSpace(token)
+	in, ok := registry.Get(p.Kind)
+	if !ok {
+		return fmt.Errorf("unknown provider kind %q", p.Kind)
+	}
+	if p.Name == "" {
+		return errors.New("name is required")
+	}
+	if u, err := url.Parse(p.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return errors.New("URL must be a valid http(s) URL")
+	}
+	all, err := m.providers.ListAll()
+	if err != nil {
+		return err
+	}
+	for _, o := range all {
+		if o.ID != p.ID && strings.EqualFold(o.Name, p.Name) {
+			return fmt.Errorf("a provider named %q already exists", p.Name)
+		}
+	}
+	isNew := p.ID == ""
+	if isNew {
+		p.ID = uuid.NewString()
+	}
+	if token == "" && in.Kind() == "ado" && !m.HasToken(p.ID) {
+		return errors.New("a personal access token is required")
+	}
+	if token != "" {
+		if err := m.secrets.Set(models.ProviderTokenName(p.ID), token); err != nil {
+			return err
+		}
+	}
+	return m.providers.Save(*p)
+}
+
+// DeleteProvider removes a provider and its token. A provider still used by
+// sources is kept: delete them first.
+func (m *Manager) DeleteProvider(id string) error {
+	used, err := m.SourcesOf(id)
+	if err != nil {
+		return err
+	}
+	if len(used) > 0 {
+		names := make([]string, len(used))
+		for i, s := range used {
+			names[i] = s.Name
+		}
+		return fmt.Errorf("%d source(s) use this provider (%s) — delete them first", len(used), strings.Join(names, ", "))
+	}
+	if m.secrets != nil && m.secrets.Has(models.ProviderTokenName(id)) {
+		if err := m.secrets.Delete(models.ProviderTokenName(id)); err != nil {
+			return err
+		}
+	}
+	return m.providers.Delete(id)
+}
+
+// SourcesOf returns the sources of a provider.
+func (m *Manager) SourcesOf(providerID string) ([]models.SourceDefinition, error) {
+	all, err := m.sources.ListAll()
+	if err != nil {
+		return nil, err
+	}
+	var out []models.SourceDefinition
+	for _, s := range all {
+		if s.ProviderID == providerID {
+			out = append(out, s)
+		}
+	}
+	return out, nil
+}
+
+// ── Sources ─────────────────────────────────────────────────────────────────
 
 func (m *Manager) ListAll() ([]models.SourceDefinition, error) { return m.sources.ListAll() }
 
 func (m *Manager) Get(id string) (*models.SourceDefinition, error) { return m.sources.Get(id) }
 
-// CredentialNames lists stored credential names (never their values).
-func (m *Manager) CredentialNames() []string {
-	creds := m.secrets.ListAll()
-	names := make([]string, len(creds))
-	for i, c := range creds {
-		names[i] = c.Name
+// Validate checks a source's config against its provider's rules,
+// returning a user-facing message, or "" if valid.
+func (m *Manager) Validate(src *models.SourceDefinition) string {
+	if !ValidType(src.Type) {
+		return fmt.Sprintf("Unknown source type %q.", src.Type)
 	}
-	return names
+	p, in, err := m.resolver.Provider(src.ProviderID)
+	if err != nil {
+		return "Provider: " + err.Error()
+	}
+	if !slices.Contains(in.SourceTypes(), src.Type) {
+		return fmt.Sprintf("%s has no %s sources.", p.Name, Label(src.Type))
+	}
+	return in.Validate(src.Type, src.Config)
 }
 
-// Save stores src. oldCollection is the collection src was indexed into
-// before this edit ("" for a new source). A type/provider change moves the
-// source to a different collection, so its vectors in the old one are
-// removed — otherwise they'd keep surfacing in the old search tool forever
-// (a re-sync only replaces within the new collection) — and it's reset to
-// idle for a fresh sync.
-func (m *Manager) Save(ctx context.Context, oldCollection string, src *models.SourceDefinition) error {
+// UpdateSettings applies a source's editable settings: its name, enabled
+// state and the keys of providers.SettingKeys ("" removes a key). Selection
+// keys (project, repository, folder, …) are changed by ticking instead.
+func (m *Manager) UpdateSettings(ctx context.Context, id, name string, disabled *bool, settings map[string]string) (*models.SourceDefinition, error) {
+	m.selMu.Lock()
+	defer m.selMu.Unlock()
+	src, err := m.sources.Get(id)
+	if err != nil {
+		return nil, err
+	}
+	if src == nil {
+		return nil, fmt.Errorf("no source has id %q", id)
+	}
+	if name = strings.TrimSpace(name); name != "" {
+		src.Name = name
+	}
+	if disabled != nil {
+		src.Disabled = *disabled
+	}
+	if src.Config == nil {
+		src.Config = map[string]string{}
+	}
+	for k, v := range settings {
+		if !slices.Contains(providers.SettingKeys, k) {
+			return nil, fmt.Errorf("%q is not a setting (settings: %s)", k, strings.Join(providers.SettingKeys, ", "))
+		}
+		if v = strings.TrimSpace(v); v == "" {
+			delete(src.Config, k)
+		} else {
+			src.Config[k] = v
+		}
+	}
+	if msg := m.Validate(src); msg != "" {
+		return nil, errors.New(msg)
+	}
+	return src, m.Save(ctx, src)
+}
+
+// Save stores src. A live source has no sync status to keep.
+func (m *Manager) Save(_ context.Context, src *models.SourceDefinition) error {
 	if models.IsLiveType(src.Type) {
-		// Nothing of a live source is synced: no status to keep.
 		src.SyncStatus, src.LastSyncedAt, src.SyncError, src.SyncErrorPhase = "idle", nil, nil, nil
 	}
-	if oldCollection != "" && sources.CollectionFor(src) != oldCollection {
-		if err := m.vectors.DeleteByFilter(ctx, oldCollection, sourceFilter(src.ID)); err != nil {
-			log.Printf("warning: could not clean up vectors in %s after collection change: %v", oldCollection, err)
-		}
+	if src.SyncStatus == "" {
 		src.SyncStatus = "idle"
-		src.LastSyncedAt = nil
 	}
 	return m.sources.Save(*src)
 }
@@ -264,9 +264,10 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	if src == nil {
 		return nil
 	}
-	// Best-effort vector cleanup — the source record is removed either way.
 	if coll := sources.CollectionFor(src); coll != "" {
-		_ = m.vectors.DeleteByFilter(ctx, coll, sourceFilter(src.ID))
+		if err := m.vectors.DeleteByFilter(ctx, coll, sourceFilter(src.ID)); err != nil {
+			log.Printf("warning: could not delete the indexed data of source %s: %v", src.ID, err)
+		}
 	}
 	return m.sources.Delete(src.ID)
 }

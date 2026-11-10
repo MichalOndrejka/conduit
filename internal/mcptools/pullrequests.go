@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
+	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
@@ -30,14 +32,17 @@ func pullRequestRequestSchema() map[string]any {
 			"iterations or commits.",
 		"oneOf": []any{
 			variant("list", map[string]any{
-				"source_id": str("A configured Azure DevOps or GitHub source of the repository (ids from sync_source status mode)"),
+				"source_id": str("A configured source (ids from sync_source status mode): a pull-request source, or any source " +
+					"of the repository. May be omitted when exactly one pull-request source is enabled"),
+				"repository": str("Optional: one repository of a pull-request source covering an Azure DevOps project " +
+					"(default: every repository in its scope)"),
 				"status":    map[string]any{"type": "string", "enum": []string{"active", "completed", "abandoned", "all"}, "description": "Default active"},
 				"author":    str(`Optional: "me" (the token's owner), an email (Azure DevOps) or a login (GitHub)`),
 				"reviewer": str(`Optional: "me", an email (Azure DevOps) or a login (GitHub). On GitHub this matches pull ` +
 					`requests whose review is still requested from that user`),
 				"target_branch": str("Optional: target branch name, e.g. main"),
 				"page":          page,
-			}, "source_id"),
+			}),
 			variant("get", map[string]any{"url": prURL}, "url"),
 			variant("files", map[string]any{"url": prURL, "page": page, "from_iteration": from, "to_iteration": to}, "url"),
 			variant("diff", map[string]any{
@@ -61,8 +66,9 @@ func RegisterPullRequestTool(s *server.MCPServer, srcs SourceLister, store secre
 	tool := mcp.NewTool("search_pull_request",
 		mcp.WithDescription(`Find and read Azure DevOps and GitHub pull requests, live from the provider, for code `+
 			`review and questions about changes. Read-only; nothing is indexed, so every answer is current. `+
-			`{"mode":"list","source_id":...} finds pull requests of a configured repository (a Pull Requests `+
-			`source, or any source of the repository; ids from sync_source status mode) by status, author, reviewer `+
+			`{"mode":"list","source_id":...} finds pull requests of a configured source — a Pull Requests source `+
+			`covers an Azure DevOps project (or some of its repositories; narrow with "repository") or a GitHub `+
+			`repository; any other source of a repository covers that repository — by status, author, reviewer `+
 			`("me" works) and target branch, newest first. Every other mode takes the pull request's web URL, which is `+
 			`matched to a configured source of the same organization or server for credentials. `+
 			`Typical review: request={"mode":"get","url":...} for the title, description, branches, reviewers and votes, `+
@@ -109,36 +115,30 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 
 	mode := str("mode")
 	if mode == "list" {
-		id := str("source_id")
-		if id == "" {
-			return nil, fmt.Errorf("list mode requires source_id")
-		}
 		switch status := str("status"); status {
 		case "", sources.PRStatusActive, sources.PRStatusCompleted, sources.PRStatusAbandoned, sources.PRStatusAll:
 		default:
 			return nil, fmt.Errorf(`request.status must be "active", "completed", "abandoned" or "all", got %q`, status)
 		}
-		for i := range all {
-			if all[i].ID != id {
-				continue
-			}
-			p, err := sources.PullRequestProviderFor(&all[i], store)
-			if err != nil {
-				return nil, err
-			}
-			prs, hasMore, err := p.List(ctx, sources.PRListFilter{
-				Status: str("status"), Author: str("author"), Reviewer: str("reviewer"),
-				TargetBranch: str("target_branch"), Page: page,
-			})
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{
-				"source":        map[string]string{"id": all[i].ID, "name": all[i].Name},
-				"pull_requests": prs, "page": page, "has_more": hasMore,
-			}, nil
+		src, err := pullRequestSource(all, str("source_id"))
+		if err != nil {
+			return nil, err
 		}
-		return nil, fmt.Errorf("no source has id %q — sync_source status mode lists them", id)
+		p, err := sources.PullRequestProviderFor(src, store)
+		if err != nil {
+			return nil, err
+		}
+		prs, hasMore, err := p.List(ctx, sources.PRListFilter{
+			Status: str("status"), Author: str("author"), Reviewer: str("reviewer"),
+			TargetBranch: str("target_branch"), Repository: str("repository"), Page: page,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{
+			"source":        map[string]string{"id": src.ID, "name": src.Name},
+			"pull_requests": prs, "page": page, "has_more": hasMore,
+		}, nil
 	}
 
 	switch mode {
@@ -231,4 +231,33 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 		}
 	}
 	return out, nil
+}
+
+// pullRequestSource picks the source a listing reads: the one id names (any
+// source of a repository), or the only enabled pull-request source.
+func pullRequestSource(all []models.SourceDefinition, id string) (*models.SourceDefinition, error) {
+	if id != "" {
+		for i := range all {
+			if all[i].ID == id {
+				return &all[i], nil
+			}
+		}
+		return nil, fmt.Errorf("no source has id %q — sync_source status mode lists them", id)
+	}
+	var found []*models.SourceDefinition
+	var names []string
+	for i := range all {
+		if all[i].Type == models.SourcePullRequest && !all[i].Disabled {
+			found = append(found, &all[i])
+			names = append(names, fmt.Sprintf("%s (%s)", all[i].ID, all[i].Name))
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return nil, fmt.Errorf("list mode requires source_id: no pull-request source is configured")
+	default:
+		return nil, fmt.Errorf("several pull-request sources are configured; pass source_id, one of: %s", strings.Join(names, ", "))
+	}
 }

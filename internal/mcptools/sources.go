@@ -4,28 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/providers"
 	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
-	"github.com/MichalOndrejka/conduit/internal/sources"
 )
 
-// SourceManager reads and edits source configs (sourcemgmt.Manager).
+// SourceManager reads and edits providers and sources (sourcemgmt.Manager).
 type SourceManager interface {
 	ListAll() ([]models.SourceDefinition, error)
 	Get(id string) (*models.SourceDefinition, error)
-	Save(ctx context.Context, oldCollection string, src *models.SourceDefinition) error
 	Delete(ctx context.Context, id string) error
-	CredentialNames() []string
 	IndexedChunks(ctx context.Context, src *models.SourceDefinition) int
+	ListProviders() ([]models.Provider, error)
+	ProviderFor(id string) (*models.Provider, providers.Integration, error)
+	HasToken(id string) bool
+	Conn(p *models.Provider) providers.Conn
+	States(providerID string, nodes []providers.Node) ([]sourcemgmt.NodeState, error)
+	Toggle(ctx context.Context, providerID string, node providers.NodeRef, name, srcType string, on bool, isSyncing func(string) bool) (*models.SourceDefinition, error)
+	UpdateSettings(ctx context.Context, id, name string, disabled *bool, settings map[string]string) (*models.SourceDefinition, error)
 }
 
 // sourceSummary is one source in list mode.
@@ -33,88 +37,95 @@ type sourceSummary struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
 	Type       string `json:"type"`
-	Provider   string `json:"provider"`
+	ProviderID string `json:"provider_id"`
 	Disabled   bool   `json:"disabled"`
 	SyncStatus string `json:"sync_status"`
 }
 
-// sourceView is one source with its config, as get/create/update return it.
-// Config holds credential names only — secret values never live there.
+// providerSummary is one provider in list mode — never its token.
+type providerSummary struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Kind     string `json:"kind"`
+	BaseURL  string `json:"base_url"`
+	HasToken bool   `json:"has_token"`
+}
+
+// sourceView is one source with its config, as get/select/update return it.
 type sourceView struct {
 	ID           string            `json:"id"`
 	Name         string            `json:"name"`
 	Type         string            `json:"type"`
+	ProviderID   string            `json:"provider_id"`
 	Disabled     bool              `json:"disabled"`
 	SyncStatus   string            `json:"sync_status"`
 	LastSyncedAt *time.Time        `json:"last_synced_at"`
 	Config       map[string]string `json:"config"`
 }
 
+// nodeRefSchema is a provider_explore node ref.
+func nodeRefSchema(desc string) map[string]any {
+	return map[string]any{
+		"type":        "object",
+		"description": desc,
+		"properties": map[string]any{
+			"kind": map[string]any{"type": "string"}, "org": map[string]any{"type": "string"},
+			"project": map[string]any{"type": "string"}, "repo": map[string]any{"type": "string"},
+			"path": map[string]any{"type": "string"}, "id": map[string]any{"type": "string"},
+		},
+		"required": []string{"kind"},
+	}
+}
+
 func manageRequestSchema() map[string]any {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
 	mode := func(m string) map[string]any { return map[string]any{"const": m} }
-	config := func(desc string) map[string]any {
-		return map[string]any{
-			"type":                 "object",
-			"additionalProperties": map[string]any{"type": "string"},
-			"description": desc + ` Provider is "api" (Azure DevOps, the default) or "github". ` +
-				"Azure DevOps keys: " + strings.Join(sourcemgmt.APIConfigKeys, ", ") +
-				" (plus UI preset keys " + strings.Join(sourcemgmt.PresetConfigKeys, ", ") + "). " +
-				"GitHub keys: " + strings.Join(sourcemgmt.GitHubConfigKeys, ", ") +
-				" (GitHubUrl https://github.com or a GitHub Enterprise Server URL; Workflow is a pipeline-run's workflow file name or ID). " +
-				"Token, Password and ApiKeyValue take the NAME of a stored credential from list mode, never a secret value.",
-		}
-	}
 	types := make([]string, len(sourcemgmt.Types))
 	for i, t := range sourcemgmt.Types {
 		types[i] = t.Value
 	}
-	sourceType := map[string]any{"type": "string", "enum": types, "description": "Source type (decides the search tool)"}
+	sourceType := map[string]any{"type": "string", "enum": types, "description": "Source type: one the node offers"}
+	variant := func(m string, props map[string]any, required ...string) map[string]any {
+		props["mode"] = mode(m)
+		return map[string]any{"type": "object", "properties": props, "required": append([]string{"mode"}, required...)}
+	}
+	node := nodeRefSchema("The node's ref exactly as provider_explore returned it")
 	return map[string]any{
-		"description": "List, read, create, update or delete source configs.",
+		"description": "List providers and sources, select or deselect what to index, change a source's settings, or delete it.",
 		"oneOf": []any{
-			map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"mode": mode("list")},
-				"required":   []string{"mode"},
-			},
-			map[string]any{
-				"type":       "object",
-				"properties": map[string]any{"mode": mode("get"), "source_id": str("Source to read")},
-				"required":   []string{"mode", "source_id"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"mode":     mode("create"),
-					"name":     str("Display name, also the source_name filter of the search tools"),
-					"type":     sourceType,
-					"config":   config("The source's config, same keys as the UI and the sources export file."),
-					"disabled": map[string]any{"type": "boolean"},
+			variant("list", map[string]any{}),
+			variant("get", map[string]any{"source_id": str("Source to read")}, "source_id"),
+			variant("select", map[string]any{
+				"provider_id": str("Provider the node belongs to"),
+				"node":        node,
+				"type":        sourceType,
+				"name":        str("Optional: the node's name from provider_explore (names a wiki's source)"),
+			}, "provider_id", "node", "type"),
+			variant("deselect", map[string]any{
+				"provider_id": str("Provider the node belongs to"),
+				"node":        node,
+				"type":        sourceType,
+				"confirm": map[string]any{"type": "boolean", "description": "true to deselect; deselecting a source's last part " +
+					"deletes the source and its indexed data"},
+			}, "provider_id", "node", "type"),
+			variant("update", map[string]any{
+				"source_id": str("Source to change"),
+				"name":      str("New display name"),
+				"disabled":  map[string]any{"type": "boolean"},
+				"settings": map[string]any{
+					"type":                 "object",
+					"additionalProperties": map[string]any{"type": "string"},
+					"description": "Settings to change; \"\" removes one. " + strings.Join(providers.SettingKeys, ", ") + ": " +
+						"Branch (files/commits; default the repository's default branch), PathFilter (files: comma-separated " +
+						"globs, \"/\"-rooted for exact paths, e.g. /src/**,*.md), AreaPaths (Azure DevOps work items: " +
+						"comma-separated, sub-areas included), Labels (GitHub issues: comma-separated, any matches), " +
+						"Top (commits/issues: max items, newest first), Runs (pipeline runs: default listing size)",
 				},
-				"required": []string{"mode", "name", "type", "config"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"mode":      mode("update"),
-					"source_id": str("Source to change"),
-					"name":      str("New display name"),
-					"type":      sourceType,
-					"config":    config(`Keys to change, merged into the existing config; "" removes a key.`),
-					"disabled":  map[string]any{"type": "boolean"},
-				},
-				"required": []string{"mode", "source_id"},
-			},
-			map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"mode":      mode("delete"),
-					"source_id": str("Source to delete"),
-					"confirm":   map[string]any{"type": "boolean", "description": "true to delete; otherwise only reports what would be deleted"},
-				},
-				"required": []string{"mode", "source_id"},
-			},
+			}, "source_id"),
+			variant("delete", map[string]any{
+				"source_id": str("Source to delete"),
+				"confirm":   map[string]any{"type": "boolean", "description": "true to delete; otherwise only reports what would be deleted"},
+			}, "source_id"),
 		},
 	}
 }
@@ -123,14 +134,21 @@ func manageRequestSchema() map[string]any {
 // startup, alongside RegisterSyncTool.
 func RegisterSourcesTool(s *server.MCPServer, mgr SourceManager, runner SyncRunner) {
 	tool := mcp.NewTool("manage_source",
-		mcp.WithDescription(`Configure Conduit's Azure DevOps and GitHub sources — the systems its search tools index. `+
-			`Pass request={"mode":"list"} for every source (id, name, type, provider, disabled, sync_status), `+
-			`the stored credential names and the source types. `+
-			`{"mode":"get","source_id":...} returns one source with its config. `+
-			`{"mode":"create","name":...,"type":...,"config":{...}} adds a source (config.Provider "github" for GitHub); `+
-			`{"mode":"update","source_id":...,...} changes name, type, disabled or merges config keys. `+
-			`Credentials are referenced by name only: ask the user which stored credential to use and never ask for `+
-			`or pass a token or password. Saving doesn't index anything — call sync_source trigger afterwards. `+
+		mcp.WithDescription(`Configure what Conduit indexes and reads live. Sources live inside providers — saved Azure `+
+			`DevOps or GitHub accounts with their token, which the user adds in the Conduit UI (never ask for a token). `+
+			`{"mode":"list"} returns every provider (id, name, kind, base_url, has_token), every source (id, name, type, `+
+			`provider_id, disabled, sync_status) and the source types. To add a source, browse the provider with `+
+			`provider_explore, then {"mode":"select","provider_id":...,"node":<the node's ref>,"type":<one it offers>}: `+
+			`a repository, folder or file becomes Code/Test Code/Documentation/Requirements/Test Cases (one source per `+
+			`repository × type, ticked folders and files narrowing it), a repository Commit History, a work item or `+
+			`issue type Work Items/Requirements/Test Cases, an Azure DevOps project's Repositories group (or a single `+
+			`repository) Pull Requests, its Pipelines group (or a pipeline folder) Pipeline Runs; on GitHub a `+
+			`repository's Issues, Workflows or the repository itself. Selecting more parts of the same source extends `+
+			`it. {"mode":"deselect",...,"confirm":true} undoes a selection — deselecting a source's last part deletes `+
+			`it and its indexed data. {"mode":"get","source_id":...} returns a source with its config; `+
+			`{"mode":"update","source_id":...} changes its name, disabled flag or settings (branch, path filter, area `+
+			`paths, labels, max items, runs). Selecting doesn't index anything — call sync_source trigger afterwards; `+
+			`pipeline-run and pull-request sources are read live and need no sync. `+
 			`{"mode":"delete","source_id":...} reports what would be removed; repeat with "confirm":true to delete `+
 			`the source and its indexed data.`),
 		func(t *mcp.Tool) {
@@ -156,24 +174,38 @@ func handleManageRequest(ctx context.Context, args map[string]any, mgr SourceMan
 	if !ok {
 		return nil, fmt.Errorf(`request is required, e.g. {"mode":"list"}`)
 	}
-	switch mode, _ := req["mode"].(string); mode {
+	str := func(key string) string { s, _ := req[key].(string); return strings.TrimSpace(s) }
+	switch mode := str("mode"); mode {
 	case "list":
 		all, err := mgr.ListAll()
 		if err != nil {
 			return nil, fmt.Errorf("reading sources: %w", err)
 		}
+		sort.Slice(all, func(i, j int) bool { return strings.ToLower(all[i].Name) < strings.ToLower(all[j].Name) })
 		out := make([]sourceSummary, 0, len(all))
 		for _, src := range all {
 			out = append(out, sourceSummary{
-				ID: src.ID, Name: src.Name, Type: src.Type, Provider: src.GetConfig("Provider"),
+				ID: src.ID, Name: src.Name, Type: src.Type, ProviderID: src.ProviderID,
 				Disabled: src.Disabled, SyncStatus: syncStatusOf(src),
 			})
+		}
+		provs, err := mgr.ListProviders()
+		if err != nil {
+			return nil, fmt.Errorf("reading providers: %w", err)
+		}
+		ps := make([]providerSummary, 0, len(provs))
+		for _, p := range provs {
+			ps = append(ps, providerSummary{ID: p.ID, Name: p.Name, Kind: p.Kind, BaseURL: p.BaseURL, HasToken: mgr.HasToken(p.ID)})
 		}
 		types := make([]map[string]string, len(sourcemgmt.Types))
 		for i, t := range sourcemgmt.Types {
 			types[i] = map[string]string{"type": t.Value, "label": t.Label, "description": t.Description}
 		}
-		return map[string]any{"sources": out, "credentials": credentialNames(mgr), "types": types}, nil
+		res := map[string]any{"providers": ps, "sources": out, "types": types}
+		if len(ps) == 0 {
+			res["note"] = "No provider is configured yet: ask the user to add one (Azure DevOps or GitHub, with a token) on the Providers page of the Conduit UI."
+		}
+		return res, nil
 
 	case "get":
 		src, err := lookup(mgr, req)
@@ -182,32 +214,77 @@ func handleManageRequest(ctx context.Context, args map[string]any, mgr SourceMan
 		}
 		return map[string]any{"source": viewOf(*src)}, nil
 
-	case "create":
-		src := models.SourceDefinition{ID: uuid.NewString(), SyncStatus: "idle", Config: map[string]string{"Provider": "api"}}
-		if err := applyEdits(&src, req, mgr, true); err != nil {
+	case "select", "deselect":
+		ref, err := nodeRefOf(req["node"])
+		if err != nil {
 			return nil, err
 		}
-		if err := mgr.Save(ctx, "", &src); err != nil {
-			return nil, fmt.Errorf("saving source: %w", err)
+		on := mode == "select"
+		if confirm, _ := req["confirm"].(bool); !on && !confirm {
+			return map[string]any{
+				"note": `Nothing changed. Repeat with "confirm":true to deselect; if this is the source's last selected part, ` +
+					`the source and its indexed data are deleted.`,
+			}, nil
 		}
-		return map[string]any{"source": viewOf(src), "next": nextStep(src, "index")}, nil
+		srcType := str("type")
+		src, err := mgr.Toggle(ctx, str("provider_id"), ref, str("name"), srcType, on, runner.IsSyncing)
+		if err != nil {
+			return nil, err
+		}
+		if src == nil {
+			if on {
+				return nil, fmt.Errorf("nothing was selected")
+			}
+			return map[string]any{"deleted": true, "note": "That was the source's last selected part: the source and its indexed data were deleted."}, nil
+		}
+		out := map[string]any{"source": viewOf(*src)}
+		if on {
+			out["next"] = nextStep(*src, "index")
+		} else {
+			out["next"] = nextStep(*src, "re-index")
+		}
+		return out, nil
 
 	case "update":
 		src, err := lookup(mgr, req)
 		if err != nil {
 			return nil, err
 		}
-		if err := editable(*src, runner); err != nil {
+		if runner.IsSyncing(src.ID) {
+			return nil, fmt.Errorf("source %q is syncing; cancel the sync in the UI or wait for it to finish", src.Name)
+		}
+		var disabled *bool
+		if v, ok := req["disabled"]; ok {
+			d, isBool := v.(bool)
+			if !isBool {
+				return nil, fmt.Errorf("disabled must be a boolean")
+			}
+			disabled = &d
+		}
+		settings := map[string]string{}
+		if raw, ok := req["settings"]; ok {
+			patch, isMap := raw.(map[string]any)
+			if !isMap {
+				return nil, fmt.Errorf("settings must be an object of string values")
+			}
+			for k, v := range patch {
+				val, err := configValue(v)
+				if err != nil {
+					return nil, fmt.Errorf("settings.%s: %w", k, err)
+				}
+				settings[k] = val
+			}
+		}
+		if v, ok := req["name"]; ok {
+			if n, _ := v.(string); strings.TrimSpace(n) == "" {
+				return nil, fmt.Errorf("name must be a non-empty string")
+			}
+		}
+		updated, err := mgr.UpdateSettings(ctx, src.ID, str("name"), disabled, settings)
+		if err != nil {
 			return nil, err
 		}
-		oldCollection := sources.CollectionFor(src)
-		if err := applyEdits(src, req, mgr, false); err != nil {
-			return nil, err
-		}
-		if err := mgr.Save(ctx, oldCollection, src); err != nil {
-			return nil, fmt.Errorf("saving source: %w", err)
-		}
-		return map[string]any{"source": viewOf(*src), "next": nextStep(*src, "re-index")}, nil
+		return map[string]any{"source": viewOf(*updated), "next": nextStep(*updated, "re-index")}, nil
 
 	case "delete":
 		src, err := lookup(mgr, req)
@@ -232,8 +309,25 @@ func handleManageRequest(ctx context.Context, args map[string]any, mgr SourceMan
 		return map[string]any{"deleted": src.ID}, nil
 
 	default:
-		return nil, fmt.Errorf(`request.mode must be "list", "get", "create", "update" or "delete", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "list", "get", "select", "deselect", "update" or "delete", got %q`, mode)
 	}
+}
+
+// nodeRefOf decodes a node ref passed back from provider_explore.
+func nodeRefOf(v any) (providers.NodeRef, error) {
+	var ref providers.NodeRef
+	m, ok := v.(map[string]any)
+	if !ok {
+		return ref, fmt.Errorf("node is required: a node's ref as provider_explore returned it")
+	}
+	data, _ := json.Marshal(m)
+	if err := json.Unmarshal(data, &ref); err != nil {
+		return ref, fmt.Errorf("node: %w", err)
+	}
+	if ref.Kind == "" {
+		return ref, fmt.Errorf("node.kind is required")
+	}
+	return ref, nil
 }
 
 func lookup(mgr SourceManager, req map[string]any) (*models.SourceDefinition, error) {
@@ -251,121 +345,8 @@ func lookup(mgr SourceManager, req map[string]any) (*models.SourceDefinition, er
 	return src, nil
 }
 
-// editable refuses edits to sources mid-sync (the sync would index the old
-// config).
-func editable(src models.SourceDefinition, runner SyncRunner) error {
-	if runner.IsSyncing(src.ID) {
-		return fmt.Errorf("source %q is syncing; cancel the sync in the UI or wait for it to finish", src.Name)
-	}
-	return nil
-}
-
-// applyEdits applies name/type/disabled/config from req to src and validates
-// the result. create requires name, type and config; update applies only the
-// fields present.
-func applyEdits(src *models.SourceDefinition, req map[string]any, mgr SourceManager, create bool) error {
-	before := copyConfig(src.Config)
-	if src.Config == nil {
-		src.Config = map[string]string{}
-	}
-
-	if v, ok := req["name"]; ok || create {
-		name, _ := v.(string)
-		if name = strings.TrimSpace(name); name == "" {
-			return fmt.Errorf("name must be a non-empty string")
-		}
-		src.Name = name
-	}
-	if v, ok := req["type"]; ok || create {
-		t, _ := v.(string)
-		if !sourcemgmt.ValidType(t) {
-			return fmt.Errorf("type %q is not a source type; list mode shows the types", t)
-		}
-		src.Type = t
-	}
-	if v, ok := req["disabled"]; ok {
-		d, isBool := v.(bool)
-		if !isBool {
-			return fmt.Errorf("disabled must be a boolean")
-		}
-		src.Disabled = d
-	}
-	if v, ok := req["config"]; ok || create {
-		patch, isMap := v.(map[string]any)
-		if !isMap {
-			return fmt.Errorf("config must be an object of string values")
-		}
-		// Provider decides which keys are allowed, so it applies first.
-		// Switching provider drops the old provider's keys, which the new
-		// one doesn't read.
-		if raw, ok := patch["Provider"]; ok {
-			p, _ := raw.(string)
-			if !slices.Contains(sourcemgmt.Providers, p) {
-				return fmt.Errorf("config.Provider must be one of %s", strings.Join(sourcemgmt.Providers, ", "))
-			}
-			if p != src.Config["Provider"] {
-				for key := range src.Config {
-					if !slices.Contains(sourcemgmt.ConfigKeys(p), key) {
-						delete(src.Config, key)
-					}
-				}
-			}
-			src.Config["Provider"] = p
-		}
-		allowed := sourcemgmt.ConfigKeys(src.Config["Provider"])
-		for key, raw := range patch {
-			if key == "Provider" {
-				continue
-			}
-			if !slices.Contains(allowed, key) {
-				return fmt.Errorf("config key %q is not allowed for provider %q; allowed keys: %s",
-					key, src.Config["Provider"], strings.Join(allowed, ", "))
-			}
-			val, err := configValue(raw)
-			if err != nil {
-				return fmt.Errorf("config.%s: %w", key, err)
-			}
-			if val == "" {
-				delete(src.Config, key)
-			} else {
-				src.Config[key] = val
-			}
-		}
-	}
-
-	if err := checkCredentials(src.Config, before, credentialNames(mgr)); err != nil {
-		return err
-	}
-	if msg := sourcemgmt.Validate(src.Type, src.Config); msg != "" {
-		return fmt.Errorf("%s", msg)
-	}
-	return nil
-}
-
-// checkCredentials requires every credential field that this edit sets to
-// name a stored credential. A value that isn't one is most likely a pasted
-// secret, which would otherwise be stored in plain conduit-sources.json; it
-// is not echoed back. Fields left unchanged are not re-checked, so a source
-// whose credential was deleted can still be renamed.
-func checkCredentials(cfg, before map[string]string, known []string) error {
-	for _, key := range sourcemgmt.CredentialKeys {
-		name := cfg[key]
-		if name == "" || name == before[key] || slices.Contains(known, name) {
-			continue
-		}
-		stored := "none yet"
-		if len(known) > 0 {
-			stored = strings.Join(known, ", ")
-		}
-		return fmt.Errorf("config.%s must be the name of a stored credential, never a secret value, and the "+
-			"given value is not one. Stored credentials: %s. If the right one is missing, ask the user to add it at "+
-			"/credentials in the Conduit UI", key, stored)
-	}
-	return nil
-}
-
 // configValue accepts strings, plus numbers and booleans that models often
-// send for fields like Top or VerifySSL.
+// send for settings like Top.
 func configValue(v any) (string, error) {
 	switch x := v.(type) {
 	case string:
@@ -379,14 +360,6 @@ func configValue(v any) (string, error) {
 	}
 }
 
-func credentialNames(mgr SourceManager) []string {
-	names := mgr.CredentialNames()
-	if names == nil {
-		names = []string{}
-	}
-	return names
-}
-
 func syncStatusOf(src models.SourceDefinition) string {
 	if src.SyncStatus == "" {
 		return "idle"
@@ -396,20 +369,14 @@ func syncStatusOf(src models.SourceDefinition) string {
 
 // viewOf copies src for output.
 func viewOf(src models.SourceDefinition) sourceView {
-	cfg := copyConfig(src.Config)
+	cfg := make(map[string]string, len(src.Config))
+	for k, v := range src.Config {
+		cfg[k] = v
+	}
 	return sourceView{
-		ID: src.ID, Name: src.Name, Type: src.Type, Disabled: src.Disabled,
+		ID: src.ID, Name: src.Name, Type: src.Type, ProviderID: src.ProviderID, Disabled: src.Disabled,
 		SyncStatus: syncStatusOf(src), LastSyncedAt: src.LastSyncedAt, Config: cfg,
 	}
-}
-
-// copyConfig returns a copy of m (never nil).
-func copyConfig(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
 }
 
 // nextStep tells the agent what to do with a saved source: sync it, or for
@@ -417,9 +384,9 @@ func copyConfig(m map[string]string) map[string]string {
 func nextStep(src models.SourceDefinition, verb string) string {
 	switch src.Type {
 	case models.SourcePipelineRun:
-		return "Nothing to sync: search_pipeline_run reads this pipeline live with this source_id."
+		return "Nothing to sync: search_pipeline_run reads these pipelines live with this source_id."
 	case models.SourcePullRequest:
-		return "Nothing to sync: search_pull_request reads this repository's pull requests live with this source_id."
+		return "Nothing to sync: search_pull_request reads these pull requests live with this source_id."
 	}
 	return "Call sync_source trigger with this id to " + verb + " it."
 }

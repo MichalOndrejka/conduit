@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,7 +28,13 @@ type adoPRClient struct {
 	client  *http.Client
 	org     string // organization / collection URL
 	project string
-	repo    string
+	// repo is the pull request's repository, or "" for a project-wide
+	// listing client (a pull-request source covering every repository, or
+	// several).
+	repo string
+	// repos narrows a project-wide listing ("" repo) to these repositories;
+	// empty = every repository of the project.
+	repos   []string
 	version string
 }
 
@@ -132,6 +140,7 @@ type adoPullRequest struct {
 	LastMergeSourceCommit adoCommitRef `json:"lastMergeSourceCommit"`
 	LastMergeTargetCommit adoCommitRef `json:"lastMergeTargetCommit"`
 	Repository            struct {
+		Name    string `json:"name"`
 		Project struct {
 			ID string `json:"id"`
 		} `json:"project"`
@@ -139,15 +148,72 @@ type adoPullRequest struct {
 }
 
 func (c *adoPRClient) summary(pr adoPullRequest) PRSummary {
+	repo := pr.Repository.Name
+	if repo == "" {
+		repo = c.repo
+	}
 	return PRSummary{
 		ID: pr.PullRequestID, Title: pr.Title, Status: pr.Status, Author: pr.CreatedBy.String(),
+		Repository:   repo,
 		SourceBranch: strings.TrimPrefix(pr.SourceRefName, "refs/heads/"),
 		TargetBranch: strings.TrimPrefix(pr.TargetRefName, "refs/heads/"),
-		IsDraft:      pr.IsDraft, CreatedAt: pr.CreationDate, WebURL: c.WebURL(pr.PullRequestID),
+		IsDraft:      pr.IsDraft, CreatedAt: pr.CreationDate,
+		WebURL: fmt.Sprintf("%s/_git/%s/pullrequest/%d", c.projectBase(), url.PathEscape(repo), pr.PullRequestID),
 	}
 }
 
+// List lists pull requests newest first: of the repository f names (which
+// must be in the source's scope), else of the client's repository, else of
+// every repository in scope — the whole project in one query, or a few named
+// repositories merged by creation date.
 func (c *adoPRClient) List(ctx context.Context, f PRListFilter) ([]PRSummary, bool, error) {
+	repo := c.repo
+	if want := strings.TrimSpace(f.Repository); want != "" {
+		if len(c.repos) > 0 && !slices.ContainsFunc(c.repos, func(r string) bool { return strings.EqualFold(r, want) }) {
+			return nil, false, fmt.Errorf("repository %q is not in this source's scope (%s)", want, strings.Join(c.repos, ", "))
+		}
+		repo = want
+	} else if repo == "" && len(c.repos) == 1 {
+		repo = c.repos[0]
+	}
+	page := max(f.Page, 1)
+	if repo != "" || len(c.repos) == 0 {
+		endpoint := c.projectBase() + "/_apis/git/pullrequests"
+		if repo != "" {
+			endpoint = c.projectBase() + "/_apis/git/repositories/" + url.PathEscape(repo) + "/pullrequests"
+		}
+		// One extra item tells whether another page follows.
+		prs, err := c.listFrom(ctx, endpoint, f, (page-1)*PRPageSize, PRPageSize+1)
+		if err != nil {
+			return nil, false, err
+		}
+		return c.page(prs, 0)
+	}
+	// Several repositories: each one's newest page*PRPageSize+1 pull
+	// requests hold the merged list's first page*PRPageSize+1.
+	var all []adoPullRequest
+	for _, r := range c.repos {
+		prs, err := c.listFrom(ctx, c.projectBase()+"/_apis/git/repositories/"+url.PathEscape(r)+"/pullrequests", f, 0, page*PRPageSize+1)
+		if err != nil {
+			return nil, false, fmt.Errorf("repository %s: %w", r, err)
+		}
+		all = append(all, prs...)
+	}
+	sort.SliceStable(all, func(i, j int) bool { return all[i].CreationDate > all[j].CreationDate })
+	return c.page(all, (page-1)*PRPageSize)
+}
+
+// page returns PRPageSize summaries of prs from skip, and whether more follow.
+func (c *adoPRClient) page(prs []adoPullRequest, skip int) ([]PRSummary, bool, error) {
+	out := []PRSummary{}
+	for i := skip; i < len(prs) && i < skip+PRPageSize; i++ {
+		out = append(out, c.summary(prs[i]))
+	}
+	return out, len(prs) > skip+PRPageSize, nil
+}
+
+// listFrom reads one pull request listing endpoint with f's criteria.
+func (c *adoPRClient) listFrom(ctx context.Context, endpoint string, f PRListFilter, skip, top int) ([]adoPullRequest, error) {
 	status := f.Status
 	if status == "" {
 		status = PRStatusActive
@@ -161,7 +227,7 @@ func (c *adoPRClient) List(ctx context.Context, f PRListFilter) ([]PRSummary, bo
 		}
 		id, err := c.identityID(ctx, who.value)
 		if err != nil {
-			return nil, false, err
+			return nil, err
 		}
 		q.Set(who.key, id)
 	}
@@ -171,25 +237,16 @@ func (c *adoPRClient) List(ctx context.Context, f PRListFilter) ([]PRSummary, bo
 		}
 		q.Set("searchCriteria.targetRefName", b)
 	}
-	page := max(f.Page, 1)
-	// One extra item tells whether another page follows.
-	q.Set("$top", strconv.Itoa(PRPageSize+1))
-	q.Set("$skip", strconv.Itoa((page-1)*PRPageSize))
+	q.Set("$top", strconv.Itoa(top))
+	q.Set("$skip", strconv.Itoa(skip))
 
 	var resp struct {
 		Value []adoPullRequest `json:"value"`
 	}
-	if _, err := c.getJSON(ctx, c.repoAPI()+"/pullrequests"+c.query(q), &resp); err != nil {
-		return nil, false, err
+	if _, err := c.getJSON(ctx, endpoint+c.query(q), &resp); err != nil {
+		return nil, err
 	}
-	out := []PRSummary{}
-	for i, pr := range resp.Value {
-		if i == PRPageSize {
-			break
-		}
-		out = append(out, c.summary(pr))
-	}
-	return out, len(resp.Value) > PRPageSize, nil
+	return resp.Value, nil
 }
 
 // identityID resolves "me" (the token's owner) or an email to an Azure

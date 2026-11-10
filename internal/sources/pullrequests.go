@@ -39,6 +39,8 @@ type PRListFilter struct {
 	Author       string
 	Reviewer     string
 	TargetBranch string
+	// Repository narrows a listing to one repository of the source's scope.
+	Repository string
 	Page         int // 1-based, PRPageSize per page
 }
 
@@ -49,6 +51,7 @@ const PRPageSize = 20
 type PRSummary struct {
 	ID           int    `json:"id"`
 	Title        string `json:"title"`
+	Repository   string `json:"repository,omitempty"`
 	Status       string `json:"status"`
 	Author       string `json:"author"`
 	SourceBranch string `json:"source_branch,omitempty"`
@@ -262,11 +265,24 @@ func PullRequestProviderFor(src *models.SourceDefinition, store secrets.Reader) 
 		return newGitHubPRClient(src, store, g.owner, g.repo)
 	case "", "api", "custom":
 		org, project, repo := adoSourceScope(src)
-		if org == "" || project == "" || repo == "" {
-			return nil, fmt.Errorf("source %q doesn't name an Azure DevOps repository — use a code, test code, "+
-				"documentation, commit-history or pull-request source of the repository", src.Name)
+		if org == "" || project == "" {
+			return nil, fmt.Errorf("source %q doesn't name an Azure DevOps project", src.Name)
 		}
-		return newAdoPRClient(src, store, org, project, repo), nil
+		c := newAdoPRClient(src, store, org, project, repo)
+		if src.Type == models.SourcePullRequest {
+			// A pull-request source covers the project, or the repositories
+			// it lists; a repository's other sources cover that repository.
+			c.repo = ""
+			for _, r := range strings.Split(src.GetConfig("Repositories"), ",") {
+				if r = strings.TrimSpace(r); r != "" {
+					c.repos = append(c.repos, r)
+				}
+			}
+		} else if repo == "" {
+			return nil, fmt.Errorf("source %q doesn't name an Azure DevOps repository — use a pull-request source, "+
+				"or a code, test code, documentation or commit-history source of the repository", src.Name)
+		}
+		return c, nil
 	default:
 		return nil, fmt.Errorf("source %q has provider %q, which has no pull requests", src.Name, src.GetConfig("Provider"))
 	}

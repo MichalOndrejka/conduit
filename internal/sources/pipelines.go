@@ -31,6 +31,9 @@ const MaxPipelineRuns = 100
 // Values are passed to the provider as given (Azure DevOps and GitHub name
 // results and statuses differently).
 type PipelineRunFilter struct {
+	// Pipeline names one pipeline of the source's scope — its id, name or
+	// (GitHub) workflow file; "" lists every pipeline in scope.
+	Pipeline     string
 	Top          int
 	Result       string
 	Status       string
@@ -178,17 +181,67 @@ type pipelineBackend interface {
 	// cacheScope identifies the project/repository, so a run read through a
 	// source and through a URL shares cache entries.
 	cacheScope() string
+	pipelines(ctx context.Context) ([]PipelineDefinition, error)
 	list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error)
 	summary(ctx context.Context, id int64) (*PipelineRunSummary, error)
 	detail(ctx context.Context, s *PipelineRunSummary) (*PipelineRun, error)
 	log(ctx context.Context, s *PipelineRunSummary, logID int64) (string, error)
 }
 
-// PipelineProvider reads one pipeline's runs (or, resolved from a run URL,
-// any run of the project or repository).
+// PipelineDefinition is one pipeline (Azure DevOps definition, GitHub
+// workflow) of a source's scope.
+type PipelineDefinition struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Folder string `json:"folder,omitempty"` // Azure DevOps folder, \-separated
+	File   string `json:"file,omitempty"`   // GitHub workflow file
+	State  string `json:"state,omitempty"`  // GitHub: active, disabled_manually, …
+	WebURL string `json:"web_url,omitempty"`
+}
+
+// matchPipeline picks the pipeline a caller named: by id, then exact name
+// or workflow file (case-insensitive), then a unique name prefix.
+func matchPipeline(defs []PipelineDefinition, want string) (*PipelineDefinition, error) {
+	want = strings.TrimSpace(want)
+	for i := range defs {
+		if defs[i].ID == want {
+			return &defs[i], nil
+		}
+	}
+	for i := range defs {
+		if strings.EqualFold(defs[i].Name, want) || (defs[i].File != "" && strings.EqualFold(defs[i].File, want)) {
+			return &defs[i], nil
+		}
+	}
+	var prefixed []*PipelineDefinition
+	for i := range defs {
+		if strings.HasPrefix(strings.ToLower(defs[i].Name), strings.ToLower(want)) {
+			prefixed = append(prefixed, &defs[i])
+		}
+	}
+	if len(prefixed) == 1 {
+		return prefixed[0], nil
+	}
+	names := make([]string, 0, len(defs))
+	for _, d := range defs {
+		names = append(names, fmt.Sprintf("%s (%s)", d.Name, d.ID))
+	}
+	if len(names) > 30 {
+		names = append(names[:30], fmt.Sprintf("… %d more — pipelines mode lists them all", len(defs)-30))
+	}
+	return nil, fmt.Errorf("no pipeline in scope matches %q; pipelines in scope: %s", want, strings.Join(names, ", "))
+}
+
+// PipelineProvider reads the runs of a source's pipelines (or, resolved
+// from a run URL, any run of the project or repository).
 type PipelineProvider struct {
 	b          pipelineBackend
 	defaultTop int
+}
+
+// Pipelines lists the pipelines in the source's scope.
+func (p *PipelineProvider) Pipelines(ctx context.Context) ([]PipelineDefinition, error) {
+	return p.b.pipelines(ctx)
 }
 
 // List returns the newest runs matching f.
@@ -260,21 +313,13 @@ func PipelineProviderFor(src *models.SourceDefinition, store secrets.Reader) (*P
 		if err != nil {
 			return nil, err
 		}
-		workflow := strings.TrimSpace(src.GetConfig("Workflow"))
-		if workflow == "" {
-			return nil, fmt.Errorf("source %q names no workflow", src.Name)
-		}
-		return &PipelineProvider{b: &githubPipelineClient{g: g, workflow: workflow}, defaultTop: top}, nil
+		return &PipelineProvider{b: &githubPipelineClient{g: g}, defaultTop: top}, nil
 	case "", "api", "custom":
 		org, project, _ := adoSourceScope(src)
 		if org == "" || project == "" {
 			return nil, fmt.Errorf("source %q doesn't name an Azure DevOps organization and project", src.Name)
 		}
-		def, err := strconv.Atoi(strings.TrimSpace(src.GetConfig("DefinitionId")))
-		if err != nil || def <= 0 {
-			return nil, fmt.Errorf("source %q has no numeric DefinitionId (got %q)", src.Name, src.GetConfig("DefinitionId"))
-		}
-		return &PipelineProvider{b: newAdoPipelineClient(src, store, org, project, def), defaultTop: top}, nil
+		return &PipelineProvider{b: newAdoPipelineClient(src, store, org, project, src.GetConfig("PipelineFolder")), defaultTop: top}, nil
 	default:
 		return nil, fmt.Errorf("source %q has provider %q, which has no pipelines", src.Name, src.GetConfig("Provider"))
 	}
@@ -324,7 +369,7 @@ func ResolvePipelineRunURL(rawURL string, all []models.SourceDefinition, store s
 		case "", "api", "custom":
 			if ref, rank, ok := matchAdoRun(src, u); ok {
 				c = &candidate{src: src, rank: rank, id: ref.id, build: func() (pipelineBackend, error) {
-					return newAdoPipelineClient(src, store, ref.org, ref.project, 0), nil
+					return newAdoPipelineClient(src, store, ref.org, ref.project, ""), nil
 				}}
 			}
 		}

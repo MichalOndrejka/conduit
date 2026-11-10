@@ -538,3 +538,64 @@ func TestGitHubPR_ThreadsAndList(t *testing.T) {
 		t.Error("want an error for an email filter on GitHub")
 	}
 }
+
+// A pull-request source covers its project — every repository through the
+// project endpoint — or the repositories it lists, merged newest first; a
+// named repository must be in scope.
+func TestAdoPR_ProjectScopedListing(t *testing.T) {
+	var paths []string
+	pr := func(id int, repo, created string) map[string]any {
+		return map[string]any{"pullRequestId": id, "title": "PR " + repo, "status": "active", "creationDate": created,
+			"repository": map[string]any{"name": repo}}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		var value []any
+		switch r.URL.Path {
+		case "/acme/Shop/_apis/git/pullrequests":
+			value = []any{pr(3, "web", "2026-11-03T00:00:00Z"), pr(2, "api", "2026-11-02T00:00:00Z")}
+		case "/acme/Shop/_apis/git/repositories/api/pullrequests":
+			value = []any{pr(5, "api", "2026-11-05T00:00:00Z"), pr(2, "api", "2026-11-02T00:00:00Z")}
+		case "/acme/Shop/_apis/git/repositories/web/pullrequests":
+			value = []any{pr(3, "web", "2026-11-03T00:00:00Z")}
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(w, map[string]any{"value": value})
+	}))
+	defer srv.Close()
+	src := models.SourceDefinition{ID: "prs", Name: "PRs", Type: models.SourcePullRequest, Config: map[string]string{
+		"Provider": "api", "AdoOrg": srv.URL + "/acme", "AdoProject": "Shop", "Url": srv.URL + "/acme/Shop"}}
+	list := func(f PRListFilter) []PRSummary {
+		t.Helper()
+		p, err := PullRequestProviderFor(&src, fakeSecrets{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		prs, _, err := p.List(context.Background(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return prs
+	}
+
+	prs := list(PRListFilter{})
+	if len(prs) != 2 || paths[0] != "/acme/Shop/_apis/git/pullrequests" || prs[0].Repository != "web" ||
+		prs[0].WebURL != srv.URL+"/acme/Shop/_git/web/pullrequest/3" {
+		t.Fatalf("project-wide = %+v via %v", prs, paths)
+	}
+	paths = nil
+	if prs := list(PRListFilter{Repository: "api"}); len(prs) != 2 || paths[0] != "/acme/Shop/_apis/git/repositories/api/pullrequests" {
+		t.Errorf("one repository = %+v via %v", prs, paths)
+	}
+
+	src.Config["Repositories"] = "api,web"
+	if prs := list(PRListFilter{}); len(prs) != 3 || prs[0].ID != 5 || prs[1].ID != 3 || prs[2].ID != 2 {
+		t.Errorf("merged = %+v, want 5, 3, 2 (newest first)", prs)
+	}
+	p, _ := PullRequestProviderFor(&src, fakeSecrets{})
+	if _, _, err := p.List(context.Background(), PRListFilter{Repository: "infra"}); err == nil || !strings.Contains(err.Error(), "not in this source's scope") {
+		t.Errorf("out-of-scope repository: err = %v", err)
+	}
+}

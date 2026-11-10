@@ -14,7 +14,7 @@ import (
 func (f *fakeGitHub) pipeline(t *testing.T, cfg map[string]string) *PipelineProvider {
 	t.Helper()
 	full := map[string]string{
-		"Provider": "github", "GitHubUrl": f.srv.URL, "GitHubOwner": "acme", "GitHubRepo": "app", "Token": "gh", "Workflow": "ci.yml",
+		"Provider": "github", "GitHubUrl": f.srv.URL, "GitHubOwner": "acme", "GitHubRepo": "app", "Token": "gh",
 	}
 	for k, v := range cfg {
 		full[k] = v
@@ -39,7 +39,7 @@ func TestGitHubPipelineList(t *testing.T) {
 				"run_started_at": "2026-10-01T10:00:00Z", "updated_at": "2026-10-01T10:05:00Z"},
 		}})
 	})
-	runs, err := f.pipeline(t, nil).List(context.Background(), PipelineRunFilter{Result: "failure", Branch: "refs/heads/main", Reason: "push"})
+	runs, err := f.pipeline(t, nil).List(context.Background(), PipelineRunFilter{Pipeline: "ci.yml", Result: "failure", Branch: "refs/heads/main", Reason: "push"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,5 +117,38 @@ func TestGitHubPipelineGetAndLog(t *testing.T) {
 	}
 	if text, _, err := p.Log(context.Background(), 21, 9); err != nil || !strings.Contains(text, "no longer available on GitHub: HTTP 410") {
 		t.Errorf("expired log = %q, %v", text, err)
+	}
+}
+
+// A source covers every workflow of the repository: a listing without a
+// pipeline reads the repository's runs, a workflow name is looked up first.
+func TestGitHubPipelineScope(t *testing.T) {
+	f := newFakeGitHub(t)
+	var hits []string
+	runs := func(w http.ResponseWriter, r *http.Request) {
+		hits = append(hits, r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []any{}})
+	}
+	f.HandleFunc("/api/v3/repos/acme/app/actions/runs", runs)
+	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows/9/runs", runs)
+	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflows": []any{
+			map[string]any{"id": 9, "name": "Release", "path": ".github/workflows/release.yml", "state": "active"},
+			map[string]any{"id": 8, "name": "CI", "path": ".github/workflows/ci.yml", "state": "active"},
+		}})
+	})
+	p := f.pipeline(t, nil)
+	defs, err := p.Pipelines(context.Background())
+	if err != nil || len(defs) != 2 || defs[0].Name != "CI" || defs[0].File != "ci.yml" {
+		t.Fatalf("pipelines = %+v, %v", defs, err)
+	}
+	if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.List(context.Background(), PipelineRunFilter{Pipeline: "release"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(hits, "|") != "/api/v3/repos/acme/app/actions/runs|/api/v3/repos/acme/app/actions/workflows/9/runs" {
+		t.Errorf("listings hit %v", hits)
 	}
 }

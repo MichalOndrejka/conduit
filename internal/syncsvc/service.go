@@ -48,6 +48,14 @@ type Service struct {
 	stats *stats.Recorder // nil: sync runs aren't recorded
 }
 
+// SourceResolver compiles a source into what its fetcher reads (see
+// providers/registry). When the reader New gets is one, every sync fetches
+// through it; a plain secrets.Reader fetches the stored config as is.
+type SourceResolver interface {
+	secrets.Reader
+	Effective(src *models.SourceDefinition) (*models.SourceDefinition, error)
+}
+
 // SetRecorder makes every sync run append its outcome, timings, counts and
 // API requests to the stats history.
 func (s *Service) SetRecorder(r *stats.Recorder) { s.stats = r }
@@ -207,7 +215,14 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		record("failed")
 	}
 
-	impl, err := sources.New(src, s.secrets)
+	eff := src
+	if r, ok := s.secrets.(SourceResolver); ok {
+		if eff, err = r.Effective(src); err != nil {
+			failedOutcome("fetch", err)
+			return
+		}
+	}
+	impl, err := sources.New(eff, s.secrets)
 	if err != nil {
 		failedOutcome("fetch", err)
 		return

@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/MichalOndrejka/conduit/internal/models"
 )
 
 // Fixture generated with Python `cryptography`:
@@ -310,55 +309,3 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestSourcesUsing(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CONDUIT_SECRET_KEY", pyKey)
-	s, _ := New(dir)
-	if err := s.Create("my-pat", "v"); err != nil {
-		t.Fatal(err)
-	}
-
-	sources := []models.SourceDefinition{
-		{Name: "src-a", Config: map[string]string{"Pat": "my-pat"}},
-		{Name: "src-b", Config: map[string]string{"Token": "other-token"}},
-		{Name: "src-c", Config: map[string]string{"Password": "my-pat"}},
-	}
-
-	got := s.SourcesUsing("my-pat", sources)
-	want := []string{"src-a", "src-c"}
-	if len(got) != len(want) {
-		t.Fatalf("SourcesUsing = %v, want %v", got, want)
-	}
-	for i, w := range want {
-		if got[i] != w {
-			t.Errorf("SourcesUsing[%d] = %q, want %q", i, got[i], w)
-		}
-	}
-
-	if got := s.SourcesUsing("unknown-cred", sources); got != nil {
-		t.Errorf("SourcesUsing for unknown credential = %v, want nil", got)
-	}
-}
-
-func TestMissingReferences(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("CONDUIT_SECRET_KEY", pyKey)
-	s, _ := New(dir)
-	if err := s.Create("present", "v"); err != nil {
-		t.Fatal(err)
-	}
-
-	sources := []models.SourceDefinition{
-		{Name: "src-a", Config: map[string]string{"Pat": "present"}},
-		{Name: "src-b", Config: map[string]string{"Token": "missing-cred"}},
-		{Name: "src-c", Config: map[string]string{}},
-	}
-
-	got := s.MissingReferences(sources)
-	if len(got) != 1 {
-		t.Fatalf("MissingReferences = %+v, want 1 entry", got)
-	}
-	if got[0].SourceName != "src-b" || got[0].CredentialName != "missing-cred" {
-		t.Errorf("MissingReferences[0] = %+v, want {src-b missing-cred}", got[0])
-	}
-}

@@ -7,6 +7,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 
@@ -14,9 +15,6 @@ import (
 
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
-
-// credentialFields mirrors rename_credential_references in source_config.py.
-var credentialFields = []string{"Pat", "Token", "Password", "ApiKeyValue"}
 
 type SourceConfigStore struct {
 	path string
@@ -106,81 +104,59 @@ func (s *SourceConfigStore) Delete(id string) error {
 	return s.write(id, out)
 }
 
-// RenameCredentialReferences cascades a credential rename into source configs.
-func (s *SourceConfigStore) RenameCredentialReferences(oldName, newName string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	sources, err := s.read()
-	if err != nil {
-		return err
-	}
-	changed := false
-	for i := range sources {
-		for _, f := range credentialFields {
-			if sources[i].Config[f] == oldName {
-				sources[i].Config[f] = newName
-				changed = true
-			}
-		}
-	}
-	if !changed {
-		return nil
-	}
-	return s.write("", sources)
-}
 
-// Import parses an exported sources document (flat [...] array or the
-// {"sources": [...]} wrapper, with camelCase keys normalized like readFile),
-// assigns a fresh ID to any source whose ID collides with an existing one,
-// resets sync state, and saves. Returns the number imported. Mirrors
-// import_sources in app/web/routes.py.
-func (s *SourceConfigStore) Import(data []byte) (int, error) {
+// ParseSources parses the sources of an export: a flat [...] array, or the
+// "sources" list of an {"sources": [...], ...} document, with camelCase keys
+// normalized like readFile. Nothing is stored.
+func ParseSources(data []byte) ([]models.SourceDefinition, error) {
 	var rawList []json.RawMessage
 	if err := json.Unmarshal(data, &rawList); err != nil {
 		var wrapper struct {
 			Sources []json.RawMessage `json:"sources"`
 		}
 		if err2 := json.Unmarshal(data, &wrapper); err2 != nil {
-			return 0, err // surface the original (array) parse error
+			return nil, err // surface the original (array) parse error
 		}
 		rawList = wrapper.Sources
 	}
+	out := make([]models.SourceDefinition, 0, len(rawList))
+	for i, raw := range rawList {
+		var src models.SourceDefinition
+		if err := json.Unmarshal(normaliseKeys(raw), &src); err != nil {
+			return nil, fmt.Errorf("source %d: %w", i+1, err)
+		}
+		if src.Config == nil {
+			src.Config = map[string]string{}
+		}
+		out = append(out, src)
+	}
+	return out, nil
+}
 
+// AddAll appends srcs in one write. A source whose ID is empty or already
+// stored gets a fresh one.
+func (s *SourceConfigStore) AddAll(srcs []models.SourceDefinition) error {
+	if len(srcs) == 0 {
+		return nil
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sources, err := s.read()
 	if err != nil {
-		return 0, err
+		return err
 	}
 	existing := make(map[string]bool, len(sources))
 	for _, src := range sources {
 		existing[src.ID] = true
 	}
-
-	imported := 0
-	for _, raw := range rawList {
-		var src models.SourceDefinition
-		if err := json.Unmarshal(normaliseKeys(raw), &src); err != nil {
-			return imported, err
-		}
-		if src.Config == nil {
-			src.Config = map[string]string{}
-		}
+	for _, src := range srcs {
 		if src.ID == "" || existing[src.ID] {
 			src.ID = uuid.NewString()
 		}
 		existing[src.ID] = true
-		src.SyncStatus = "idle"
-		src.SyncError = nil
 		sources = append(sources, src)
-		imported++
 	}
-	if imported > 0 {
-		if err := s.write("", sources); err != nil {
-			return 0, err
-		}
-	}
-	return imported, nil
+	return s.write("", sources)
 }
 
 // ReconcileStaleSync resets any source stuck in "syncing" to "idle". Call
@@ -222,28 +198,6 @@ func (s *SourceConfigStore) ResetAllSyncStatus(status string) error {
 		sources[i].LastSyncedAt = nil
 	}
 	return s.write("", sources)
-}
-
-// ExportStripped returns sources for download, replacing manual document
-// content with the placeholder so uploads don't leak into exports.
-func (s *SourceConfigStore) ExportStripped() ([]models.SourceDefinition, error) {
-	sources, err := s.ListAll()
-	if err != nil {
-		return nil, err
-	}
-	out := make([]models.SourceDefinition, len(sources))
-	for i, src := range sources {
-		cfg := make(map[string]string, len(src.Config))
-		for k, v := range src.Config {
-			cfg[k] = v
-		}
-		if cfg["Provider"] == "manual" || cfg["DocType"] == "upload" {
-			cfg["Content"] = models.DocumentPlaceholder
-		}
-		src.Config = cfg
-		out[i] = src
-	}
-	return out, nil
 }
 
 // ── File I/O ────────────────────────────────────────────────────────────────

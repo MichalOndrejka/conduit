@@ -1,0 +1,61 @@
+{{define "title"}}Providers — Conduit{{end}}
+{{define "content"}}
+<div class="flex items-center justify-between mb-6 flex-wrap gap-3">
+  <h1 class="text-2xl font-semibold text-white">Providers</h1>
+  <a href="/providers/create" class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-500">New provider</a>
+</div>
+
+{{if .Notice}}
+<script>showToast({{.Notice}}, 'ok');</script>
+{{end}}
+{{if .Error}}
+<script>showToast({{.Error}}, 'error');</script>
+{{end}}
+
+{{if not .Providers}}
+<div class="rounded-2xl border border-dashed border-slate-700 p-10 text-center text-slate-400">
+  No providers yet. <a href="/providers/create" class="text-violet-400 hover:underline">Add one</a> to start choosing sources.
+</div>
+{{else}}
+<div class="space-y-3">
+  {{range .Providers}}
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4" data-provider="{{.ID}}">
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <a href="/providers/{{.ID}}" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
+          <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Label}}</span>
+          {{if not .HasToken}}
+          <span class="text-[10px] uppercase tracking-wider text-amber-300 border border-amber-800 bg-amber-950/50 rounded px-1.5 py-0.5">No token</span>
+          {{template "tip" "Edit the provider to set its token. Without one, nothing can be browsed or synced (GitHub: public repositories only)."}}
+          {{end}}
+        </div>
+        <div class="text-xs text-slate-500 mt-1 font-mono truncate">{{.BaseURL}}</div>
+        <div class="text-xs text-slate-500 mt-1">{{.Sources}} source{{if ne .Sources 1}}s{{end}}</div>
+      </div>
+      <div class="flex gap-1.5 shrink-0">
+        <a href="/providers/{{.ID}}" class="text-xs rounded-lg bg-violet-600 text-white px-3 py-1.5 hover:bg-violet-500">Browse</a>
+        <button type="button" onclick="testProvider('{{.ID}}', this)" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Test</button>
+        <a href="/providers/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
+        <form method="post" action="/providers/{{.ID}}/delete" class="contents" onsubmit="return confirm('Delete provider {{.Name}} and its token?')">
+          <button type="submit" class="text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {{end}}
+</div>
+{{end}}
+
+<script>
+function testProvider(id, btn) {
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  fetch('/providers/' + id + '/test', { method: 'POST' })
+    .then(function (r) { return r.json(); })
+    .then(function (res) { showToast(res.ok ? 'Connected.' : 'Failed: ' + res.error, res.ok ? 'ok' : 'error'); })
+    .catch(function (err) { showToast('Failed: ' + err, 'error'); })
+    .finally(function () { btn.disabled = false; btn.textContent = 'Test'; });
+}
+</script>
+{{end}}

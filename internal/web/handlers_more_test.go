@@ -95,35 +95,7 @@ func TestHandleExperienceDeleteRedirects(t *testing.T) {
 
 // ── Credentials page ─────────────────────────────────────────────────────────
 
-func TestHandleCredentialsPageListsCreatedAndMissing(t *testing.T) {
-	h := newHarness(t)
-	if err := h.secrets.Create("stored-cred", "value"); err != nil {
-		t.Fatal(err)
-	}
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Uses missing cred", Config: map[string]string{
-		"Provider": "api", "Password": "missing-cred",
-	}})
 
-	resp := h.get("/credentials")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	body := bodyString(t, resp)
-	if !strings.Contains(body, "stored-cred") {
-		t.Error("credentials page does not list the stored credential")
-	}
-	if !strings.Contains(body, "missing-cred") {
-		t.Error("credentials page does not flag the missing credential reference")
-	}
-}
-
-func TestHandleCredentialCreateGetShowsForm(t *testing.T) {
-	h := newHarness(t)
-	resp := h.get("/credentials/create")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-}
 
 // ── Sync selected (no-op with empty selection) ──────────────────────────────
 

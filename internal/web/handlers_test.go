@@ -3,19 +3,14 @@ package web
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-	"maps"
 	"mime/multipart"
 	"net/http"
-	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
-	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 )
 
 // ── Health / status ──────────────────────────────────────────────────────────
@@ -126,275 +121,19 @@ func TestHandleIndexSortsSourcesByName(t *testing.T) {
 
 // ── Source create ────────────────────────────────────────────────────────────
 
-func TestSourceCreateGetShowsTypePicker(t *testing.T) {
-	h := newHarness(t)
-	resp := h.get("/sources/create")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	if body := bodyString(t, resp); !strings.Contains(body, "Work Items") {
-		t.Error("type picker page does not list Work Items")
-	}
-}
 
-func TestSourceCreateGetShowsFormForType(t *testing.T) {
-	h := newHarness(t)
-	resp := h.get("/sources/create?type=work-item")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-}
 
-func TestSourceCreatePostRequiresName(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/sources/create", url.Values{
-		"type": {"work-item"}, "provider": {"github"}, "GitHubOwner": {"acme"}, "GitHubRepo": {"app"},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (re-rendered form with error)", resp.StatusCode)
-	}
-	if body := bodyString(t, resp); !strings.Contains(body, "Name is required") {
-		t.Error("expected the name-required error message in the response")
-	}
-	all, _ := h.sources.ListAll()
-	if len(all) != 0 {
-		t.Errorf("ListAll() = %+v, want nothing saved", all)
-	}
-}
 
-func TestSourceCreatePostValidatesGitHubRepo(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/sources/create", url.Values{
-		"name": {"Docs"}, "type": {"documentation"}, "provider": {"github"}, "GitHubOwner": {"acme"},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	if body := bodyString(t, resp); !strings.Contains(body, "Repository is required") {
-		t.Error("expected the repository-required validation error")
-	}
-}
 
-func TestSourceCreatePostSavesValidGitHubSource(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/sources/create", url.Values{
-		"name": {"Docs"}, "type": {"documentation"}, "provider": {"github"},
-		"GitHubUrl": {"https://github.com"}, "GitHubOwner": {"acme"}, "GitHubRepo": {"handbook"},
-		"PathFilter": {"*.md"},
-		// Fields of the hidden Azure DevOps tab are not GitHub config.
-		"AdoProject": {"ignored"}, "Url": {"https://ignored.example"},
-	})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303 redirect", resp.StatusCode)
-	}
-	all, err := h.sources.ListAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]string{
-		"Provider": "github", "GitHubUrl": "https://github.com", "GitHubOwner": "acme",
-		"GitHubRepo": "handbook", "PathFilter": "*.md",
-	}
-	if len(all) != 1 || !maps.Equal(all[0].Config, want) {
-		t.Errorf("ListAll() = %+v, want config %v", all, want)
-	}
-}
 
-func TestSourceFormOpensGitHubTab(t *testing.T) {
-	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "g1", Name: "Docs", Type: "documentation", Config: map[string]string{
-		"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "handbook",
-	}})
-	body := bodyString(t, h.get("/sources/g1/edit"))
-	if !strings.Contains(body, `var INITIAL_TAB = "github"`) || !strings.Contains(body, `value="handbook"`) {
-		t.Error("expected the edit form to open on the GitHub tab, pre-filled")
-	}
-	if strings.Contains(body, "Manual") {
-		t.Error("the Manual tab should be gone")
-	}
-	// Both tabs render for every source type.
-	for _, st := range sourcemgmt.Types {
-		resp := h.get("/sources/create?type=" + st.Value)
-		if body := bodyString(t, resp); resp.StatusCode != http.StatusOK || !strings.Contains(body, `id="github-block"`) {
-			t.Errorf("%s form: status %d, GitHub tab missing", st.Value, resp.StatusCode)
-		}
-	}
-}
 
-func TestSourceCreatePostSavesValidAPISource(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/sources/create", url.Values{
-		"name": {"My API Source"}, "type": {"work-item"}, "provider": {"api"},
-		"Url": {"https://api.example.com/items"},
-	})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303 redirect; body: %s", resp.StatusCode, bodyString(t, resp))
-	}
-	all, err := h.sources.ListAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 1 || all[0].GetConfig("Url") != "https://api.example.com/items" {
-		t.Errorf("ListAll() = %+v, want the saved API source", all)
-	}
-}
 
-func TestSourceCreatePostRejectsInvalidURL(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/sources/create", url.Values{
-		"name": {"Bad"}, "type": {"work-item"}, "provider": {"api"}, "Url": {"not-a-url"},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (validation error)", resp.StatusCode)
-	}
-	if body := bodyString(t, resp); !strings.Contains(body, "valid http") {
-		t.Error("expected the URL validation error")
-	}
-}
 
 // ── Source preview ───────────────────────────────────────────────────────────
 
-func TestSourcePreviewFetchesSampleDocuments(t *testing.T) {
-	h := newHarness(t)
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`[{"title":"First item","body":"hello"},{"title":"Second item","body":"world"}]`))
-	}))
-	defer api.Close()
 
-	resp := h.postForm("/sources/preview", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var out struct {
-		Ok        bool                           `json:"ok"`
-		Documents []struct{ Title, Text string } `json:"documents"`
-	}
-	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-		t.Fatal(err)
-	}
-	if !out.Ok || len(out.Documents) != 2 || out.Documents[0].Title != "First item" {
-		t.Errorf("preview = %+v, want two items starting with First item", out)
-	}
-}
 
-func TestSourcePreviewPaginatesAcrossOffset(t *testing.T) {
-	h := newHarness(t)
-	items := make([]string, 12)
-	for i := range items {
-		items[i] = fmt.Sprintf(`{"title":"Item %d"}`, i)
-	}
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
-	}))
-	defer api.Close()
 
-	fetchPage := func(offset string) struct {
-		Ok         bool                           `json:"ok"`
-		Documents  []struct{ Title, Text string } `json:"documents"`
-		Offset     int                            `json:"offset"`
-		Limit      int                            `json:"limit"`
-		HasMore    bool                           `json:"hasMore"`
-		Total      int                            `json:"total"`
-		TotalExact bool                           `json:"totalExact"`
-	} {
-		resp := h.postForm("/sources/preview", url.Values{
-			"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL}, "offset": {offset},
-		})
-		var out struct {
-			Ok         bool                           `json:"ok"`
-			Documents  []struct{ Title, Text string } `json:"documents"`
-			Offset     int                            `json:"offset"`
-			Limit      int                            `json:"limit"`
-			HasMore    bool                           `json:"hasMore"`
-			Total      int                            `json:"total"`
-			TotalExact bool                           `json:"totalExact"`
-		}
-		if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
-
-	first := fetchPage("0")
-	if !first.Ok || len(first.Documents) != 5 || first.Offset != 0 || !first.HasMore {
-		t.Errorf("page 1 = %+v, want 5 docs, offset 0, hasMore true", first)
-	}
-	if first.Documents[0].Title != "Item 0" {
-		t.Errorf("page 1 first doc = %q, want Item 0", first.Documents[0].Title)
-	}
-	// The underlying fetch is capped at top (offset+limit+1 = 6), which is
-	// fewer than the 12 items available, so the total is a floor, not exact.
-	if first.Total != 6 || first.TotalExact {
-		t.Errorf("page 1 total = %d exact=%v, want 6 exact=false", first.Total, first.TotalExact)
-	}
-
-	second := fetchPage("5")
-	if !second.Ok || len(second.Documents) != 5 || second.Offset != 5 || !second.HasMore {
-		t.Errorf("page 2 = %+v, want 5 docs, offset 5, hasMore true", second)
-	}
-	if second.Documents[0].Title != "Item 5" {
-		t.Errorf("page 2 first doc = %q, want Item 5", second.Documents[0].Title)
-	}
-
-	third := fetchPage("10")
-	if !third.Ok || len(third.Documents) != 2 || third.Offset != 10 || third.HasMore {
-		t.Errorf("page 3 = %+v, want 2 docs, offset 10, hasMore false", third)
-	}
-	// At this offset the fetch (top=16) exceeds the 12 items available, so
-	// the exact total is now known.
-	if third.Total != 12 || !third.TotalExact {
-		t.Errorf("page 3 total = %d exact=%v, want 12 exact=true", third.Total, third.TotalExact)
-	}
-}
-
-func TestSourcePreviewSurfacesFetchError(t *testing.T) {
-	h := newHarness(t)
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-	}))
-	defer api.Close()
-
-	resp := h.postForm("/sources/preview", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var out struct {
-		Ok    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out.Ok || !strings.Contains(out.Error, "401") {
-		t.Errorf("preview = %+v, want an HTTP 401 error surfaced", out)
-	}
-}
-
-func TestSourcePreviewReturnsValidationError(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/sources/preview", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "Url": {"not-a-url"},
-	})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200", resp.StatusCode)
-	}
-	var out struct {
-		Ok    bool   `json:"ok"`
-		Error string `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-		t.Fatal(err)
-	}
-	if out.Ok || !strings.Contains(out.Error, "valid http") {
-		t.Errorf("preview = %+v, want a URL validation error", out)
-	}
-}
 
 // ── Source edit ──────────────────────────────────────────────────────────────
 
@@ -419,72 +158,7 @@ func TestSourceEditGetShowsForm(t *testing.T) {
 	}
 }
 
-func TestSourceEditPostUpdatesSource(t *testing.T) {
-	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Old Name", Type: "work-item", Config: map[string]string{
-		"Provider": "api", "Url": "https://api.example.com/items",
-	}})
 
-	resp := h.postForm("/sources/s1/edit", url.Values{
-		"name": {"New Name"}, "type": {"work-item"}, "provider": {"api"},
-		"Url": {"https://api.example.com/items"},
-	})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303; body: %s", resp.StatusCode, bodyString(t, resp))
-	}
-	got, err := h.sources.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Name != "New Name" {
-		t.Errorf("Name = %q, want %q", got.Name, "New Name")
-	}
-}
-
-// Changing a source's type moves it to a different Qdrant collection — the
-// old collection's vectors for this source must be cleaned up and the sync
-// status reset, since a re-sync only replaces vectors within the *new*
-// collection (see handleSourceEditPost's collection-change branch).
-func TestSourceEditPostCollectionChangeCleansUpOldVectors(t *testing.T) {
-	h := newHarness(t)
-	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	mustSave(t, h, models.SourceDefinition{
-		ID: "s1", Name: "Moving", Type: "work-item", SyncStatus: "completed", LastSyncedAt: &now,
-		Config: map[string]string{"Provider": "api", "Url": "https://api.example.com/items"},
-	})
-
-	resp := h.postForm("/sources/s1/edit", url.Values{
-		"name": {"Moving"}, "type": {"code"}, "provider": {"api"},
-		"Url": {"https://dev.azure.com/org/proj/_apis/git/repositories/repo/items"},
-	})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303; body: %s", resp.StatusCode, bodyString(t, resp))
-	}
-
-	h.qd.mu.Lock()
-	deleted := append([]string(nil), h.qd.deleteFilterCalls...)
-	h.qd.mu.Unlock()
-	found := false
-	for _, c := range deleted {
-		if c == models.CollectionWorkItems {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("DeleteByFilter calls = %v, want a cleanup of the old collection %q", deleted, models.CollectionWorkItems)
-	}
-
-	got, err := h.sources.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.SyncStatus != "idle" {
-		t.Errorf("SyncStatus = %q, want reset to idle after a collection change", got.SyncStatus)
-	}
-	if got.LastSyncedAt != nil {
-		t.Errorf("LastSyncedAt = %v, want cleared", got.LastSyncedAt)
-	}
-}
 
 // ── Source delete / toggle / bulk actions ───────────────────────────────────
 
@@ -583,60 +257,7 @@ func TestHandleSyncPauseResumeCancel(t *testing.T) {
 
 // ── Export / Import ──────────────────────────────────────────────────────────
 
-func TestHandleExportReturnsStrippedSources(t *testing.T) {
-	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Manual Doc", Config: map[string]string{
-		"Provider": "manual", "Content": "sensitive uploaded text",
-	}})
 
-	resp := h.get("/export")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	var out []models.SourceDefinition
-	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-		t.Fatal(err)
-	}
-	if len(out) != 1 || out[0].Config["Content"] != models.DocumentPlaceholder {
-		t.Errorf("exported = %+v, want manual Content replaced with the placeholder", out)
-	}
-}
-
-func TestHandleImportMergesSources(t *testing.T) {
-	h := newHarness(t)
-
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	fw, err := mw.CreateFormFile("file", "conduit-sources.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fw.Write([]byte(`[{"id":"imported-1","name":"Imported Source"}]`))
-	mw.Close()
-
-	req, err := http.NewRequest(http.MethodPost, h.url("/import"), &buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", mw.FormDataContentType())
-	resp, err := h.client.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (re-rendered index)", resp.StatusCode)
-	}
-	if body := bodyString(t, resp); !strings.Contains(body, "Imported 1 source") {
-		t.Error("expected the import-count banner in the response")
-	}
-	got, err := h.sources.Get("imported-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || got.Name != "Imported Source" {
-		t.Errorf("Get(imported-1) = %+v, want the imported source", got)
-	}
-}
 
 func TestHandleImportNoFileShowsError(t *testing.T) {
 	h := newHarness(t)
@@ -657,71 +278,9 @@ func TestHandleImportNoFileShowsError(t *testing.T) {
 
 // ── Credentials ──────────────────────────────────────────────────────────────
 
-func TestHandleCredentialCreatePersists(t *testing.T) {
-	h := newHarness(t)
-	resp := h.postForm("/credentials/create", url.Values{"name": {"my-token"}, "value": {"secret-value"}})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303; body: %s", resp.StatusCode, bodyString(t, resp))
-	}
-	if !h.secrets.Has("my-token") {
-		t.Error("credential was not persisted")
-	}
-}
 
-func TestHandleCredentialCreateDuplicateNameErrors(t *testing.T) {
-	h := newHarness(t)
-	h.postForm("/credentials/create", url.Values{"name": {"dup"}, "value": {"v1"}})
 
-	resp := h.postForm("/credentials/create", url.Values{"name": {"dup"}, "value": {"v2"}})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (re-rendered form with error)", resp.StatusCode)
-	}
-	if body := bodyString(t, resp); !strings.Contains(body, "already exists") {
-		t.Error("expected a duplicate-name error message")
-	}
-}
 
-func TestHandleCredentialEditRenamesAndCascadesToSources(t *testing.T) {
-	h := newHarness(t)
-	if err := h.secrets.Create("old-name", "secret"); err != nil {
-		t.Fatal(err)
-	}
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Uses cred", Config: map[string]string{
-		"Provider": "api", "Password": "old-name",
-	}})
-
-	resp := h.postForm("/credentials/old-name/edit", url.Values{"name": {"new-name"}})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303; body: %s", resp.StatusCode, bodyString(t, resp))
-	}
-	if h.secrets.Has("old-name") {
-		t.Error("old credential name should no longer exist")
-	}
-	if !h.secrets.Has("new-name") {
-		t.Error("new credential name should exist")
-	}
-	got, err := h.sources.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Config["Password"] != "new-name" {
-		t.Errorf("source's Password reference = %q, want cascaded rename to %q", got.Config["Password"], "new-name")
-	}
-}
-
-func TestHandleCredentialDeleteRemoves(t *testing.T) {
-	h := newHarness(t)
-	if err := h.secrets.Create("to-delete", "secret"); err != nil {
-		t.Fatal(err)
-	}
-	resp := h.postForm("/credentials/to-delete/delete", nil)
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d, want 303", resp.StatusCode)
-	}
-	if h.secrets.Has("to-delete") {
-		t.Error("credential should have been deleted")
-	}
-}
 
 // ── Experience ───────────────────────────────────────────────────────────────
 
@@ -897,68 +456,7 @@ func TestHandleMapDataQdrantUnreachableReturnsEmptyWithError(t *testing.T) {
 	}
 }
 
-func TestAdoWorkItemTypesEndpoint(t *testing.T) {
-	h := newHarness(t)
-	ado := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/workitemtypes"):
-			_, _ = w.Write([]byte(`{"value":[{"name":"Product Backlog Item"},{"name":"Impediment"}]}`))
-		case strings.HasSuffix(r.URL.Path, "/workitemtypecategories"):
-			_, _ = w.Write([]byte(`{"value":[]}`))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer ado.Close()
 
-	resp := h.postForm("/sources/ado/workitemtypes", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "AdoOrg": {ado.URL}, "AdoProject": {"Proj"},
-	})
-	var out struct {
-		Ok    bool     `json:"ok"`
-		Types []string `json:"types"`
-		Error string   `json:"error"`
-	}
-	if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-		t.Fatal(err)
-	}
-	if !out.Ok || strings.Join(out.Types, ",") != "Impediment,Product Backlog Item" {
-		t.Errorf("response = %+v", out)
-	}
-}
-
-func TestGitHubIssueTypesEndpoint(t *testing.T) {
-	h := newHarness(t)
-	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v3/orgs/acme/issue-types" {
-			http.NotFound(w, r)
-			return
-		}
-		_, _ = w.Write([]byte(`[{"name":"Feature"},{"name":"Bug"}]`))
-	}))
-	defer gh.Close()
-
-	post := func(owner string) (ok, available bool, types []string) {
-		resp := h.postForm("/sources/github/issuetypes", url.Values{
-			"type": {"work-item"}, "provider": {"github"}, "GitHubUrl": {gh.URL}, "GitHubOwner": {owner}, "GitHubRepo": {"app"},
-		})
-		var out struct {
-			Ok        bool     `json:"ok"`
-			Available bool     `json:"available"`
-			Types     []string `json:"types"`
-		}
-		if err := json.Unmarshal([]byte(bodyString(t, resp)), &out); err != nil {
-			t.Fatal(err)
-		}
-		return out.Ok, out.Available, out.Types
-	}
-	if ok, available, types := post("acme"); !ok || !available || strings.Join(types, ",") != "Bug,Feature" {
-		t.Errorf("acme: ok=%v available=%v types=%v", ok, available, types)
-	}
-	if ok, available, types := post("someone"); !ok || available || len(types) != 0 {
-		t.Errorf("personal account: ok=%v available=%v types=%v, want ok and unavailable", ok, available, types)
-	}
-}
 
 // Pipeline-run and pull-request sources are read live: the Sources page
 // marks them Live without sync controls, /status skips their vector count,
