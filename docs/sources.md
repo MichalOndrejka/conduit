@@ -29,7 +29,7 @@ Fetches from any endpoint that returns JSON. Configured via `internal/sources/ap
 | Top | `Top` | Maximum items to fetch across all pages. Default: unlimited (every item the source has, up to 50 pages). |
 | Verify SSL | `VerifySSL` | Set to `false` to skip TLS verification (self-hosted instances with private CAs). |
 
-Credential fields (`Token`, `Password`, `ApiKeyValue`) hold a **name**, not the secret itself — the actual value lives in the encrypted [credential library](/credentials) and is looked up at sync time.
+Credential fields (`Token`, `Password`, `ApiKeyValue`) hold a **name**, not the secret itself — the actual value lives in the encrypted credential library (`/credentials` in the UI) and is looked up at sync time.
 
 **How item mapping works**
 
@@ -39,8 +39,6 @@ Credential fields (`Token`, `Password`, `ApiKeyValue`) hold a **name**, not the 
 4. If `ContentFields` is set, only those fields appear in the body text. Otherwise every field except the title field is included.
 5. Document IDs are `{source_id}_capi_{IdField value or position}`.
 6. If `NextUrlPath` resolves to a string, that URL is fetched next — up to 50 pages or `Top` items, whichever comes first.
-
-Constraint accepted by this generic design: multi-step fetch flows (e.g. an ADO WIQL query followed by a batch fetch, or downloading a git repo as a zip and parsing source files into code units) aren't expressible — only single-endpoint JSON APIs are.
 
 ### GitHub
 
@@ -103,10 +101,7 @@ These sources download the branch's whole tree as **one zip** (`…/items?path=/
 
 Within one sync batch (**Sync selected**, or `source_sync trigger` with several IDs), sources that read the same archive — the same repository, branch and credential, e.g. a Source Code and a Test Code source of one repository — share a single download: the first downloads, the others wait for it and read the same file. This holds for GitHub tarballs too. The files are deleted when the batch ends; nothing is kept between syncs, and a source synced on its own downloads for itself. A download that ends early (even when the response itself ended cleanly) is detected by reading the archive back and restarted.
 
-The generic API config keys aren't tied to Azure DevOps — the backend runs any single-endpoint JSON API this way — but the web UI no longer exposes a form for building one from scratch; non-ADO API sources must be added directly to `conduit-sources.json`. Examples expressible as pure configuration:
-
-- **Jira**: `https://you.atlassian.net/rest/api/3/search` with `AuthType=basic`, `ItemsPath=issues`
-- **GitHub**: `https://api.github.com/repos/{owner}/{repo}/issues` with `AuthType=bearer`
+The generic API config keys aren't tied to Azure DevOps — the backend runs any single-endpoint JSON API this way — but the web UI no longer exposes a form for building one from scratch; other API sources are added with the `source_manage` MCP tool, an import, or directly in `conduit-sources.json`. Example: **Jira**, `https://you.atlassian.net/rest/api/3/search` with `AuthType=basic`, `ItemsPath=issues`.
 
 ### Azure DevOps Work Items
 
@@ -140,16 +135,6 @@ Set `NextUrlPath` to the response field holding the next page's full URL (many A
 ### Private API with a custom auth header
 
 Set `AuthType` to `apikey`, `ApiKeyHeader` to the header name your API expects (e.g. `X-Api-Key`), and create a credential at `/credentials` holding the key value for `ApiKeyValue`.
-
-## What's not expressible
-
-Because the backend is a single generic HTTP-JSON provider, some fetch patterns are out of reach by design:
-
-- Multi-step flows — e.g. a WIQL query followed by a batch fetch of matching items.
-- Downloading a git repository as a zip and parsing individual files into code units (classes, methods, functions).
-- Recursive wiki/tree-walk fetches.
-
-These require dedicated provider code, which the Go backend deliberately does not have (see [go-port.md](go-port.md) for the rationale).
 
 ## Pipeline Runs
 

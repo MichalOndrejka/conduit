@@ -202,8 +202,8 @@ Sources that are currently syncing can't be changed by the tool.
 
 ```
 source_manage(request={"mode":"create","name":"Bugs","type":"work-item",
-  "config":{"Url":"https://ado.example/org/proj/_apis/wit/wiql?api-version=7.1","HttpMethod":"POST",
-            "Body":"{\"query\":\"SELECT [System.Id] FROM WorkItems\"}","AuthType":"basic","Password":"ado-pat"}})
+  "config":{"Platform":"ado","Url":"https://dev.azure.com/acme/Shop","AdoOrg":"https://dev.azure.com/acme",
+            "AdoProject":"Shop","WorkItemTypes":"Bug","AuthType":"basic","Password":"ado-pat"}})
 → { "source": { "id": "c0ffee…", "name": "Bugs", "sync_status": "idle", "config": {...} }, "next": "Call source_sync trigger with this id to index it." }
 ```
 

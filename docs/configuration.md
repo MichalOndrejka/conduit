@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Conduit stores its runtime configuration in `config.json` (location controlled by `CONDUIT_CONFIG` env var). All settings are also editable via the **Settings** page in the web UI.
+Conduit stores its runtime configuration in `config.json` (location controlled by `CONDUIT_CONFIG` env var). The **Settings** page in the web UI edits the embedding, Qdrant, preprocessing and search settings; chunking, concurrency and `sources_file_path` are set in the file or by env var.
 
 The `localhost` URL defaults below become `host.docker.internal` when Conduit runs in a container (detected via `CONDUIT_IN_CONTAINER`, which the Docker image sets, or `/.dockerenv` / `/run/.containerenv`). Defaults only fill fields absent from `config.json`; saved values and env-var overrides always win.
 
@@ -153,7 +153,7 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | Variable | Effect |
 |----------|--------|
 | `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in CWD. |
-| `CONDUIT_DATA_DIR` | If set, `config.json`, `conduit-sources.json`, and `credentials.enc.json` are placed here. **Required in Docker** to persist all data across container restarts. |
+| `CONDUIT_DATA_DIR` | If set, `config.json`, `conduit-sources.json`, and `credentials.enc.json` are placed here. The Docker image sets it to `/data`. |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
 | `QDRANT_URL` | Overrides `qdrant.url` in config. |
 | `QDRANT_API_KEY` | Overrides `qdrant.api_key`. |
@@ -188,11 +188,11 @@ directly to the internet.
 
 ## Changing embedding model
 
-When you change `model` or `dimensions` in Settings:
+When you change `model`, `dimensions` or `base_url` in Settings:
 
-1. All Qdrant collections are dropped (existing indexed data is lost).
-2. All source sync statuses are set to `needs-reindex`.
-3. Conduit re-creates collections with the new dimension on the next sync.
+1. All Qdrant collections are dropped, including stored experience (memories).
+2. They are re-created empty with the new dimension.
+3. All source sync statuses are set to `needs-reindex`.
 
 Re-sync all sources after changing the embedding model.
 

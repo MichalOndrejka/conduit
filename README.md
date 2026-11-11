@@ -4,59 +4,40 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 RAG + MCP server: semantic search over work items, code, commits and docs
-from Azure DevOps and GitHub (including GitHub Enterprise Server), live
-reads of pipeline runs and pull requests, plus a persistent memory store
-for MCP clients.
+from Azure DevOps and GitHub, plus live pipeline runs, pull requests and a
+memory store for MCP clients.
 
-## Install
+## Quick start
 
-Requires [Docker](https://docs.docker.com/get-docker/). No clone needed:
-
-```bash
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
-```
-
-Wait for `Setup done` (first run downloads the models), then open
-http://localhost:8000. Press Ctrl+C and re-run with `up -d` to keep it
-running in the background.
-
-**NVIDIA GPU** — add a second file:
+Requires [Docker Desktop](https://docs.docker.com/get-docker/) or
+[Podman](https://podman.io/docs/installation).
 
 ```bash
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml \
-               -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.nvidia.yml up
-```
-
-AMD GPUs work on Linux only (`docker-compose.amd.yml`); other setups run on
-CPU — see [GPU](docs/installation.md#gpu).
-
-**Corporate proxy** (PowerShell):
-
-```powershell
-irm https://raw.githubusercontent.com/MichalOndrejka/conduit/main/scripts/export-ca-certs.ps1 | iex
-$env:CONDUIT_CERTS_DIR = "$PWD\certs"
-$env:HTTPS_PROXY = "http://proxy.example.com:8080"
+# Docker
 docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
+
+# Podman
+git clone https://github.com/MichalOndrejka/conduit.git && cd conduit
+podman compose up
 ```
 
-## Use
-
-1. Add credentials at `/credentials` and a source at `/sources/create`, then **Sync**.
-2. Point your MCP client at `http://localhost:8000/mcp`:
+When it logs `Setup done`, open http://localhost:8000, add credentials and a
+source, and **Sync**. Then point your MCP client at it:
 
 ```json
 { "mcpServers": { "conduit": { "type": "http", "url": "http://localhost:8000/mcp" } } }
 ```
 
-Conduit has no authentication — keep it on localhost or a trusted network.
+> [!WARNING]
+> Conduit has no authentication. Keep it on localhost or a trusted network.
 
-## Docs
+## Documentation
 
-- [Installation](docs/installation.md) — GPU, proxy, models, data, other setups
-- [Configuration](docs/configuration.md) — `config.json` and env vars
-- [Sources](docs/sources.md) — connecting APIs
+- [Installation](docs/installation.md): GPU, corporate proxy, models, data
+- [Configuration](docs/configuration.md)
+- [Sources](docs/sources.md)
 - [MCP tools](docs/mcp-tools.md)
-- [Dashboard](docs/stats.md) — the home page: searches and syncs since the process started
+- [Dashboard](docs/stats.md)
 - [Architecture & development](docs/go-port.md)
 
 ## License

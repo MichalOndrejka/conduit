@@ -74,11 +74,7 @@ same on-disk state — a design constraint that still shapes the current code:
 - [x] Phase 5 — PCA vector map (hand-rolled power iteration, zero deps),
       background health probes with exponential backoff
 
-The Go binary is feature-complete. Existing ADO sources synced by the old
-Python era's multi-step providers (WIQL, git zip downloads) keep their
-already-indexed data in Qdrant (search/MCP work unchanged); re-syncing them
-requires reconfiguring as generic API sources, since the Python app that
-could sync them is no longer in the repo.
+The Go binary is feature-complete.
 
 ## Build & run
 
