@@ -22,7 +22,7 @@
 #
 # Behind a corporate TLS-interception proxy, export the CA bundle first
 # (scripts/export-ca-certs.ps1 writes ./certs), point CONDUIT_CERTS_DIR at it,
-# and set HTTPS_PROXY (see docs/installation.md). The certs folder is
+# and set HTTPS_PROXY (see docs/customization.md). The certs folder is
 # added to — not substituted for — each image's own CA list.
 
 # Fixed so the stack is the same project whichever folder it's started from,

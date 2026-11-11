@@ -244,7 +244,7 @@ func pullHint(err error) string {
 	switch {
 	case strings.Contains(msg, "x509") || strings.Contains(msg, "certificate"):
 		return "\n         → TLS interception: export your CAs (scripts/export-ca-certs.ps1) and set " +
-			"CONDUIT_CERTS_DIR to that folder (see docs/installation.md)"
+			"CONDUIT_CERTS_DIR to that folder (see docs/customization.md)"
 	case strings.Contains(msg, "proxy") || strings.Contains(msg, "407"):
 		return "\n         → check HTTPS_PROXY (and proxy credentials)"
 	case strings.Contains(msg, "no such host") || strings.Contains(msg, "timeout") ||

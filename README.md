@@ -9,17 +9,15 @@ memory store for MCP clients.
 
 ## Quick start
 
-Requires [Docker Desktop](https://docs.docker.com/get-docker/) or
-[Podman](https://podman.io/docs/installation).
+With [Docker Desktop](https://docs.docker.com/get-docker/):
 
-```bash
-# Docker
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
-
-# Podman
-git clone https://github.com/MichalOndrejka/conduit.git && cd conduit
-podman compose up
 ```
+docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
+```
+
+Other ways: [Podman](docs/install/podman.md),
+[standalone container](docs/install/standalone.md),
+[from source](docs/install/source.md).
 
 When it logs `Setup done`, open http://localhost:8000, add credentials and a
 source, and **Sync**. Then point your MCP client at it:
@@ -33,7 +31,9 @@ source, and **Sync**. Then point your MCP client at it:
 
 ## Documentation
 
-- [Installation](docs/installation.md): GPU, corporate proxy, models, data
+- Install: [Docker](docs/install/docker.md), [Podman](docs/install/podman.md),
+  [standalone](docs/install/standalone.md), [from source](docs/install/source.md)
+- [Customization](docs/customization.md): GPU, corporate proxy, models, data
 - [Configuration](docs/configuration.md)
 - [Sources](docs/sources.md)
 - [MCP tools](docs/mcp-tools.md)

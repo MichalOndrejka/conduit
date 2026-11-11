@@ -212,7 +212,7 @@ credentials can't be decrypted. To pin the key, set `CONDUIT_SECRET_KEY`:
 openssl rand -base64 32 | tr '+/' '-_'
 ```
 
-Installing and running in Docker: see [Installation](installation.md).
+Docker volumes and other install options: see [Customization](customization.md).
 
 ---
 
