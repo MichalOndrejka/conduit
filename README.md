@@ -33,7 +33,7 @@ source, and **Sync**. Then point your MCP client at it:
 
 - Install: [Docker](docs/install/docker.md), [Podman](docs/install/podman.md),
   [standalone](docs/install/standalone.md), [from source](docs/install/source.md)
-- [Customization](docs/customization.md): GPU, corporate proxy, models, data
+- [Customization](docs/customization.md): corporate proxy, models, data
 - [Configuration](docs/configuration.md)
 - [Sources](docs/sources.md)
 - [MCP tools](docs/mcp-tools.md)

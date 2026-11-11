@@ -4,62 +4,6 @@ Changes to the [Docker](install/docker.md) and [Podman](install/podman.md)
 installs. Settings go in environment variables or a `.env` file next to where
 you run `compose` (see [`.env.example`](../.env.example)).
 
-## GPU
-
-Without a GPU, models run on CPU (setup warns). With a GPU overlay, setup fails
-unless the models run fully on the GPU.
-
-| Overlay | Works on |
-| --- | --- |
-| `docker-compose.nvidia.yml` | NVIDIA: Windows (Docker Desktop), Linux |
-| `docker-compose.amd.yml` | AMD: Linux only |
-
-Intel GPUs, macOS, and AMD on Windows run on CPU. For AMD on Windows, use the
-[standalone container](install/standalone.md) with native Ollama.
-
-### Prerequisites
-
-- **NVIDIA, Windows:** a current NVIDIA driver on Windows, then `wsl --update`.
-  Podman also needs the NVIDIA Container Toolkit in its machine
-  ([guide](https://podman-desktop.io/docs/podman/gpu)).
-- **NVIDIA, Linux:** the NVIDIA driver and the
-  [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html).
-- **AMD, Linux:** the ROCm driver ([supported cards](https://docs.ollama.com/gpu)).
-  On SELinux hosts: `sudo setsebool container_use_devices=1`.
-
-Check NVIDIA is visible:
-
-```
-docker run --rm --gpus all ubuntu nvidia-smi
-podman run --rm --device nvidia.com/gpu=all ubuntu nvidia-smi
-```
-
-### Docker
-
-Add the overlay as a second `-f` on every `up`:
-
-```
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.nvidia.yml up
-```
-
-### Podman
-
-In the clone, once:
-
-PowerShell:
-
-```powershell
-Add-Content .env "COMPOSE_PATH_SEPARATOR=:", "COMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml"
-```
-
-bash:
-
-```bash
-printf 'COMPOSE_PATH_SEPARATOR=:\nCOMPOSE_FILE=docker-compose.yml:docker-compose.nvidia.yml\n' >> .env
-```
-
-Then `podman compose up` as usual. Use `docker-compose.amd.yml` for AMD.
-
 ## Corporate proxy
 
 PowerShell (exports the Windows root CAs to `.\certs`):
