@@ -131,7 +131,10 @@ func TestFetchDocumentsDownloadsRepositoryAsOneZip(t *testing.T) {
 		requests = append(requests, r.URL.String())
 		q := r.URL.Query()
 		if !strings.HasSuffix(r.URL.Path, "/items") || q.Get("$format") != "zip" || q.Get("path") != "/" ||
-			q.Get("versionDescriptor.version") != "dev" || q.Get("api-version") != "7.1" {
+			q.Get("versionDescriptor.version") != "dev" || q.Get("api-version") != "7.1" ||
+			// Azure DevOps Server: HTTP 400 for a recursionLevel other than
+			// None with a single item path.
+			q.Has("recursionLevel") || q.Has("scopePath") {
 			http.Error(w, "unexpected request: "+r.URL.String(), http.StatusBadRequest)
 			return
 		}
@@ -141,7 +144,7 @@ func TestFetchDocumentsDownloadsRepositoryAsOneZip(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: codeSrc(map[string]string{
-		"Url":        srv.URL + "/_apis/git/repositories/repo/items?api-version=7.1",
+		"Url":        srv.URL + "/_apis/git/repositories/repo/items?recursionLevel=Full&scopePath=/&api-version=7.1",
 		"Branch":     "dev",
 		"PathFilter": "*.cs",
 	})}

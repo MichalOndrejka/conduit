@@ -78,15 +78,20 @@ func matchesPathFilter(p string, patterns []string) bool {
 }
 
 // adoRepoZipURL turns a source's items URL (already carrying its branch's
-// versionDescriptor) into a download of the whole tree as one zip.
+// versionDescriptor) into a download of the whole tree as one zip. A folder
+// zip is always recursive; recursionLevel and scopePath are dropped because
+// Azure DevOps Server rejects a recursionLevel other than None alongside a
+// single item path (HTTP 400), and source URLs usually carry
+// recursionLevel=Full from the items-list form.
 func adoRepoZipURL(itemsURL string) (string, error) {
 	u, err := url.Parse(itemsURL)
 	if err != nil {
 		return "", err
 	}
 	q := u.Query()
+	q.Del("recursionLevel")
+	q.Del("scopePath")
 	q.Set("path", "/")
-	q.Set("recursionLevel", "Full")
 	q.Set("$format", "zip")
 	q.Set("download", "true")
 	if q.Get("api-version") == "" {
