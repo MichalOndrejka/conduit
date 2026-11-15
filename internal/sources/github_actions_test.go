@@ -141,6 +141,22 @@ func TestGitHubPipelineGetAndLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// steps lists every job of every attempt, green ones too, and each job's
+	// steps with the job's log id; GitHub has no tests to list.
+	steps, _, err := p.Steps(context.Background(), 21)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, s := range steps {
+		got = append(got, fmt.Sprintf("%s|%s|%d|%s|%d", s.Type, s.Path, s.Attempt, s.Result, s.LogID))
+	}
+	if fmt.Sprint(got) != "[job|test|2|success|202 job|test|1|failure|201 step|test > go test|1|failure|201]" {
+		t.Errorf("steps = %v", got)
+	}
+	if _, _, err := p.Tests(context.Background(), 21); err == nil {
+		t.Error("GitHub tests: want an error")
+	}
 	if run.Attempts != 2 || len(run.FailedSteps) != 1 || run.FailedSteps[0].LogID != 201 || run.FailedSteps[0].Attempt != 1 ||
 		strings.Join(run.FailedSteps[0].FailedTasks, ",") != "go test" {
 		t.Fatalf("steps = %+v", run.FailedSteps)

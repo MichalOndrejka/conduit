@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -374,8 +375,38 @@ func (c *githubPRClient) Iterations(ctx context.Context, id int) ([]PRIteration,
 	return out, nil
 }
 
-func (c *githubPRClient) Changes(ctx context.Context, id int, r PRRange) (PRChanges, error) {
+// prState is the pull request as Changes needs it (head and base commits),
+// kept for prStateTTL: it decides which cached file lists apply, and only a
+// push changes it.
+func (c *githubPRClient) prState(ctx context.Context, id int) (githubPR, error) {
+	key := c.prAPI(id) + "|state"
+	if v, ok := shortCache.get(key); ok {
+		return v.(githubPR), nil
+	}
 	pr, err := c.pr(ctx, id)
+	if err != nil {
+		return githubPR{}, err
+	}
+	shortCache.put(key, pr, prStateTTL)
+	return pr, nil
+}
+
+// cachedChanges keeps a file listing that can't change: its key names the
+// commits it was read at.
+func cachedChanges(key string, read func() (PRChanges, error)) (PRChanges, error) {
+	if v, ok := prCache.get(key); ok {
+		return v.(PRChanges), nil
+	}
+	out, err := read()
+	if err != nil {
+		return PRChanges{}, err
+	}
+	prCache.put(key, out, prChangesSize(out))
+	return out, nil
+}
+
+func (c *githubPRClient) Changes(ctx context.Context, id int, r PRRange) (PRChanges, error) {
+	pr, err := c.prState(ctx, id)
 	if err != nil {
 		return PRChanges{}, err
 	}
@@ -383,10 +414,21 @@ func (c *githubPRClient) Changes(ctx context.Context, id int, r PRRange) (PRChan
 		return c.prFiles(ctx, id, pr.Head.SHA)
 	}
 
-	commits, incomplete, err := c.commits(ctx, id)
-	if err != nil {
-		return PRChanges{}, err
+	type commitList struct {
+		commits    []githubCommit
+		incomplete []string
 	}
+	ckey := c.prAPI(id) + "|commits|" + pr.Head.SHA
+	var cl commitList
+	if v, ok := prCache.get(ckey); ok {
+		cl = v.(commitList)
+	} else {
+		if cl.commits, cl.incomplete, err = c.commits(ctx, id); err != nil {
+			return PRChanges{}, err
+		}
+		prCache.put(ckey, cl, int64(len(cl.commits))*512+1024)
+	}
+	commits, incomplete := cl.commits, cl.incomplete
 	if r, err = checkRange(r, len(commits)); err != nil {
 		return PRChanges{}, err
 	}
@@ -399,22 +441,29 @@ func (c *githubPRClient) Changes(ctx context.Context, id int, r PRRange) (PRChan
 	}
 	head := commits[r.To-1].SHA
 
-	var cmp struct {
-		Files []githubCommitFile `json:"files"`
-	}
-	if _, err := c.g.getJSON(ctx, c.g.repoAPI()+"/compare/"+url.PathEscape(from)+"..."+url.PathEscape(head), &cmp); err != nil {
-		return PRChanges{}, err
-	}
-	out := c.changes(cmp.Files, head)
-	out.Incomplete = incomplete
-	if len(cmp.Files) >= githubMaxCompareFiles {
-		out.Incomplete = append(out.Incomplete, fmt.Sprintf("GitHub compares at most %d files between "+
-			"iterations; any further changed files are not listed", githubMaxCompareFiles))
-	}
-	return out, nil
+	return cachedChanges(c.g.repoAPI()+"|compare|"+from+"|"+head, func() (PRChanges, error) {
+		var cmp struct {
+			Files []githubCommitFile `json:"files"`
+		}
+		if _, err := c.g.getJSON(ctx, c.g.repoAPI()+"/compare/"+url.PathEscape(from)+"..."+url.PathEscape(head), &cmp); err != nil {
+			return PRChanges{}, err
+		}
+		out := c.changes(cmp.Files, head)
+		out.Incomplete = slices.Clone(incomplete)
+		if len(cmp.Files) >= githubMaxCompareFiles {
+			out.Incomplete = append(out.Incomplete, fmt.Sprintf("GitHub compares at most %d files between "+
+				"iterations; any further changed files are not listed", githubMaxCompareFiles))
+		}
+		return out, nil
+	})
 }
 
+// prFiles lists the pull request's changed files, kept by head commit.
 func (c *githubPRClient) prFiles(ctx context.Context, id int, head string) (PRChanges, error) {
+	return cachedChanges(c.prAPI(id)+"|files|"+head, func() (PRChanges, error) { return c.readPRFiles(ctx, id, head) })
+}
+
+func (c *githubPRClient) readPRFiles(ctx context.Context, id int, head string) (PRChanges, error) {
 	var files []githubCommitFile
 	err := c.g.pages(ctx, c.prAPI(id)+"/files", func(data []byte) (int, bool, error) {
 		var page []githubCommitFile
@@ -490,8 +539,21 @@ func (c *githubPRClient) Diff(ctx context.Context, changes []PRChange, withConte
 	return out, nil
 }
 
-// content reads a file's raw text at ref.
+// content reads a file's raw text at ref (a commit, so it is kept).
 func (c *githubPRClient) content(ctx context.Context, path, ref string) (string, error) {
+	key := c.g.repoAPI() + "|content|" + ref + "|" + path
+	if v, ok := prCache.get(key); ok {
+		return v.(string), nil
+	}
+	text, err := c.readContent(ctx, path, ref)
+	if err != nil {
+		return "", err
+	}
+	prCache.put(key, text, int64(len(text)))
+	return text, nil
+}
+
+func (c *githubPRClient) readContent(ctx context.Context, path, ref string) (string, error) {
 	segs := strings.Split(path, "/")
 	for i, s := range segs {
 		segs[i] = url.PathEscape(s)

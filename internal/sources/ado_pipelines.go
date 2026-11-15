@@ -61,9 +61,13 @@ type adoBuild struct {
 	StartTime     string `json:"startTime"`
 	FinishTime    string `json:"finishTime"`
 	Definition    struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		Revision int    `json:"revision"`
 	} `json:"definition"`
+	// Parameters is the JSON object of variables set at queue time.
+	Parameters         string         `json:"parameters"`
+	TemplateParameters map[string]any `json:"templateParameters"`
 	Project struct {
 		Name string `json:"name"`
 	} `json:"project"`
@@ -90,6 +94,7 @@ type adoTimelineRecord struct {
 	Type     string `json:"type"`
 	Name     string `json:"name"`
 	Result   string `json:"result"`
+	State    string `json:"state"`
 	Order    int    `json:"order"`
 	Attempt  int    `json:"attempt"`
 	// StartTime / FinishTime place a job execution in time, to match a test
@@ -601,6 +606,9 @@ func (c *adoPipelineClient) detail(ctx context.Context, s *PipelineRunSummary) (
 	if err := c.readTimelinesAndTests(ctx, b, run); err != nil {
 		return nil, err
 	}
+	if err := c.readContext(ctx, b, run); err != nil {
+		return nil, err
+	}
 
 	changes, err := c.buildChanges(ctx, b.ID)
 	if err != nil {
@@ -616,16 +624,16 @@ func (c *adoPipelineClient) detail(ctx context.Context, s *PipelineRunSummary) (
 	return run, nil
 }
 
-func (c *adoPipelineClient) readTimelinesAndTests(ctx context.Context, b *adoBuild, run *PipelineRun) error {
-	current, records, err := c.timeline(ctx, b.ID, "")
+// allTimelines reads the build's latest timeline, which holds each record's
+// newest attempt, and the timelines of every earlier attempt of rerun
+// jobs/stages, which their previousAttempts point to (and those may point
+// further back in turn).
+func (c *adoPipelineClient) allTimelines(ctx context.Context, buildID int) (*timeline, []*timeline, error) {
+	current, records, err := c.timeline(ctx, buildID, "")
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	latest := newTimeline(records)
-
-	// The latest timeline holds each record's newest attempt; earlier
-	// attempts of rerun jobs/stages live in the timelines their
-	// previousAttempts point to. Those may point further back in turn.
 	timelines := []*timeline{latest}
 	seenTimeline := map[string]bool{current: true}
 	for i := 0; i < len(timelines); i++ {
@@ -635,13 +643,256 @@ func (c *adoPipelineClient) readTimelinesAndTests(ctx context.Context, b *adoBui
 					continue
 				}
 				seenTimeline[pa.TimelineID] = true
-				_, recs, err := c.timeline(ctx, b.ID, pa.TimelineID)
+				_, recs, err := c.timeline(ctx, buildID, pa.TimelineID)
 				if err != nil {
-					return fmt.Errorf("attempt %d of %q: %w", pa.Attempt, r.Name, err)
+					return nil, nil, fmt.Errorf("attempt %d of %q: %w", pa.Attempt, r.Name, err)
 				}
 				timelines = append(timelines, newTimeline(recs))
 			}
 		}
+	}
+	return latest, timelines, nil
+}
+
+// maxAttempt is the run's highest attempt number.
+func maxAttempt(timelines []*timeline) int {
+	n := 1
+	for _, tl := range timelines {
+		for _, r := range tl.ordered {
+			n = max(n, r.attempt())
+		}
+	}
+	return n
+}
+
+// stepWebURL links a record's log view: its job, and the task within it.
+func (c *adoPipelineClient) stepWebURL(buildID int, latest, tl *timeline, r adoTimelineRecord) string {
+	jobID := latest.jobID(r)
+	if jobID == "" {
+		jobID = tl.jobID(r)
+	}
+	web := fmt.Sprintf("%s/_build/results?buildId=%d&view=logs", c.webBase(), buildID)
+	if jobID != "" {
+		web += "&j=" + jobID
+	}
+	if jobID != r.ID {
+		web += "&t=" + r.ID
+	}
+	return web
+}
+
+// steps lists every stage, job and task of every attempt, newest attempt's
+// tree first. Phase and checkpoint records are structural and left out.
+func (c *adoPipelineClient) steps(ctx context.Context, s *PipelineRunSummary) ([]PipelineStepNode, error) {
+	b := s.ado
+	latest, timelines, err := c.allTimelines(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	type execKey struct {
+		id      string
+		attempt int
+	}
+	seen := map[execKey]bool{}
+	out := []PipelineStepNode{}
+	for _, tl := range timelines {
+		for _, r := range tl.ordered {
+			kind := strings.ToLower(r.Type)
+			if kind == "phase" || strings.HasPrefix(kind, "checkpoint") {
+				continue
+			}
+			k := execKey{r.ID, r.attempt()}
+			if seen[k] {
+				continue
+			}
+			seen[k] = true
+			n := PipelineStepNode{
+				Path: latest.pathIn(tl, r), Type: kind, Attempt: r.attempt(), State: r.State, Result: r.Result,
+				Started: r.StartTime, Finished: r.FinishTime, WebURL: c.stepWebURL(b.ID, latest, tl, r),
+			}
+			if start, finish := parseTime(r.StartTime), parseTime(r.FinishTime); !start.IsZero() && !finish.IsZero() {
+				n.Duration = finish.Sub(start).Round(time.Second).String()
+			}
+			if r.Log != nil {
+				n.LogID = int64(r.Log.ID)
+			}
+			for _, is := range r.Issues {
+				switch strings.ToLower(is.Type) {
+				case "error":
+					n.Errors++
+				case "warning":
+					n.Warnings++
+				}
+			}
+			out = append(out, n)
+		}
+	}
+	return out, nil
+}
+
+// tests lists every result of every test run of the build, each placed in
+// its attempt and job like get's failed tests. Attachments are left to get.
+func (c *adoPipelineClient) tests(ctx context.Context, s *PipelineRunSummary) ([]PipelineTest, error) {
+	b := s.ado
+	latest, timelines, err := c.allTimelines(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	attempts, jobs := maxAttempt(timelines), jobExecutions(latest, timelines)
+	testRuns, err := c.testRuns(ctx, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := []PipelineTest{}
+	for _, tr := range testRuns {
+		attempt, job := testRunAttempt(tr, jobs, attempts)
+		results, err := c.testResults(ctx, tr.ID, "")
+		if err != nil {
+			return nil, fmt.Errorf("test run %d: %w", tr.ID, err)
+		}
+		for _, res := range results {
+			out = append(out, c.testOf(b.ID, tr, res, attempt, job))
+		}
+	}
+	return out, nil
+}
+
+// resultAttachments lists one test result's attachments (metadata only).
+func (c *adoPipelineClient) resultAttachments(ctx context.Context, testRunID, resultID int) ([]PipelineFile, []string, error) {
+	atts, notes, err := c.testAttachments(ctx, testRunID, resultID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return pipelineFiles(atts), notes, nil
+}
+
+// testOf is one test result as get and tests mode show it.
+func (c *adoPipelineClient) testOf(buildID int, tr adoTestRun, res adoTestResult, attempt int, job string) PipelineTest {
+	t := PipelineTest{
+		Name: testNameOf(res), Outcome: res.Outcome,
+		Flaky:   !isFailedTestOutcome(res.Outcome) && hasFailedSubResult(res.SubResults),
+		Attempt: attempt, Job: job, TestRun: fmt.Sprintf("%s (id %d)", tr.Name, tr.ID), Storage: res.AutomatedTestStorage,
+		ErrorMessage: res.ErrorMessage, StackTrace: res.StackTrace, SubResults: subResults(res.SubResults),
+		WebURL: fmt.Sprintf("%s/_build/results?buildId=%d&view=ms.vss-test-web.build-test-results-tab&runId=%d&resultId=%d",
+			c.webBase(), buildID, tr.ID, res.ID),
+		testRunID: tr.ID, resultID: res.ID,
+	}
+	if res.TestCaseTitle != t.Name {
+		t.Title = res.TestCaseTitle
+	}
+	if res.DurationInMs > 0 {
+		t.Duration = (time.Duration(res.DurationInMs) * time.Millisecond).String()
+	}
+	return t
+}
+
+// adoDefinitionDetail is what get reads of the run's pipeline definition.
+type adoDefinitionDetail struct {
+	Process struct {
+		YamlFilename string `json:"yamlFilename"`
+	} `json:"process"`
+	Variables map[string]struct {
+		Value    *string `json:"value"`
+		IsSecret bool    `json:"isSecret"`
+	} `json:"variables"`
+}
+
+// readContext adds the run's parameters and queue-time variables, its
+// pipeline's YAML file and variables at the run's revision, and the work
+// items linked to it. A definition or work item listing the server doesn't
+// have (a deleted pipeline, an older server) is noted.
+func (c *adoPipelineClient) readContext(ctx context.Context, b *adoBuild, run *PipelineRun) error {
+	run.Parameters = stringMap(b.TemplateParameters)
+	if p := strings.TrimSpace(b.Parameters); p != "" {
+		var m map[string]any
+		if err := json.Unmarshal([]byte(p), &m); err != nil {
+			run.Notes = append(run.Notes, "queue-time variables aren't a JSON object: "+p)
+		} else {
+			run.QueueVariables = stringMap(m)
+		}
+	}
+
+	defURL := fmt.Sprintf("%s/build/definitions/%d?api-version=%s", c.apiBase(), b.Definition.ID, c.version)
+	if b.Definition.Revision > 0 {
+		defURL += fmt.Sprintf("&revision=%d", b.Definition.Revision)
+	}
+	if data, err := c.get(ctx, defURL); err != nil {
+		note, err := listUnavailable("the pipeline definition", err)
+		if err != nil {
+			return fmt.Errorf("reading pipeline definition %d: %w", b.Definition.ID, err)
+		}
+		run.Notes = append(run.Notes, note)
+	} else {
+		var def adoDefinitionDetail
+		if err := json.Unmarshal(data, &def); err != nil {
+			return fmt.Errorf("pipeline definition response is not valid JSON: %w", err)
+		}
+		run.PipelineFile = def.Process.YamlFilename
+		for name, v := range def.Variables {
+			if run.Variables == nil {
+				run.Variables = map[string]string{}
+			}
+			switch {
+			case v.IsSecret:
+				run.Variables[name] = "***"
+			case v.Value != nil:
+				run.Variables[name] = *v.Value
+			default:
+				run.Variables[name] = ""
+			}
+		}
+	}
+
+	data, err := c.get(ctx, fmt.Sprintf("%s/build/builds/%d/workitems?$top=10000&api-version=%s", c.apiBase(), b.ID, c.version))
+	if err != nil {
+		note, err := listUnavailable("linked work items", err)
+		if err != nil {
+			return fmt.Errorf("listing linked work items: %w", err)
+		}
+		run.Notes = append(run.Notes, note)
+		return nil
+	}
+	var page struct {
+		Value []struct {
+			ID string `json:"id"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(data, &page); err != nil {
+		return fmt.Errorf("work items response is not valid JSON: %w", err)
+	}
+	for _, wi := range page.Value {
+		run.WorkItems = append(run.WorkItems, PipelineWorkItem{ID: wi.ID, WebURL: c.webBase() + "/_workitems/edit/" + wi.ID})
+	}
+	return nil
+}
+
+// stringMap renders a decoded JSON object's values as strings (objects and
+// arrays as JSON); nil for an empty one.
+func stringMap(m map[string]any) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		switch x := v.(type) {
+		case string:
+			out[k] = x
+		case nil:
+			out[k] = ""
+		case map[string]any, []any:
+			data, _ := json.Marshal(x)
+			out[k] = string(data)
+		default:
+			out[k] = fmt.Sprint(x)
+		}
+	}
+	return out
+}
+
+func (c *adoPipelineClient) readTimelinesAndTests(ctx context.Context, b *adoBuild, run *PipelineRun) error {
+	latest, timelines, err := c.allTimelines(ctx, b.ID)
+	if err != nil {
+		return err
 	}
 
 	for _, tl := range timelines {
@@ -680,17 +931,7 @@ func (c *adoPipelineClient) readTimelinesAndTests(ctx context.Context, b *adoBui
 				continue
 			}
 			seenSteps[k] = true
-			jobID := latest.jobID(r)
-			if jobID == "" {
-				jobID = tl.jobID(r)
-			}
-			web := fmt.Sprintf("%s/_build/results?buildId=%d&view=logs", c.webBase(), b.ID)
-			if jobID != "" {
-				web += "&j=" + jobID
-			}
-			if jobID != r.ID {
-				web += "&t=" + r.ID
-			}
+			web := c.stepWebURL(b.ID, latest, tl, r)
 			run.FailedSteps = append(run.FailedSteps, PipelineStep{
 				Path: latest.pathIn(tl, r), Attempt: r.attempt(), Result: r.Result,
 				LogID: int64(r.Log.ID), WebURL: web,
@@ -745,25 +986,7 @@ func (c *adoPipelineClient) readTimelinesAndTests(ctx context.Context, b *adoBui
 			}
 		}
 		for _, res := range results {
-			t := PipelineTest{
-				Name: testNameOf(res), Outcome: res.Outcome, Flaky: !isFailedTestOutcome(res.Outcome),
-				Attempt: attempt, Job: job, TestRun: runLabel, Storage: res.AutomatedTestStorage,
-				ErrorMessage: res.ErrorMessage, StackTrace: res.StackTrace, SubResults: subResults(res.SubResults),
-				WebURL: fmt.Sprintf("%s/_build/results?buildId=%d&view=ms.vss-test-web.build-test-results-tab&runId=%d&resultId=%d",
-					c.webBase(), b.ID, tr.ID, res.ID),
-			}
-			if res.TestCaseTitle != t.Name {
-				t.Title = res.TestCaseTitle
-			}
-			if res.DurationInMs > 0 {
-				t.Duration = (time.Duration(res.DurationInMs) * time.Millisecond).String()
-			}
-			atts, notes, err := c.testAttachments(ctx, tr.ID, res.ID)
-			if err != nil {
-				return fmt.Errorf("test run %d, result %d: %w", tr.ID, res.ID, err)
-			}
-			t.Attachments = pipelineFiles(atts)
-			run.Notes = append(run.Notes, notes...)
+			t := c.testOf(b.ID, tr, res, attempt, job)
 			run.Tests = append(run.Tests, t)
 		}
 	}
@@ -827,8 +1050,11 @@ func (c *adoPipelineClient) testResults(ctx context.Context, runID int, outcomes
 		var page struct {
 			Value []adoTestResult `json:"value"`
 		}
-		u := fmt.Sprintf("%s/test/Runs/%d/results?outcomes=%s&detailsToInclude=SubResults&$top=%d&$skip=%d&api-version=%s",
-			c.apiBase(), runID, outcomes, adoTestResultsPageSize, skip, c.version)
+		u := fmt.Sprintf("%s/test/Runs/%d/results?detailsToInclude=SubResults&$top=%d&$skip=%d&api-version=%s",
+			c.apiBase(), runID, adoTestResultsPageSize, skip, c.version)
+		if outcomes != "" {
+			u += "&outcomes=" + outcomes
+		}
 		if err := c.getJSON(ctx, u, &page); err != nil {
 			return nil, fmt.Errorf("listing %s test results: %w", outcomes, err)
 		}

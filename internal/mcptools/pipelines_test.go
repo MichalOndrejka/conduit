@@ -30,8 +30,11 @@ func fakeAdoPipeline(t *testing.T) (*httptest.Server, fakeSources) {
 		case "build/builds/3":
 			write(w, run)
 		case "build/builds/3/timeline":
-			write(w, map[string]any{"records": []any{map[string]any{"id": "t1", "type": "Task", "name": "Test",
-				"result": "failed", "log": map[string]any{"id": 5}}}})
+			write(w, map[string]any{"records": []any{
+				map[string]any{"id": "j1", "type": "Job", "name": "Linux", "result": "failed", "order": 1, "log": map[string]any{"id": 3}},
+				map[string]any{"id": "t0", "parentId": "j1", "type": "Task", "name": "Checkout", "result": "succeeded", "order": 1, "log": map[string]any{"id": 4}},
+				map[string]any{"id": "t1", "parentId": "j1", "type": "Task", "name": "Test", "result": "failed", "order": 2, "log": map[string]any{"id": 5}},
+			}})
 		case "build/builds/3/logs/5":
 			for i := 1; i <= 1200; i++ {
 				fmt.Fprintf(w, "line %d\n", i)
@@ -103,6 +106,27 @@ func TestPipelineTool_ListGetLog(t *testing.T) {
 	if out["cached"] != false {
 		t.Error("the first log read can't be cached")
 	}
+	// search returns just the matching lines with context and their page.
+	out = pipelineCall(t, srcs, map[string]any{"mode": "log", "run_id": float64(3), "log_id": float64(5), "search": "LINE 600"})
+	if m := out["matches"].([]map[string]any); out["total_matches"] != 1 || len(m) != 1 || m[0]["line"] != 600 || m[0]["page"] != 2 ||
+		m[0]["text"] != "line 597\nline 598\nline 599\nline 600\nline 601\nline 602\nline 603" {
+		t.Fatalf("search = %v", out)
+	}
+
+	// steps lists every step, succeeded ones too, filterable; tests every test.
+	out = pipelineCall(t, srcs, map[string]any{"mode": "steps", "run_id": float64(3)})
+	if out["total_steps"] != 3 || out["matched"] != 3 {
+		t.Fatalf("steps = %v", out)
+	}
+	out = pipelineCall(t, srcs, map[string]any{"mode": "steps", "run_id": float64(3), "result": "Succeeded", "type": "task"})
+	if st := out["steps"].([]sources.PipelineStepNode); len(st) != 1 || st[0].Path != "Linux > Checkout" || st[0].LogID != 4 {
+		t.Fatalf("succeeded tasks = %v", out)
+	}
+	out = pipelineCall(t, srcs, map[string]any{"mode": "tests", "run_id": float64(3), "name": "t2", "outcome": "failed"})
+	if ts := out["tests"].([]sources.PipelineTest); out["total_tests"] != 25 || out["matched"] != 6 || len(ts) != 6 || ts[0].Name != "T20" {
+		t.Fatalf("tests = %v", out)
+	}
+
 	out = pipelineCall(t, srcs, map[string]any{"mode": "log", "run_id": float64(3), "log_id": float64(5), "page": float64(1)})
 	if out["first_line"] != 1 || out["last_line"] != 500 || out["cached"] != true {
 		t.Fatalf("first page = %v", out)

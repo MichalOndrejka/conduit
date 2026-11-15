@@ -31,7 +31,7 @@ var Types = []TypeInfo{
 	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
 	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
-	{models.SourcePipelineRun, "Pipeline Runs", "A build pipeline whose runs, failed-step logs and failed tests are read live. Not synced."},
+	{models.SourcePipelineRun, "Pipeline Runs", "Build pipelines whose runs, steps, logs and tests are read live. Not synced."},
 	{models.SourcePullRequest, "Pull Requests", "A repository whose pull requests, diffs and comment threads are read live. Not synced."},
 	{models.SourceCodeRepo, "Source Code", "Application source files from a repository."},
 	{models.SourceTestCodeRepo, "Test Code", "Automated test and spec files from a repository."},

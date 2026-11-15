@@ -109,9 +109,41 @@ type PipelineRun struct {
 	TestRunAttachments []PipelineTestRunFiles `json:"test_run_attachments,omitempty"`
 	Changes            []PipelineChange       `json:"changes"`
 	Artifacts          []PipelineFile         `json:"artifacts"`
+	// Run context: the pipeline file and what the run was queued with.
+	PipelineFile   string            `json:"pipeline_file,omitempty"`   // YAML path (Azure DevOps YAML pipelines, GitHub workflows)
+	Parameters     map[string]string `json:"parameters,omitempty"`      // Azure DevOps template parameters
+	QueueVariables map[string]string `json:"queue_variables,omitempty"` // Azure DevOps variables set at queue time
+	// Variables are the Azure DevOps pipeline's variables at the run's
+	// revision; secret values read "***".
+	Variables map[string]string  `json:"variables,omitempty"`
+	WorkItems []PipelineWorkItem `json:"work_items,omitempty"` // Azure DevOps work items linked to the run
 	// Notes say what couldn't be read (an API the server lacks, an expired
 	// log); everything else is complete.
 	Notes []string `json:"notes,omitempty"`
+}
+
+// PipelineWorkItem is a work item linked to a run.
+type PipelineWorkItem struct {
+	ID     string `json:"id"`
+	WebURL string `json:"web_url,omitempty"`
+}
+
+// PipelineStepNode is one record of a run's tree, of any result and
+// attempt: Azure DevOps stage, job or task; GitHub job or step. LogID reads
+// its log (a GitHub step's is its job's log).
+type PipelineStepNode struct {
+	Path     string `json:"path"`
+	Type     string `json:"type"`
+	Attempt  int    `json:"attempt"`
+	State    string `json:"state,omitempty"`
+	Result   string `json:"result,omitempty"`
+	Started  string `json:"started,omitempty"`
+	Finished string `json:"finished,omitempty"`
+	Duration string `json:"duration,omitempty"`
+	Errors   int    `json:"errors,omitempty"`
+	Warnings int    `json:"warnings,omitempty"`
+	LogID    int64  `json:"log_id,omitempty"`
+	WebURL   string `json:"web_url,omitempty"`
 }
 
 // PipelineStep is one failed step (Azure DevOps task or GitHub job) of any
@@ -142,6 +174,9 @@ type PipelineTest struct {
 	SubResults   []PipelineSubResult `json:"sub_results,omitempty"`
 	Attachments  []PipelineFile      `json:"attachments,omitempty"`
 	WebURL       string              `json:"web_url"`
+
+	// testRunID and resultID read the result's attachments (Azure DevOps).
+	testRunID, resultID int
 }
 
 // PipelineSubResult is one attempt of a retried test or one iteration of a
@@ -208,6 +243,12 @@ type pipelineBackend interface {
 	// (an Azure DevOps folder: its pipelines' ids).
 	resolvesPipelines() bool
 	list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error)
+	// steps reads every stage/job/task (GitHub job/step) of every attempt.
+	steps(ctx context.Context, s *PipelineRunSummary) ([]PipelineStepNode, error)
+	// tests reads every test result of the run, of any outcome.
+	tests(ctx context.Context, s *PipelineRunSummary) ([]PipelineTest, error)
+	// resultAttachments reads one test result's attachments.
+	resultAttachments(ctx context.Context, testRunID, resultID int) ([]PipelineFile, []string, error)
 	summary(ctx context.Context, id int64) (*PipelineRunSummary, error)
 	detail(ctx context.Context, s *PipelineRunSummary) (*PipelineRun, error)
 	log(ctx context.Context, s *PipelineRunSummary, logID int64) (string, error)
@@ -253,13 +294,13 @@ func (p *PipelineProvider) List(ctx context.Context, f PipelineRunFilter) ([]Pip
 // cached reports a kept answer.
 func (p *PipelineProvider) Pipelines(ctx context.Context) (infos []PipelineInfo, cached bool, err error) {
 	key := p.b.cacheScope() + "|pipelines|" + p.b.pipelinesKey()
-	if v, ok := pipelineLists.get(key); ok {
-		return v, true, nil
+	if v, ok := shortCache.get(key); ok {
+		return v.([]PipelineInfo), true, nil
 	}
 	if infos, err = p.b.pipelines(ctx); err != nil {
 		return nil, false, err
 	}
-	pipelineLists.put(key, infos)
+	shortCache.put(key, infos, pipelineListTTL)
 	return infos, false, nil
 }
 
@@ -305,48 +346,128 @@ func matchPipeline(all []PipelineInfo, sel string) (PipelineInfo, error) {
 	}
 }
 
-// Get returns one run's details. cached reports a completed run served from
-// the cache (one call to the provider, for the run's current state).
-func (p *PipelineProvider) Get(ctx context.Context, id int64) (run *PipelineRun, cached bool, err error) {
-	s, err := p.b.summary(ctx, id)
-	if err != nil {
-		return nil, false, err
-	}
-	if !s.completed() {
-		run, err = p.b.detail(ctx, s)
-		return run, false, err
-	}
-	key := fmt.Sprintf("%s|run|%d|%s", p.b.cacheScope(), id, s.version())
-	if v, ok := pipelineCache.get(key); ok {
-		return v.(*PipelineRun), true, nil
-	}
-	if run, err = p.b.detail(ctx, s); err != nil {
-		return nil, false, err
-	}
-	pipelineCache.put(key, run, runSize(run))
-	return run, false, nil
+// Get returns one run's details. cached reports details served from the
+// cache. A failed test's attachments are not included: TestAttachments reads
+// them for the tests a page shows.
+func (p *PipelineProvider) Get(ctx context.Context, id int64) (*PipelineRun, bool, error) {
+	return runCached(ctx, p, id, "run", p.b.detail)
+}
+
+// Steps returns every stage, job and task (GitHub job and step) of every
+// attempt of a run, whatever their result.
+func (p *PipelineProvider) Steps(ctx context.Context, runID int64) ([]PipelineStepNode, bool, error) {
+	return runCached(ctx, p, runID, "steps", p.b.steps)
+}
+
+// Tests returns every test result of a run, whatever its outcome.
+func (p *PipelineProvider) Tests(ctx context.Context, runID int64) ([]PipelineTest, bool, error) {
+	return runCached(ctx, p, runID, "tests", p.b.tests)
 }
 
 // Log returns the complete, cleaned log of one step (Azure DevOps log id)
 // or job (GitHub job id) of a run.
-func (p *PipelineProvider) Log(ctx context.Context, runID, logID int64) (text string, cached bool, err error) {
-	s, err := p.b.summary(ctx, runID)
+func (p *PipelineProvider) Log(ctx context.Context, runID, logID int64) (string, bool, error) {
+	return runCached(ctx, p, runID, fmt.Sprintf("log|%d", logID), func(ctx context.Context, s *PipelineRunSummary) (string, error) {
+		return p.b.log(ctx, s, logID)
+	})
+}
+
+// testAttachmentEntry is one test result's cached attachments.
+type testAttachmentEntry struct {
+	files []PipelineFile
+	notes []string
+}
+
+// TestAttachments returns tests (a page of Get's tests) with each one's
+// attachments, read one test at a time — only for the tests shown, never for
+// every failed test of a run — and kept like the run's details.
+func (p *PipelineProvider) TestAttachments(ctx context.Context, runID int64, tests []PipelineTest) ([]PipelineTest, []string, error) {
+	s, err := p.summary(ctx, runID)
 	if err != nil {
-		return "", false, err
+		return nil, nil, err
+	}
+	out := slices.Clone(tests)
+	var notes []string
+	for i := range out {
+		t := &out[i]
+		if t.resultID == 0 {
+			continue
+		}
+		key := fmt.Sprintf("%s|testatt|%d|%d|%d|%s", p.b.cacheScope(), runID, t.testRunID, t.resultID, s.version())
+		if !s.completed() {
+			key = fmt.Sprintf("%s|testatt|%d|%d|%d|live", p.b.cacheScope(), runID, t.testRunID, t.resultID)
+		}
+		var e testAttachmentEntry
+		if v, ok := pipelineCache.get(key); ok {
+			e = v.(testAttachmentEntry)
+		} else {
+			if e.files, e.notes, err = p.b.resultAttachments(ctx, t.testRunID, t.resultID); err != nil {
+				return nil, nil, fmt.Errorf("attachments of test %s: %w", t.Name, err)
+			}
+			if s.completed() {
+				pipelineCache.put(key, e, jsonSize(e.files)+jsonSize(e.notes))
+			}
+		}
+		t.Attachments = e.files
+		for _, n := range e.notes {
+			if !slices.Contains(notes, n) {
+				notes = append(notes, n)
+			}
+		}
+	}
+	return out, notes, nil
+}
+
+// summary reads a run's current state. A completed run's is kept for
+// runStateTTL, so paging through its cached details or logs asks the
+// provider nothing; a run in progress is always asked.
+func (p *PipelineProvider) summary(ctx context.Context, id int64) (*PipelineRunSummary, error) {
+	key := fmt.Sprintf("%s|summary|%d", p.b.cacheScope(), id)
+	if v, ok := shortCache.get(key); ok {
+		return v.(*PipelineRunSummary), nil
+	}
+	s, err := p.b.summary(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if s.completed() {
+		shortCache.put(key, s, runStateTTL)
+	}
+	return s, nil
+}
+
+// runCached reads something of a run. For a completed run it is kept until
+// the run changes (a rerun gives it a new version); for a run in progress,
+// for liveRunTTL. cached reports a kept answer.
+func runCached[T any](ctx context.Context, p *PipelineProvider, runID int64, kind string,
+	read func(context.Context, *PipelineRunSummary) (T, error)) (T, bool, error) {
+	var zero T
+	s, err := p.summary(ctx, runID)
+	if err != nil {
+		return zero, false, err
 	}
 	if !s.completed() {
-		text, err = p.b.log(ctx, s, logID)
-		return text, false, err
+		key := fmt.Sprintf("%s|%s|%d|live|%s", p.b.cacheScope(), kind, runID, s.Status)
+		if v, ok := shortCache.get(key); ok {
+			return v.(T), true, nil
+		}
+		v, err := read(ctx, s)
+		if err != nil {
+			return zero, false, err
+		}
+		shortCache.put(key, v, liveRunTTL)
+		return v, false, nil
 	}
-	key := fmt.Sprintf("%s|log|%d|%d|%s", p.b.cacheScope(), runID, logID, s.version())
+	key := fmt.Sprintf("%s|%s|%d|%s", p.b.cacheScope(), kind, runID, s.version())
 	if v, ok := pipelineCache.get(key); ok {
-		return v.(string), true, nil
+		return v.(T), true, nil
 	}
-	if text, err = p.b.log(ctx, s, logID); err != nil {
-		return "", false, err
+	v, err := read(ctx, s)
+	if err != nil {
+		return zero, false, err
 	}
-	pipelineCache.put(key, text, int64(len(text)))
-	return text, false, nil
+	pipelineCache.put(key, v, jsonSize(v))
+	return v, false, nil
 }
 
 // PipelineProviderFor reads the runs of the pipelines a pipeline-run source

@@ -926,3 +926,42 @@ func blobsZipShim(h http.HandlerFunc) http.Handler {
 	})
 }
 
+
+// A rate limit that resets later than maxRetryAfter fails at once with the
+// wait, instead of retrying sooner than the server allows; one that resets
+// soon is waited for.
+func TestRateLimitIsNotRetriedEarly(t *testing.T) {
+	for name, set := range map[string]func(h http.Header){
+		"retry-after": func(h http.Header) { h.Set("Retry-After", "600") },
+		"reset":       func(h http.Header) { h.Set("X-RateLimit-Remaining", "0"); h.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10)) },
+	} {
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			set(w.Header())
+			http.Error(w, "rate limited", http.StatusForbidden)
+		}))
+		s := &APISource{src: src(nil)}
+		_, err := s.getRaw(context.Background(), s.httpClient(), srv.URL)
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "not retrying sooner") || calls != 1 {
+			t.Errorf("%s: %d calls, err %v", name, calls, err)
+		}
+	}
+
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls++; calls == 1 {
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Unix(), 10))
+			http.Error(w, "rate limited", http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+	s := &APISource{src: src(nil)}
+	if data, err := s.getRaw(context.Background(), s.httpClient(), srv.URL); err != nil || string(data) != "ok" || calls != 2 {
+		t.Errorf("soon reset: %q after %d calls, err %v", data, calls, err)
+	}
+}

@@ -38,21 +38,26 @@ type githubRun struct {
 	CreatedAt    string     `json:"created_at"`
 	RunStartedAt string     `json:"run_started_at"`
 	UpdatedAt    string     `json:"updated_at"`
+	Path         string     `json:"path"` // the workflow file, e.g. .github/workflows/ci.yml
 	Actor        githubUser `json:"actor"`
 }
 
 type githubJob struct {
 	ID          int64  `json:"id"`
 	Name        string `json:"name"`
+	Status      string `json:"status"`
 	Conclusion  string `json:"conclusion"`
 	RunAttempt  int    `json:"run_attempt"`
 	StartedAt   string `json:"started_at"`
 	CompletedAt string `json:"completed_at"`
 	HTMLURL     string `json:"html_url"`
 	Steps       []struct {
-		Name       string `json:"name"`
-		Number     int    `json:"number"`
-		Conclusion string `json:"conclusion"`
+		Name        string `json:"name"`
+		Number      int    `json:"number"`
+		Status      string `json:"status"`
+		Conclusion  string `json:"conclusion"`
+		StartedAt   string `json:"started_at"`
+		CompletedAt string `json:"completed_at"`
 	} `json:"steps"`
 }
 
@@ -226,15 +231,10 @@ func (c *githubPipelineClient) log(ctx context.Context, s *PipelineRunSummary, j
 
 // detail reads the jobs of every attempt, the annotations of each failed
 // job, the run's changes and its artifacts.
-func (c *githubPipelineClient) detail(ctx context.Context, s *PipelineRunSummary) (*PipelineRun, error) {
-	r := s.gh
-	run := &PipelineRun{
-		PipelineRunSummary: *s, Repository: c.g.owner + "/" + c.g.repo, Attempts: max(r.RunAttempt, 1),
-		Issues: []string{}, FailedSteps: []PipelineStep{}, Tests: []PipelineTest{},
-	}
-
+// jobs lists the jobs of every attempt of a run.
+func (c *githubPipelineClient) jobs(ctx context.Context, runID int64) ([]githubJob, error) {
 	var jobs []githubJob
-	err := c.g.pages(ctx, fmt.Sprintf("%s/actions/runs/%d/jobs?filter=all", c.g.repoAPI(), r.ID), func(data []byte) (int, bool, error) {
+	err := c.g.pages(ctx, fmt.Sprintf("%s/actions/runs/%d/jobs?filter=all", c.g.repoAPI(), runID), func(data []byte) (int, bool, error) {
 		var page struct {
 			Jobs []githubJob `json:"jobs"`
 		}
@@ -246,6 +246,62 @@ func (c *githubPipelineClient) detail(ctx context.Context, s *PipelineRunSummary
 	})
 	if err != nil {
 		return nil, fmt.Errorf("listing jobs: %w", err)
+	}
+	return jobs, nil
+}
+
+// steps lists every job of every attempt and each job's steps. GitHub keeps
+// one log per job, so a step's log_id is its job's.
+func (c *githubPipelineClient) steps(ctx context.Context, s *PipelineRunSummary) ([]PipelineStepNode, error) {
+	jobs, err := c.jobs(ctx, s.ID)
+	if err != nil {
+		return nil, err
+	}
+	duration := func(start, finish string) string {
+		if a, b := parseTime(start), parseTime(finish); !a.IsZero() && !b.IsZero() {
+			return b.Sub(a).Round(time.Second).String()
+		}
+		return ""
+	}
+	out := []PipelineStepNode{}
+	for _, j := range jobs {
+		web := j.HTMLURL
+		if !isWebURL(web) {
+			web = fmt.Sprintf("%s/actions/runs/%d/job/%d", c.g.repoWeb(), s.ID, j.ID)
+		}
+		attempt := max(j.RunAttempt, 1)
+		out = append(out, PipelineStepNode{Path: j.Name, Type: "job", Attempt: attempt, State: j.Status, Result: j.Conclusion,
+			Started: j.StartedAt, Finished: j.CompletedAt, Duration: duration(j.StartedAt, j.CompletedAt), LogID: j.ID, WebURL: web})
+		for _, st := range j.Steps {
+			out = append(out, PipelineStepNode{Path: j.Name + " > " + st.Name, Type: "step", Attempt: attempt, State: st.Status,
+				Result: st.Conclusion, Started: st.StartedAt, Finished: st.CompletedAt, Duration: duration(st.StartedAt, st.CompletedAt),
+				LogID: j.ID, WebURL: fmt.Sprintf("%s#step:%d:1", web, st.Number)})
+		}
+	}
+	return out, nil
+}
+
+// resultAttachments: GitHub has no test results, so none are attached.
+func (c *githubPipelineClient) resultAttachments(context.Context, int, int) ([]PipelineFile, []string, error) {
+	return nil, nil, nil
+}
+
+// tests: GitHub has no test results API.
+func (c *githubPipelineClient) tests(context.Context, *PipelineRunSummary) ([]PipelineTest, error) {
+	return nil, fmt.Errorf("GitHub Actions has no test results API — read the test step's log (steps mode, then log mode with search)")
+}
+
+func (c *githubPipelineClient) detail(ctx context.Context, s *PipelineRunSummary) (*PipelineRun, error) {
+	r := s.gh
+	run := &PipelineRun{
+		PipelineRunSummary: *s, Repository: c.g.owner + "/" + c.g.repo, Attempts: max(r.RunAttempt, 1),
+		Issues: []string{}, FailedSteps: []PipelineStep{}, Tests: []PipelineTest{},
+	}
+
+	run.PipelineFile = r.Path
+	jobs, err := c.jobs(ctx, r.ID)
+	if err != nil {
+		return nil, err
 	}
 	seenJob := map[string]bool{}
 	for _, j := range jobs {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -16,6 +17,16 @@ import (
 
 // logPageLines is how many log lines one log page returns.
 const logPageLines = 500
+
+const (
+	// stepsPageSize, testsPageSize and matchesPageSize page steps mode,
+	// tests mode and log search matches.
+	stepsPageSize   = 100
+	testsPageSize   = 50
+	matchesPageSize = 20
+	// matchContext is how many lines around a log search match are shown.
+	matchContext = 3
+)
 
 func pipelineRequestSchema() map[string]any {
 	str := func(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
@@ -30,7 +41,7 @@ func pipelineRequestSchema() map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": append([]string{"mode"}, required...)}
 	}
 	return map[string]any{
-		"description": "List a source's pipelines, list their latest runs, read one run's failures, or read one failed step's log.",
+		"description": "List a source's pipelines and their runs, then explore one run: its failures and context, all its steps, all its tests, and any step's log.",
 		"oneOf": []any{
 			variant("pipelines", map[string]any{"source_id": sourceID}),
 			variant("list", map[string]any{
@@ -53,9 +64,25 @@ func pipelineRequestSchema() map[string]any {
 				"source_id": sourceID, "run_id": runID, "url": runURL,
 				"page": num("Page of failed/flaky tests, 20 per page, starting at 1"),
 			}),
+			variant("steps", map[string]any{
+				"source_id": sourceID, "run_id": runID, "url": runURL,
+				"result": str("Optional: only steps with these results, comma-separated (Azure DevOps succeeded, failed, " +
+					"skipped, canceled, succeededWithIssues; GitHub success, failure, skipped, …)"),
+				"type": str("Optional: only stage, job or task (Azure DevOps); job or step (GitHub)"),
+				"name": str("Optional: only steps whose Stage > Job > Task path contains this text (any case)"),
+				"page": num(fmt.Sprintf("Page of %d steps, starting at 1", stepsPageSize)),
+			}),
+			variant("tests", map[string]any{
+				"source_id": sourceID, "run_id": runID, "url": runURL,
+				"outcome": str("Optional: only these outcomes, comma-separated (Passed, Failed, NotExecuted, Inconclusive, …)"),
+				"name": str("Optional: only tests whose name or title contains this text (any case)"),
+				"page": num(fmt.Sprintf("Page of %d tests, starting at 1", testsPageSize)),
+			}),
 			variant("log", map[string]any{
 				"source_id": sourceID, "run_id": runID, "url": runURL,
-				"log_id": num("A failed step's log_id, from get mode"),
+				"log_id": num("Any step's log_id, from steps or get mode (GitHub: the job id)"),
+				"search": str(fmt.Sprintf("Optional: return only the lines containing this text (any case), each with %d lines "+
+					"around it and its page; page then pages the matches, %d at a time", matchContext, matchesPageSize)),
 				"page": num(fmt.Sprintf("Page of %d log lines, starting at 1 (default: the last page, where the error usually is)",
 					logPageLines)),
 			}, "log_id"),
@@ -68,19 +95,23 @@ func pipelineRequestSchema() map[string]any {
 func RegisterPipelineTool(s *server.MCPServer, srcs SourceLister, store secrets.Reader) {
 	tool := mcp.NewTool("search_pipeline_run",
 		mcp.WithDescription(`Read pipeline runs (Azure DevOps builds, GitHub Actions workflow runs) live from the `+
-			`provider. Read-only; nothing is indexed, so every answer is current. `+
+			`provider — anything about a run, not only its failures. Read-only; nothing is indexed, so every answer is current. `+
 			`A source covers one or several pipelines (Azure DevOps by ids or a whole folder; GitHub workflows): `+
 			`{"mode":"pipelines"} lists them with id, name, folder (or workflow file) and web_url. `+
 			`{"mode":"list"} returns the latest runs of the source's pipelines merged, newest first (5 by default), each `+
 			`naming its pipeline, with result, status, reason, branch, commit, requester, timing and web_url — narrow to `+
 			`one pipeline with "pipeline" (id or exact name) and filter by result, status, branch, reason or requested_for `+
 			`(e.g. last failed build of Deploy on main: {"mode":"list","pipeline":"Deploy","result":"failed","branch":"main","top":1}). `+
-			`{"mode":"get","run_id":...} (or "url": a run link with buildId=… or …/actions/runs/…) explains one run: `+
-			`timeline issues (errors and warnings), every failed step of every attempt — so a run rerun to green still `+
-			`shows attempt 1's failures — with its log_id, failed and flaky tests with error message and stack trace `+
-			`(Azure DevOps; 20 per page), the commits the run built since the previous run, and its artifacts `+
-			`(metadata only). A step's result never says why it failed: read its log with {"mode":"log","run_id":...,`+
-			`"log_id":...}, which returns the last 500 lines by default; page backwards for earlier lines. `+
+			`{"mode":"get","run_id":...} (or "url": a run link with buildId=… or …/actions/runs/…) summarizes one run: `+
+			`timeline issues, every failed step of every attempt — so a run rerun to green still shows attempt 1's `+
+			`failures — failed and flaky tests with error and stack trace (Azure DevOps; 20 per page), the commits it built, `+
+			`its artifacts (metadata only) and its context: pipeline YAML file, parameters, queue-time and pipeline `+
+			`variables (secrets masked) and linked work items (Azure DevOps). `+
+			`{"mode":"steps"} lists every stage, job and task (GitHub job and step) of every attempt whatever its result, `+
+			`with timing, error/warning counts and log_id — filter by result, type or name. `+
+			`{"mode":"tests"} lists every test result, passed ones too (Azure DevOps) — filter by outcome or name. `+
+			`{"mode":"log","log_id":...} reads ANY step's log (a succeeded one too), 500 lines per page, the last page by `+
+			`default; add "search" to get just the matching lines with context and their page. `+
 			`Completed runs are cached in memory, so asking again is cheap. Cite web_url links when referring to a run, `+
 			`step or test.`),
 		func(t *mcp.Tool) {
@@ -153,9 +184,9 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 		}
 		return out, nil
 
-	case "get", "log":
+	case "get", "steps", "tests", "log":
 	default:
-		return nil, fmt.Errorf(`request.mode must be "pipelines", "list", "get" or "log", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "pipelines", "list", "get", "steps", "tests" or "log", got %q`, mode)
 	}
 
 	var (
@@ -189,16 +220,65 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 		page := max(int(num("page")), 1)
 		shown := *run // the cached run is shared: page a copy
 		tests, hasMore := sources.PageOf(run.Tests, page)
+		// Attachments are read for the page's tests only.
+		tests, notes, err := p.TestAttachments(ctx, runID, tests)
+		if err != nil {
+			return nil, err
+		}
 		shown.Tests = tests
+		if len(notes) > 0 {
+			shown.Notes = append(slices.Clone(run.Notes), notes...)
+		}
 		return map[string]any{
 			"credentials_from": sourceRef(src), "cached": cached, "run": shown,
 			"total_tests": len(run.Tests), "tests_page": page, "tests_has_more": hasMore,
 		}, nil
 	}
 
+	switch mode {
+	case "steps":
+		steps, cached, err := p.Steps(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		results, kind, name := csvSet(str("result")), strings.ToLower(str("type")), strings.ToLower(str("name"))
+		var shown []sources.PipelineStepNode
+		for _, st := range steps {
+			if (len(results) == 0 || results[strings.ToLower(st.Result)]) && (kind == "" || st.Type == kind) &&
+				(name == "" || strings.Contains(strings.ToLower(st.Path), name)) {
+				shown = append(shown, st)
+			}
+		}
+		page := max(int(num("page")), 1)
+		paged, more := pageSlice(shown, page, stepsPageSize)
+		return map[string]any{
+			"credentials_from": sourceRef(src), "cached": cached, "run_id": runID,
+			"total_steps": len(steps), "matched": len(shown), "page": page, "has_more": more, "steps": paged,
+		}, nil
+	case "tests":
+		tests, cached, err := p.Tests(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+		outcomes, name := csvSet(str("outcome")), strings.ToLower(str("name"))
+		var shown []sources.PipelineTest
+		for _, t := range tests {
+			if (len(outcomes) == 0 || outcomes[strings.ToLower(t.Outcome)]) &&
+				(name == "" || strings.Contains(strings.ToLower(t.Name), name) || strings.Contains(strings.ToLower(t.Title), name)) {
+				shown = append(shown, t)
+			}
+		}
+		page := max(int(num("page")), 1)
+		paged, more := pageSlice(shown, page, testsPageSize)
+		return map[string]any{
+			"credentials_from": sourceRef(src), "cached": cached, "run_id": runID,
+			"total_tests": len(tests), "matched": len(shown), "page": page, "has_more": more, "tests": paged,
+		}, nil
+	}
+
 	logID := num("log_id")
 	if logID <= 0 {
-		return nil, fmt.Errorf("log mode requires log_id, a failed step's log_id from get mode")
+		return nil, fmt.Errorf("log mode requires log_id, a step's log_id from steps or get mode")
 	}
 	text, cached, err := p.Log(ctx, runID, logID)
 	if err != nil {
@@ -206,6 +286,25 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 	}
 	lines := strings.Split(text, "\n")
 	pages := max((len(lines)+logPageLines-1)/logPageLines, 1)
+	if q := str("search"); q != "" {
+		ql := strings.ToLower(q)
+		var matches []map[string]any
+		for i, l := range lines {
+			if strings.Contains(strings.ToLower(l), ql) {
+				from, to := max(i-matchContext, 0), min(i+matchContext+1, len(lines))
+				matches = append(matches, map[string]any{
+					"line": i + 1, "page": i/logPageLines + 1, "text": strings.Join(lines[from:to], "\n"),
+				})
+			}
+		}
+		page := max(int(num("page")), 1)
+		paged, more := pageSlice(matches, page, matchesPageSize)
+		return map[string]any{
+			"credentials_from": sourceRef(src), "cached": cached, "run_id": runID, "log_id": logID,
+			"search": q, "total_matches": len(matches), "matches_page": page, "matches_has_more": more, "matches": paged,
+			"total_lines": len(lines), "total_pages": pages,
+		}, nil
+	}
 	page := int(num("page"))
 	if page <= 0 {
 		page = pages
@@ -257,4 +356,26 @@ func pipelineSource(all []models.SourceDefinition, id string) (*models.SourceDef
 
 func sourceRef(src *models.SourceDefinition) map[string]string {
 	return map[string]string{"id": src.ID, "name": src.Name}
+}
+
+// pageSlice returns page (from 1) of all, size items at a time, and whether
+// more follow.
+func pageSlice[T any](all []T, page, size int) ([]T, bool) {
+	start := (max(page, 1) - 1) * size
+	if start >= len(all) {
+		return []T{}, false
+	}
+	end := min(start+size, len(all))
+	return all[start:end], end < len(all)
+}
+
+// csvSet is a comma-separated filter's values, lower-cased; empty when none.
+func csvSet(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, v := range strings.Split(s, ",") {
+		if v = strings.ToLower(strings.TrimSpace(v)); v != "" {
+			out[v] = true
+		}
+	}
+	return out
 }

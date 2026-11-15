@@ -406,6 +406,19 @@ func matchGitHubPR(src *models.SourceDefinition, u *url.URL) (githubPRRef, int, 
 // SelectChanges picks the changes Diff should render: the one at path (a
 // rename's old path matches too, a leading "/" is ignored), or else page
 // (1-based) of PRPageSize files. hasMore reports further pages.
+// prChangesSize approximates a changed-file listing's memory, patches
+// (GitHub) included.
+func prChangesSize(c PRChanges) int64 {
+	n := int64(1024)
+	for _, f := range c.Files {
+		n += int64(len(f.Path)+len(f.OriginalPath)) + 256
+		if f.githubFile != nil {
+			n += int64(len(f.githubFile.Patch))
+		}
+	}
+	return n
+}
+
 func SelectChanges(all []PRChange, path string, page int) (selected []PRChange, hasMore bool, err error) {
 	if path != "" {
 		want := strings.TrimPrefix(path, "/")

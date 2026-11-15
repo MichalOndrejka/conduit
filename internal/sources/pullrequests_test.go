@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
@@ -536,5 +537,116 @@ func TestGitHubPR_ThreadsAndList(t *testing.T) {
 	}
 	if _, _, err := p.List(ctx, PRListFilter{Author: "ann@corp"}); err == nil {
 		t.Error("want an error for an email filter on GitHub")
+	}
+}
+
+// countingTransport counts the requests a client sends, by path.
+type countingTransport struct {
+	base http.RoundTripper
+	mu   sync.Mutex
+	n    map[string]int
+}
+
+func countRequests(c *http.Client) *countingTransport {
+	base := c.Transport
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	ct := &countingTransport{base: base, n: map[string]int{}}
+	c.Transport = ct
+	return ct
+}
+
+func (ct *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	ct.mu.Lock()
+	ct.n[r.URL.Path]++
+	ct.mu.Unlock()
+	return ct.base.RoundTrip(r)
+}
+
+func (ct *countingTransport) count(suffix string) int {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+	n := 0
+	for p, c := range ct.n {
+		if strings.HasSuffix(p, suffix) {
+			n += c
+		}
+	}
+	return n
+}
+
+func (ct *countingTransport) prefixCount(part string) int {
+	ct.mu.Lock()
+	defer ct.mu.Unlock()
+	n := 0
+	for p, c := range ct.n {
+		if strings.Contains(p, part) {
+			n += c
+		}
+	}
+	return n
+}
+
+// Reviewing a pull request file by file asks Azure DevOps once for its
+// iterations and changes and once per file version; "me" is resolved once.
+// After prStateTTL the iterations are asked again, the unchanged iteration's
+// changes are not.
+func TestAdoPR_ReadsAreCached(t *testing.T) {
+	_, c := fakeAdoPR(t)
+	ct := countRequests(c.client)
+	ctx := context.Background()
+	for range 3 {
+		changes, err := c.Changes(ctx, 7, PRRange{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := c.Diff(ctx, changes.Files, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	blobs := ct.prefixCount("/blobs/")
+	if ct.count("/pullRequests/7/iterations") != 1 || ct.prefixCount("/changes") != 1 || blobs == 0 || blobs > 6 {
+		t.Errorf("requests = %v", ct.n)
+	}
+	expireShortCache()
+	if _, err := c.Changes(ctx, 7, PRRange{}); err != nil {
+		t.Fatal(err)
+	}
+	if ct.count("/pullRequests/7/iterations") != 2 || ct.prefixCount("/changes") != 1 {
+		t.Errorf("after expiry: requests = %v", ct.n)
+	}
+
+	for range 2 {
+		if _, _, err := c.List(ctx, PRListFilter{Reviewer: "me", TargetBranch: "main", Page: 2}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := ct.count("/connectionData"); n != 1 {
+		t.Errorf("\"me\" resolved %d times, want once", n)
+	}
+}
+
+// GitHub: the pull request's head is read once per prStateTTL, its files once
+// per head commit and a file's content once per commit.
+func TestGitHubPR_ReadsAreCached(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.handleJSON("/pulls/7", map[string]any{"number": 7, "head": map[string]any{"sha": "h2"}, "base": map[string]any{"sha": "b1"}})
+	f.handleJSON("/pulls/7/files", []any{map[string]any{"filename": "cart.go", "status": "modified", "additions": 1, "deletions": 1, "patch": "@@ -1 +1 @@\n-a\n+b"}})
+	f.HandleFunc("/api/v3/repos/acme/app/contents/cart.go", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("b\n")) })
+	p := githubPR7(t, f).(*githubPRClient)
+	ct := countRequests(p.g.client)
+	ctx := context.Background()
+	for range 3 {
+		changes, err := p.Changes(ctx, 7, PRRange{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := p.Diff(ctx, changes.Files, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ct.count("/pulls/7") != 1 || ct.count("/pulls/7/files") != 1 || ct.count("/contents/cart.go") != 1 {
+		t.Errorf("requests = %v", ct.n)
 	}
 }

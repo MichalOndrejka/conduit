@@ -192,9 +192,26 @@ func (c *adoPRClient) List(ctx context.Context, f PRListFilter) ([]PRSummary, bo
 	return out, len(resp.Value) > PRPageSize, nil
 }
 
+// adoIdentities keeps resolved identities for the process: who "me" or an
+// email is doesn't change, so a listing filtered by them doesn't ask again.
+var adoIdentities sync.Map
+
 // identityID resolves "me" (the token's owner) or an email to an Azure
-// DevOps identity ID.
+// DevOps identity ID, once per source and process.
 func (c *adoPRClient) identityID(ctx context.Context, who string) (string, error) {
+	key := c.org + "|" + c.api.src.ID + "|" + strings.ToLower(who)
+	if v, ok := adoIdentities.Load(key); ok {
+		return v.(string), nil
+	}
+	id, err := c.lookupIdentity(ctx, who)
+	if err != nil {
+		return "", err
+	}
+	adoIdentities.Store(key, id)
+	return id, nil
+}
+
+func (c *adoPRClient) lookupIdentity(ctx context.Context, who string) (string, error) {
 	if strings.EqualFold(who, "me") {
 		var data struct {
 			AuthenticatedUser struct {
@@ -423,13 +440,20 @@ type adoPRIteration struct {
 	CommonRefCommit adoCommitRef   `json:"commonRefCommit"`
 }
 
+// iterations lists the pull request's iterations, kept for prStateTTL: they
+// decide which (cached) changes apply, and only a push adds one.
 func (c *adoPRClient) iterations(ctx context.Context, id int) ([]adoPRIteration, error) {
+	key := c.prAPI(id) + "|iterations"
+	if v, ok := shortCache.get(key); ok {
+		return v.([]adoPRIteration), nil
+	}
 	var resp struct {
 		Value []adoPRIteration `json:"value"`
 	}
 	if _, err := c.getJSON(ctx, c.prAPI(id)+"/iterations"+c.query(nil), &resp); err != nil {
 		return nil, err
 	}
+	shortCache.put(key, resp.Value, prStateTTL)
 	return resp.Value, nil
 }
 
@@ -462,7 +486,21 @@ func (c *adoPRClient) Changes(ctx context.Context, id int, r PRRange) (PRChanges
 	if r.From > 0 {
 		base = iters[r.From-1].SourceRefCommit.CommitID
 	}
+	// An iteration never changes, so its changes are kept by its commits.
+	key := fmt.Sprintf("%s|changes|%d|%d|%s|%s", c.prAPI(id), r.To, r.From, base, head)
+	if v, ok := prCache.get(key); ok {
+		return v.(PRChanges), nil
+	}
+	out, err := c.readChanges(ctx, id, r, base, head)
+	if err != nil {
+		return PRChanges{}, err
+	}
+	prCache.put(key, out, prChangesSize(out))
+	return out, nil
+}
 
+// readChanges pages through an iteration's changes.
+func (c *adoPRClient) readChanges(ctx context.Context, id int, r PRRange, base, head string) (PRChanges, error) {
 	out := PRChanges{Files: []PRChange{}, HeadCommit: head}
 	for skip := 0; ; {
 		q := url.Values{
@@ -562,7 +600,25 @@ func (c *adoPRClient) diffOne(ctx context.Context, ch PRChange, withContent bool
 
 // fileText reads a file version by blob ID, or — when ADO didn't give one —
 // by path at commit.
+// A file version never changes, so it is kept by blob id (or path and
+// commit): files mode and each file's diff read it once.
 func (c *adoPRClient) fileText(ctx context.Context, objectID, path, commit string) (string, error) {
+	key := c.repoAPI() + "|blob|" + objectID
+	if objectID == "" {
+		key = c.repoAPI() + "|item|" + commit + "|" + path
+	}
+	if v, ok := prCache.get(key); ok {
+		return v.(string), nil
+	}
+	text, err := c.readFileText(ctx, objectID, path, commit)
+	if err != nil {
+		return "", err
+	}
+	prCache.put(key, text, int64(len(text)))
+	return text, nil
+}
+
+func (c *adoPRClient) readFileText(ctx context.Context, objectID, path, commit string) (string, error) {
 	if objectID != "" {
 		q := url.Values{"$format": {"text"}}
 		data, err := c.api.getRaw(ctx, c.client, c.repoAPI()+"/blobs/"+url.PathEscape(objectID)+c.query(q))

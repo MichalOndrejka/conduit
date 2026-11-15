@@ -444,13 +444,27 @@ func statusError(resp *http.Response, url string, body []byte) (retryAfter time.
 		return 0, nil
 	}
 	if s, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil && s > 0 {
-		retryAfter = min(time.Duration(s)*time.Second, maxRetryAfter)
+		retryAfter = time.Duration(s) * time.Second
+	}
+	// An exhausted rate limit without Retry-After (GitHub's primary limit,
+	// Azure DevOps' throttling) says when it resets instead.
+	exhausted := resp.Header.Get("X-RateLimit-Remaining") == "0"
+	if exhausted && retryAfter == 0 {
+		if reset, err := strconv.ParseInt(resp.Header.Get("X-RateLimit-Reset"), 10, 64); err == nil {
+			retryAfter = max(time.Until(time.Unix(reset, 0))+time.Second, time.Second)
+		}
 	}
 	// GitHub refuses requests over its rate limit with 403 (primary limit:
 	// X-RateLimit-Remaining is 0; secondary limit: Retry-After is set).
-	rateLimited := resp.StatusCode == http.StatusForbidden &&
-		(resp.Header.Get("X-RateLimit-Remaining") == "0" || retryAfter > 0)
+	rateLimited := resp.StatusCode == http.StatusForbidden && (exhausted || retryAfter > 0)
 	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 || rateLimited {
+		// Asking again before the server allows only spends more of the
+		// limit: a wait longer than maxRetryAfter fails now and says when.
+		if retryAfter > maxRetryAfter {
+			return 0, &httpStatusError{status: resp.StatusCode, msg: fmt.Sprintf(
+				"HTTP %d from %s: rate limited — the server asks to wait %s (until %s); not retrying sooner",
+				resp.StatusCode, url, retryAfter.Round(time.Second), time.Now().Add(retryAfter).Format("15:04:05"))}
+		}
 		return retryAfter, fmt.Errorf("%w: HTTP %d from %s", errRetryable, resp.StatusCode, url)
 	}
 	return 0, &httpStatusError{status: resp.StatusCode,

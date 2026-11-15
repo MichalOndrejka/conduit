@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
 )
@@ -134,7 +135,18 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 		case path == "build/builds/2":
 			writeJSON(w, build(2, "20261014.2", "succeeded", "refs/heads/main"))
 		case path == "build/builds/3":
-			writeJSON(w, build(3, "20261014.3", "failed", "refs/heads/main"))
+			b := build(3, "20261014.3", "failed", "refs/heads/main")
+			b["definition"] = map[string]any{"id": 12, "name": "CI", "revision": 7}
+			b["templateParameters"] = map[string]any{"env": "prod", "regions": []any{"eu", "us"}}
+			b["parameters"] = `{"system.debug":"true"}`
+			writeJSON(w, b)
+		case path == "build/definitions/12":
+			writeJSON(w, map[string]any{"process": map[string]any{"yamlFilename": "ci/azure-pipelines.yml"},
+				"variables": map[string]any{"Config": map[string]any{"value": "Release"}, "ApiKey": map[string]any{"isSecret": true}}})
+		case path == "build/builds/3/workitems":
+			writeJSON(w, map[string]any{"value": []any{map[string]any{"id": "101", "url": "https://ado.example/_apis/wit/workItems/101"}}})
+		case strings.HasPrefix(path, "build/builds/") && strings.HasSuffix(path, "/workitems"):
+			writeJSON(w, map[string]any{"value": []any{}})
 		case path == "build/builds/4":
 			writeJSON(w, build(4, "20261014.4", "succeeded", "refs/heads/main"))
 		case path == "build/builds/5":
@@ -237,6 +249,13 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 				writeJSON(w, map[string]any{"value": []any{}})
 			}
 		case path == "test/Runs/100/results":
+			if !q.Has("outcomes") { // tests mode: every outcome
+				writeJSON(w, map[string]any{"value": []any{
+					map[string]any{"id": 7, "automatedTestName": "Parser.Tests.ParsesEmpty", "outcome": "Failed", "errorMessage": "Expected 0 but was 1"},
+					map[string]any{"id": 8, "automatedTestName": "Parser.Tests.Stable", "outcome": "Passed", "durationInMs": 20},
+				}})
+				return
+			}
 			if q.Get("outcomes") == "Passed" {
 				writeJSON(w, map[string]any{"value": []any{map[string]any{"id": 8, "automatedTestName": "Parser.Tests.Stable", "outcome": "Passed"}}})
 				return
@@ -320,7 +339,8 @@ func TestAdoPipelineList(t *testing.T) {
 
 func TestAdoPipelineGetFailedRun(t *testing.T) {
 	stub := &pipelineStub{}
-	run, cached, err := adoPipeline(t, stub, nil).Get(context.Background(), 3)
+	p := adoPipeline(t, stub, nil)
+	run, cached, err := p.Get(context.Background(), 3)
 	if err != nil || cached {
 		t.Fatalf("err %v cached %v", err, cached)
 	}
@@ -343,9 +363,25 @@ func TestAdoPipelineGetFailedRun(t *testing.T) {
 	}
 	tst := run.Tests[0]
 	if tst.Name != "Parser.Tests.ParsesEmpty" || tst.Flaky || tst.Attempt != 1 || tst.Duration != "1.5s" ||
-		tst.StackTrace == "" || len(tst.Attachments) != 1 || tst.Attachments[0].Size != "120.6 KB" ||
-		!strings.Contains(tst.WebURL, "runId=100&resultId=7") {
+		tst.StackTrace == "" || len(tst.Attachments) != 0 || !strings.Contains(tst.WebURL, "runId=100&resultId=7") {
 		t.Errorf("test = %+v", tst)
+	}
+	// A failed test's attachments are read only when asked for (a page of
+	// tests), once: the second time they come from the cache.
+	if n := stub.count("/proj/_apis/test/Runs/100/Results/"); n != 0 {
+		t.Errorf("get read %d test result attachment listings, want none", n)
+	}
+	for range 2 {
+		paged, notes, err := p.TestAttachments(context.Background(), 3, run.Tests)
+		if err != nil || len(notes) != 0 || len(paged[0].Attachments) != 1 || paged[0].Attachments[0].Size != "120.6 KB" {
+			t.Fatalf("attachments = %+v, notes %v, err %v", paged, notes, err)
+		}
+		if len(run.Tests[0].Attachments) != 0 {
+			t.Fatal("TestAttachments changed the cached run's tests")
+		}
+	}
+	if n := stub.count("/proj/_apis/test/Runs/100/Results/7/attachments"); n != 1 {
+		t.Errorf("result attachments read %d times, want 1", n)
 	}
 	if len(run.TestRunAttachments) != 1 || run.TestRunAttachments[0].Files[0].Name != "coverage.xml" {
 		t.Errorf("test run attachments = %+v", run.TestRunAttachments)
@@ -423,8 +459,18 @@ func TestPipelineCacheServesCompletedRuns(t *testing.T) {
 	if err != nil || !cached || run.ID != 3 {
 		t.Fatalf("second read: cached %v err %v", cached, err)
 	}
+	// Within runStateTTL the run's state is kept too: nothing is asked.
+	if got := stub.requests[before:]; len(got) != 0 {
+		t.Errorf("second read requested %v, want nothing", got)
+	}
+	// Once that expires only the run itself is asked again (to see a rerun).
+	expireShortCache()
+	before = len(stub.requests)
+	if _, cached, _ := p.Get(ctx, 3); !cached {
+		t.Error("details re-read after the state expired")
+	}
 	if got := stub.requests[before:]; len(got) != 1 || !strings.HasPrefix(got[0], "/proj/_apis/build/builds/3?") {
-		t.Errorf("second read requested %v, want only the run itself", got)
+		t.Errorf("read after expiry requested %v, want only the run itself", got)
 	}
 
 	text, cached, err := p.Log(ctx, 3, 5)
@@ -435,13 +481,29 @@ func TestPipelineCacheServesCompletedRuns(t *testing.T) {
 		t.Errorf("log re-read: cached %v, %d log requests", cached, stub.count("/proj/_apis/build/builds/3/logs/5"))
 	}
 
-	for range 2 {
-		if _, cached, err := p.Get(ctx, 5); err != nil || cached {
-			t.Fatalf("running build: cached %v err %v", cached, err)
+	// A running build's details are kept for liveRunTTL: polling it asks only
+	// for its state, then everything again once that expires.
+	for i, want := range []bool{false, true} {
+		if _, cached, err := p.Get(ctx, 5); err != nil || cached != want {
+			t.Fatalf("running build read %d: cached %v err %v", i+1, cached, err)
 		}
 	}
-	if n := stub.count("/proj/_apis/build/builds/5/timeline"); n != 2 {
-		t.Errorf("running build timeline read %d times, want every time", n)
+	if n, s := stub.count("/proj/_apis/build/builds/5/timeline"), stub.count("/proj/_apis/build/builds/5?"); n != 1 || s != 2 {
+		t.Errorf("running build: %d timeline reads (want 1), %d state reads (want 2)", n, s)
+	}
+	expireShortCache()
+	if _, cached, _ := p.Get(ctx, 5); cached || stub.count("/proj/_apis/build/builds/5/timeline") != 2 {
+		t.Error("running build details not read again after liveRunTTL")
+	}
+}
+
+// expireShortCache ages every short-lived answer past its expiry.
+func expireShortCache() {
+	shortCache.mu.Lock()
+	defer shortCache.mu.Unlock()
+	for k, e := range shortCache.items {
+		e.expires = time.Now().Add(-time.Second)
+		shortCache.items[k] = e
 	}
 }
 
@@ -696,5 +758,79 @@ func TestMatchPipeline(t *testing.T) {
 	}
 	if _, err := matchPipeline(all, "dep"); err == nil {
 		t.Error("a partial name must not match")
+	}
+}
+
+// get carries the run's context: the YAML file and variables of the
+// pipeline at the run's revision (secrets masked), its template and
+// queue-time parameters, and the work items linked to it.
+func TestAdoPipelineGetContext(t *testing.T) {
+	stub := &pipelineStub{}
+	run, _, err := adoPipeline(t, stub, nil).Get(context.Background(), 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.PipelineFile != "ci/azure-pipelines.yml" || run.Parameters["env"] != "prod" || run.Parameters["regions"] != `["eu","us"]` ||
+		run.QueueVariables["system.debug"] != "true" || run.Variables["Config"] != "Release" || run.Variables["ApiKey"] != "***" {
+		t.Errorf("context = file %q params %v queue %v vars %v", run.PipelineFile, run.Parameters, run.QueueVariables, run.Variables)
+	}
+	if len(run.WorkItems) != 1 || run.WorkItems[0].ID != "101" || !strings.HasSuffix(run.WorkItems[0].WebURL, "/proj/_workitems/edit/101") {
+		t.Errorf("work items = %+v", run.WorkItems)
+	}
+	found := false
+	for _, r := range stub.requests {
+		found = found || strings.HasPrefix(r, "/proj/_apis/build/definitions/12?") && strings.Contains(r, "revision=7")
+	}
+	if !found {
+		t.Errorf("definition not read at the run's revision: %v", stub.requests)
+	}
+}
+
+// steps lists every stage, job and task whatever its result, with its log
+// id — succeeded ones too — and every attempt of a rerun job; tests lists
+// every result, passed ones too. Both are cached for a completed run.
+func TestAdoPipelineStepsAndTests(t *testing.T) {
+	stub := &pipelineStub{}
+	p := adoPipeline(t, stub, nil)
+	ctx := context.Background()
+	steps, cached, err := p.Steps(ctx, 3)
+	if err != nil || cached {
+		t.Fatalf("steps: %v, cached %v", err, cached)
+	}
+	var got []string
+	for _, s := range steps {
+		got = append(got, fmt.Sprintf("%s|%s|%s|%d|%d", s.Type, s.Path, s.Result, s.LogID, s.Errors))
+	}
+	want := []string{"stage|Build|failed|0|0", "job|Build > Linux|failed|3|0", "task|Build > Linux > Checkout|succeeded|4|0",
+		"task|Build > Linux > Compile|failed|5|1", "job|Build > Windows|failed|7|1", "task|Build > Windows > Test|succeeded|8|0"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("steps =\n%v\nwant\n%v", got, want)
+	}
+	if !strings.Contains(steps[2].WebURL, "&j=j1&t=t0") {
+		t.Errorf("checkout web_url = %s", steps[2].WebURL)
+	}
+	if _, cached, _ := p.Steps(ctx, 3); !cached {
+		t.Error("second steps read of a completed run wasn't cached")
+	}
+
+	rerun, _, err := p.Steps(ctx, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempts := map[string][]int{}
+	for _, s := range rerun {
+		attempts[s.Path] = append(attempts[s.Path], s.Attempt)
+	}
+	if fmt.Sprint(attempts["Build > Linux > Test"]) != "[2 1]" {
+		t.Errorf("rerun task attempts = %v (steps %+v)", attempts, rerun)
+	}
+
+	tests, _, err := p.Tests(ctx, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tests) != 2 || tests[0].Outcome != "Failed" || tests[1].Name != "Parser.Tests.Stable" || tests[1].Outcome != "Passed" ||
+		tests[1].Flaky || tests[1].Attempt != 1 || tests[1].Duration != "20ms" {
+		t.Errorf("tests = %+v", tests)
 	}
 }
