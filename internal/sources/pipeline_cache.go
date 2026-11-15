@@ -4,7 +4,48 @@ import (
 	"container/list"
 	"encoding/json"
 	"sync"
+	"time"
 )
+
+// pipelineListTTL is how long the pipelines a source covers are kept: a
+// pipeline added to a folder is listed within this time.
+const pipelineListTTL = 5 * time.Minute
+
+// pipelineLists keeps each source's pipelines (see PipelineProvider.Pipelines).
+var pipelineLists = &ttlCache{ttl: pipelineListTTL, items: map[string]ttlEntry{}}
+
+// ttlCache keeps pipeline lists for a fixed time. Its keys are few — one per
+// pipeline-run source — so expired entries are dropped when read.
+type ttlCache struct {
+	mu    sync.Mutex
+	ttl   time.Duration
+	items map[string]ttlEntry
+}
+
+type ttlEntry struct {
+	val []PipelineInfo
+	at  time.Time
+}
+
+func (c *ttlCache) get(key string) ([]PipelineInfo, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	e, ok := c.items[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Since(e.at) > c.ttl {
+		delete(c.items, key)
+		return nil, false
+	}
+	return e.val, true
+}
+
+func (c *ttlCache) put(key string, val []PipelineInfo) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.items[key] = ttlEntry{val: val, at: time.Now()}
+}
 
 // pipelineCacheBytes bounds the cache of completed runs' details and logs.
 const pipelineCacheBytes = 64 << 20

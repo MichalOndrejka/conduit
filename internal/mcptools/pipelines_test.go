@@ -72,6 +72,19 @@ func TestPipelineTool_ListGetLog(t *testing.T) {
 		t.Fatalf("list = %+v", out)
 	}
 
+	// pipelines mode lists the source's pipelines; list takes one by id.
+	out = pipelineCall(t, srcs, map[string]any{"mode": "pipelines"})
+	if ps := out["pipelines"].([]sources.PipelineInfo); len(ps) != 1 || ps[0].ID != 12 {
+		t.Fatalf("pipelines = %+v", out)
+	}
+	if runs := pipelineCall(t, srcs, map[string]any{"mode": "list", "pipeline": "12"})["runs"].([]sources.PipelineRunSummary); len(runs) != 1 {
+		t.Fatalf("list of pipeline 12 = %+v", runs)
+	}
+	if _, err := handlePipelineRequest(context.Background(), map[string]any{"request": map[string]any{"mode": "list", "pipeline": "Nope"}}, srcs, fakeCreds{}); err == nil ||
+		!strings.Contains(err.Error(), "id 12") {
+		t.Errorf("unknown pipeline: err = %v", err)
+	}
+
 	out = pipelineCall(t, srcs, map[string]any{"mode": "get", "run_id": float64(3), "page": float64(2)})
 	run := out["run"].(sources.PipelineRun)
 	if out["total_tests"] != 25 || out["tests_has_more"] != false || len(run.Tests) != 5 || run.Tests[0].Name != "T21" {

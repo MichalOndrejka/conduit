@@ -30,10 +30,14 @@ func pipelineRequestSchema() map[string]any {
 		return map[string]any{"type": "object", "properties": props, "required": append([]string{"mode"}, required...)}
 	}
 	return map[string]any{
-		"description": "List a pipeline's latest runs, read one run's failures, or read one failed step's log.",
+		"description": "List a source's pipelines, list their latest runs, read one run's failures, or read one failed step's log.",
 		"oneOf": []any{
+			variant("pipelines", map[string]any{"source_id": sourceID}),
 			variant("list", map[string]any{
 				"source_id": sourceID,
+				"pipeline": str("Optional: only this pipeline's runs, when the source has several (IDs or a folder) — " +
+					"its id, or its exact name (any case; GitHub also the workflow file, e.g. ci.yml), from pipelines mode " +
+					"or a run's pipeline field. A name several pipelines share is an error that lists their ids"),
 				"top": num(fmt.Sprintf("How many runs, newest first (default: the source's Runs setting, else %d; at most %d)",
 					sources.DefaultPipelineRuns, sources.MaxPipelineRuns)),
 				"result": str("Optional: Azure DevOps succeeded, partiallySucceeded, failed or canceled; GitHub success, " +
@@ -65,9 +69,12 @@ func RegisterPipelineTool(s *server.MCPServer, srcs SourceLister, store secrets.
 	tool := mcp.NewTool("search_pipeline_run",
 		mcp.WithDescription(`Read pipeline runs (Azure DevOps builds, GitHub Actions workflow runs) live from the `+
 			`provider. Read-only; nothing is indexed, so every answer is current. `+
-			`{"mode":"list"} returns the latest runs of a source's pipelines (one or several; each run names its pipeline), newest first (5 by default), with result, `+
-			`status, reason, branch, commit, requester, timing and web_url — filter by result, status, branch, reason `+
-			`or requested_for (e.g. last failed build on main: {"mode":"list","result":"failed","branch":"main","top":1}). `+
+			`A source covers one or several pipelines (Azure DevOps by ids or a whole folder; GitHub workflows): `+
+			`{"mode":"pipelines"} lists them with id, name, folder (or workflow file) and web_url. `+
+			`{"mode":"list"} returns the latest runs of the source's pipelines merged, newest first (5 by default), each `+
+			`naming its pipeline, with result, status, reason, branch, commit, requester, timing and web_url — narrow to `+
+			`one pipeline with "pipeline" (id or exact name) and filter by result, status, branch, reason or requested_for `+
+			`(e.g. last failed build of Deploy on main: {"mode":"list","pipeline":"Deploy","result":"failed","branch":"main","top":1}). `+
 			`{"mode":"get","run_id":...} (or "url": a run link with buildId=… or …/actions/runs/…) explains one run: `+
 			`timeline issues (errors and warnings), every failed step of every attempt — so a run rerun to green still `+
 			`shows attempt 1's failures — with its log_id, failed and flaky tests with error message and stack trace `+
@@ -109,6 +116,21 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 
 	mode := str("mode")
 	switch mode {
+	case "pipelines":
+		src, err := pipelineSource(all, str("source_id"))
+		if err != nil {
+			return nil, err
+		}
+		p, err := sources.PipelineProviderFor(src, store)
+		if err != nil {
+			return nil, err
+		}
+		pipelines, cached, err := p.Pipelines(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"source": sourceRef(src), "cached": cached, "pipelines": pipelines}, nil
+
 	case "list":
 		src, err := pipelineSource(all, str("source_id"))
 		if err != nil {
@@ -120,7 +142,7 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 		}
 		runs, err := p.List(ctx, sources.PipelineRunFilter{
 			Top: int(num("top")), Result: str("result"), Status: str("status"), Branch: str("branch"),
-			Reason: str("reason"), RequestedFor: str("requested_for"),
+			Reason: str("reason"), RequestedFor: str("requested_for"), Pipeline: str("pipeline"),
 		})
 		if err != nil {
 			return nil, err
@@ -133,7 +155,7 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 
 	case "get", "log":
 	default:
-		return nil, fmt.Errorf(`request.mode must be "list", "get" or "log", got %q`, mode)
+		return nil, fmt.Errorf(`request.mode must be "pipelines", "list", "get" or "log", got %q`, mode)
 	}
 
 	var (

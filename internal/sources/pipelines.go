@@ -13,6 +13,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -37,6 +38,26 @@ type PipelineRunFilter struct {
 	Branch       string
 	Reason       string // Azure DevOps reason or GitHub event
 	RequestedFor string // Azure DevOps requester or GitHub actor
+	// Pipeline narrows a source of several pipelines to one: its id
+	// (definition id or workflow id), or its name or workflow file, matched
+	// exactly, case-insensitively.
+	Pipeline string
+
+	// only, set by PipelineProvider.List, is the pipeline ids the backend
+	// lists runs of instead of its configured ones.
+	only []int64
+}
+
+// PipelineInfo is one pipeline a source covers.
+type PipelineInfo struct {
+	ID     int64  `json:"id"`             // Azure DevOps definition id, GitHub workflow id
+	Name   string `json:"name,omitempty"` // as the provider names it
+	Folder string `json:"folder,omitempty"`
+	File   string `json:"file,omitempty"` // GitHub: the workflow file, e.g. ci.yml
+	WebURL string `json:"web_url,omitempty"`
+	// Note says why a configured pipeline couldn't be read (deleted, or not
+	// visible to the source's credentials).
+	Note string `json:"note,omitempty"`
 }
 
 // PipelineRunSummary is one run as a listing shows it.
@@ -178,6 +199,14 @@ type pipelineBackend interface {
 	// cacheScope identifies the project/repository, so a run read through a
 	// source and through a URL shares cache entries.
 	cacheScope() string
+	// pipelinesKey identifies the source's pipeline selection within the
+	// cache scope.
+	pipelinesKey() string
+	// pipelines reads the pipelines the source covers.
+	pipelines(ctx context.Context) ([]PipelineInfo, error)
+	// resolvesPipelines reports whether listing runs needs pipelines first
+	// (an Azure DevOps folder: its pipelines' ids).
+	resolvesPipelines() bool
 	list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error)
 	summary(ctx context.Context, id int64) (*PipelineRunSummary, error)
 	detail(ctx context.Context, s *PipelineRunSummary) (*PipelineRun, error)
@@ -191,13 +220,89 @@ type PipelineProvider struct {
 	defaultTop int
 }
 
-// List returns the newest runs matching f.
+// List returns the newest runs matching f, of f.Pipeline only when given.
 func (p *PipelineProvider) List(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error) {
 	if f.Top <= 0 {
 		f.Top = p.defaultTop
 	}
 	f.Top = min(f.Top, MaxPipelineRuns)
+	f.only = nil
+	if sel := strings.TrimSpace(f.Pipeline); sel != "" || p.b.resolvesPipelines() {
+		all, _, err := p.Pipelines(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if sel != "" {
+			m, err := matchPipeline(all, sel)
+			if err != nil {
+				return nil, err
+			}
+			f.only = []int64{m.ID}
+		} else {
+			for _, pi := range all {
+				f.only = append(f.only, pi.ID)
+			}
+			slices.Sort(f.only)
+		}
+	}
 	return p.b.list(ctx, f)
+}
+
+// Pipelines returns the pipelines the source covers. They are kept for
+// pipelineListTTL, so a folder's pipelines aren't looked up on every call;
+// cached reports a kept answer.
+func (p *PipelineProvider) Pipelines(ctx context.Context) (infos []PipelineInfo, cached bool, err error) {
+	key := p.b.cacheScope() + "|pipelines|" + p.b.pipelinesKey()
+	if v, ok := pipelineLists.get(key); ok {
+		return v, true, nil
+	}
+	if infos, err = p.b.pipelines(ctx); err != nil {
+		return nil, false, err
+	}
+	pipelineLists.put(key, infos)
+	return infos, false, nil
+}
+
+// matchPipeline finds the one pipeline sel names: its id, or its name or
+// workflow file, compared case-insensitively.
+func matchPipeline(all []PipelineInfo, sel string) (PipelineInfo, error) {
+	var hits []PipelineInfo
+	if id, err := strconv.ParseInt(sel, 10, 64); err == nil {
+		for _, pi := range all {
+			if pi.ID == id {
+				hits = append(hits, pi)
+			}
+		}
+	}
+	if len(hits) == 0 {
+		for _, pi := range all {
+			if strings.EqualFold(pi.Name, sel) || (pi.File != "" && strings.EqualFold(pi.File, sel)) {
+				hits = append(hits, pi)
+			}
+		}
+	}
+	describe := func(list []PipelineInfo) string {
+		parts := make([]string, len(list))
+		for i, pi := range list {
+			parts[i] = fmt.Sprintf("%s (id %d", orDefault(pi.Name, "?"), pi.ID)
+			if pi.Folder != "" {
+				parts[i] += ", folder " + pi.Folder
+			}
+			if pi.File != "" {
+				parts[i] += ", file " + pi.File
+			}
+			parts[i] += ")"
+		}
+		return strings.Join(parts, "; ")
+	}
+	switch len(hits) {
+	case 1:
+		return hits[0], nil
+	case 0:
+		return PipelineInfo{}, fmt.Errorf("no pipeline of this source is %q; its pipelines: %s", sel, describe(all))
+	default:
+		return PipelineInfo{}, fmt.Errorf("%q names several pipelines — pass one's id: %s", sel, describe(hits))
+	}
 }
 
 // Get returns one run's details. cached reports a completed run served from

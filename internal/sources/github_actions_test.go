@@ -75,6 +75,29 @@ func TestGitHubPipelineListSeveralWorkflows(t *testing.T) {
 	}
 }
 
+// pipelines reads each workflow; list's pipeline filter takes a workflow's
+// file and lists that workflow's runs only, by its id.
+func TestGitHubPipelinePipelinesAndFilter(t *testing.T) {
+	f := newFakeGitHub(t)
+	f.handleJSON("/actions/workflows/ci.yml", map[string]any{"id": 77, "name": "CI", "path": ".github/workflows/ci.yml", "html_url": "https://gh/ci"})
+	f.handleJSON("/actions/workflows/release.yml", map[string]any{"id": 78, "name": "Release", "path": ".github/workflows/release.yml"})
+	var listed []string
+	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows/78/runs", func(w http.ResponseWriter, r *http.Request) {
+		listed = append(listed, r.URL.Path)
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []any{
+			map[string]any{"id": 5, "name": "Release", "run_number": 5, "status": "completed", "conclusion": "success"}}})
+	})
+	p := f.pipeline(t, map[string]string{"Workflow": "ci.yml, release.yml"})
+	infos, _, err := p.Pipelines(context.Background())
+	if err != nil || len(infos) != 2 || infos[0].ID != 77 || infos[0].File != "ci.yml" || infos[1].Name != "Release" {
+		t.Fatalf("pipelines = %+v, %v", infos, err)
+	}
+	runs, err := p.List(context.Background(), PipelineRunFilter{Pipeline: "Release.yml"})
+	if err != nil || len(runs) != 1 || runs[0].ID != 5 || len(listed) != 1 {
+		t.Fatalf("runs = %+v, %v, listed %v", runs, err, listed)
+	}
+}
+
 // A run re-run to green still lists attempt 1's failed job with its
 // annotations; its log is read on request; changes come from comparing with
 // the previous run on the branch.

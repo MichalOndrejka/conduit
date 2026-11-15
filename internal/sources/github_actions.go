@@ -72,21 +72,60 @@ type githubPipelineClient struct {
 
 func (c *githubPipelineClient) cacheScope() string { return "github|" + c.g.repoAPI() }
 
+func (c *githubPipelineClient) pipelinesKey() string {
+	return "workflows|" + strings.ToLower(strings.Join(c.workflows, ","))
+}
+
+// resolvesPipelines: workflows are listed by their configured file or id.
+func (c *githubPipelineClient) resolvesPipelines() bool { return false }
+
+// pipelines reads each configured workflow, in the configured order.
+func (c *githubPipelineClient) pipelines(ctx context.Context) ([]PipelineInfo, error) {
+	if len(c.workflows) == 0 {
+		return nil, fmt.Errorf("no workflow to list — use a pipeline-run source")
+	}
+	out := make([]PipelineInfo, 0, len(c.workflows))
+	for _, wf := range c.workflows {
+		var w struct {
+			ID      int64  `json:"id"`
+			Name    string `json:"name"`
+			Path    string `json:"path"`
+			HTMLURL string `json:"html_url"`
+		}
+		if _, err := c.g.getJSON(ctx, fmt.Sprintf("%s/actions/workflows/%s", c.g.repoAPI(), url.PathEscape(wf)), &w); err != nil {
+			return nil, fmt.Errorf("reading workflow %q: %w", wf, err)
+		}
+		file := w.Path
+		if i := strings.LastIndex(file, "/"); i >= 0 {
+			file = file[i+1:]
+		}
+		out = append(out, PipelineInfo{ID: w.ID, Name: w.Name, File: file, WebURL: w.HTMLURL})
+	}
+	return out, nil
+}
+
 // list returns the newest runs across the source's workflows: each
 // workflow's newest f.Top runs, merged newest first and cut to f.Top.
 func (c *githubPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error) {
 	if len(c.workflows) == 0 {
 		return nil, fmt.Errorf("no workflow to list — use a pipeline-run source")
 	}
+	workflows := c.workflows
+	if f.only != nil {
+		workflows = make([]string, len(f.only))
+		for i, id := range f.only {
+			workflows[i] = strconv.FormatInt(id, 10)
+		}
+	}
 	var out []PipelineRunSummary
-	for _, wf := range c.workflows {
+	for _, wf := range workflows {
 		runs, err := c.listWorkflow(ctx, wf, f)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, runs...)
 	}
-	if len(c.workflows) > 1 {
+	if len(workflows) > 1 {
 		sort.SliceStable(out, func(i, j int) bool {
 			ti, tj := parseTime(out[i].Queued), parseTime(out[j].Queued)
 			if !ti.Equal(tj) {

@@ -114,9 +114,9 @@ The type picker shows the project's own work item types, loaded from Azure DevOp
 See [Pipeline Runs](#pipeline-runs). On the Azure DevOps tab a source takes `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), the pipelines, and **Runs** (`Runs`, optional, default `5`). The **Pipelines** sub-tabs choose the pipelines one of two ways:
 
 - **IDs**: `DefinitionId`, one or more `definitionId`s from the pipelines' URLs, comma-separated (`42, 57`).
-- **Folder**: `PipelineFolder`, a pipelines folder such as `\Release\Services` (`Release/Services` works too). Every pipeline in that folder and its subfolders counts; `\` is the whole project. The folder is looked up on each listing (`build/definitions`, every page), so pipelines added to it later are included.
+- **Folder**: `PipelineFolder`, a pipelines folder such as `\Release\Services` (`Release/Services` works too). Every pipeline in that folder and its subfolders counts; `\` is the whole project. The folder's pipelines are looked up when needed and kept for 5 minutes, so pipelines added to it later are included within that time. Azure DevOps filters by folder (`build/definitions?path={folder}&queryOrder=definitionNameAscending`, every page), so the project's other pipelines are never listed. If that listing holds no pipeline of a subfolder, the subfolders are read from the build folders API (a preview API) and each is listed the same way.
 
-A source sets one of the two, never both. The runs of all its pipelines are listed together, newest first, in one `build/builds?definitions=…` call per 100 pipelines (keeping the URL under IIS's default query-string limit on Azure DevOps Server); with more than 100, each call's newest runs are merged and cut to the requested number. `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
+A source sets one of the two, never both. The runs of all its pipelines are listed together, newest first, in one `build/builds?definitions=…` call per 100 pipelines (keeping the URL under IIS's default query-string limit on Azure DevOps Server); with more than 100, each call's newest runs are merged and cut to the requested number. An agent targets one of them with `search_pipeline_run`'s `pipelines` mode and `list`'s `pipeline` filter (id or exact name), which asks for that pipeline's runs only — see [`search_pipeline_run`](mcp-tools.md#search_pipeline_run). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
 
 ### Requirements and Test Cases (dual-mode)
 
@@ -149,7 +149,7 @@ What a call reads (Azure DevOps; GitHub reads the equivalents):
 
 | Mode | Requests |
 |---|---|
-| `list` | one `build/builds?definitions=…&$top=N` call per 100 of the source's pipelines (after the definitions listing of a folder source), filtered by result, status, branch, reason and requester |
+| `list` | one `build/builds?definitions=…&$top=N` call per 100 of the source's pipelines (after the folder's definitions listing, see [Azure DevOps Pipeline Runs](#azure-devops-pipeline-runs)), filtered by result, status, branch, reason and requester |
 | `get` | the run itself, its timeline plus one per earlier attempt of a rerun job, its changes and artifacts; unless the run is green with a single attempt, also its test runs, the failed results of each test run whose statistics show failures (or don't say), the passed results of each test run that may hold retried tests, and the attachments of each test run and failed or flaky test |
 | `log` | the run itself and one step log |
 

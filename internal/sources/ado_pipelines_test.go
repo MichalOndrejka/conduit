@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -52,7 +53,19 @@ type pipelineStub struct {
 	mu       sync.Mutex
 	requests []string
 	failLog  int // HTTP status to return for log requests, 0 = serve them
+	// exactPath makes definitions?path= match only that folder, not its
+	// subfolders (the API doesn't document which it does).
+	exactPath bool
 }
+
+// stubDefinitions are the project's pipelines the definitions API serves.
+var stubDefinitions = []struct {
+	id   int
+	path string
+}{{12, `\Release`}, {30, `\ReleaseNotes`}, {31, `\`}, {14, `\Release\Services\Api`}, {40, `\Other`}}
+
+// stubFolders are the project's pipeline folders.
+var stubFolders = []string{`\`, `\Other`, `\Release`, `\Release\Services`, `\Release\Services\Api`, `\ReleaseNotes`}
 
 func (p *pipelineStub) count(prefix string) int {
 	p.mu.Lock()
@@ -76,19 +89,45 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 		path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/")
 		switch {
 		case path == "build/definitions":
-			// Two pages: the continuation token leads to the second.
-			if q.Get("continuationToken") == "" {
-				w.Header().Set("x-ms-continuationtoken", "page2")
-				writeJSON(w, map[string]any{"value": []any{
-					map[string]any{"id": 12, "name": "CI", "path": `\Release`},
-					map[string]any{"id": 30, "name": "Other", "path": `\ReleaseNotes`},
-					map[string]any{"id": 31, "name": "Root", "path": `\`},
-				}})
+			// Like Azure DevOps: the path filter is a prefix match (so \Release
+			// also matches \ReleaseNotes) unless exactPath, one definition per
+			// page, and a continuation token without queryOrder is rejected.
+			folder, byIDs := q.Get("path"), q.Get("definitionIds")
+			if folder == "" && byIDs == "" {
+				t.Errorf("definitions listed without a path or definitionIds filter: %s", r.URL)
+			}
+			if q.Get("continuationToken") != "" && q.Get("queryOrder") == "" {
+				http.Error(w, "ContinuationToken timestamp query order is ambiguous", http.StatusBadRequest)
 				return
 			}
-			writeJSON(w, map[string]any{"value": []any{
-				map[string]any{"id": 14, "name": "Deploy", "path": `\Release\Services\Api`},
-			}})
+			p.mu.Lock()
+			exact := p.exactPath
+			p.mu.Unlock()
+			var match []map[string]any
+			for _, d := range stubDefinitions {
+				lp, lf := strings.ToLower(d.path), strings.ToLower(folder)
+				if byIDs != "" && slices.Contains(strings.Split(byIDs, ","), strconv.Itoa(d.id)) ||
+					folder != "" && (lp == lf || (!exact && strings.HasPrefix(lp, lf))) {
+					match = append(match, map[string]any{"id": d.id, "name": fmt.Sprintf("P%d", d.id), "path": d.path})
+				}
+			}
+			at, _ := strconv.Atoi(q.Get("continuationToken"))
+			if at+1 < len(match) {
+				w.Header().Set("x-ms-continuationtoken", strconv.Itoa(at+1))
+			}
+			writeJSON(w, map[string]any{"value": match[min(at, len(match)):min(at+1, len(match))]})
+		case strings.HasPrefix(path, "build/folders/"):
+			if !strings.Contains(q.Get("api-version"), "preview") {
+				t.Errorf("folders api-version = %q, want a preview version", q.Get("api-version"))
+			}
+			folder := strings.ToLower(strings.TrimPrefix(path, "build/folders/"))
+			var out []any
+			for _, f := range stubFolders {
+				if strings.HasPrefix(strings.ToLower(f), folder) {
+					out = append(out, map[string]any{"path": f})
+				}
+			}
+			writeJSON(w, map[string]any{"value": out})
 		case path == "build/builds":
 			writeJSON(w, map[string]any{"value": []any{build(3, "20261014.3", "failed", "refs/heads/main"),
 				build(4, "20261014.4", "succeeded", "refs/heads/main")}})
@@ -528,34 +567,44 @@ func TestAdoPipelineListSeveralDefinitions(t *testing.T) {
 }
 
 // A folder source lists the runs of every pipeline in the folder and its
-// subfolders, read from every page of definitions; a folder whose name only
-// starts the same (\ReleaseNotes) isn't included.
+// subfolders. Azure DevOps filters by folder (the project's pipelines are
+// never all listed), every page is read with a queryOrder, and a folder
+// whose name only starts the same (\ReleaseNotes) isn't included — whether
+// the server's path filter takes in subfolders or not.
 func TestAdoPipelineListFolder(t *testing.T) {
-	stub := &pipelineStub{}
-	p := adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": "Release/"})
-	runs, err := p.List(context.Background(), PipelineRunFilter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(runs) != 2 || stub.count("/proj/_apis/build/definitions") != 2 {
-		t.Fatalf("runs = %d, requests = %v", len(runs), stub.requests)
-	}
-	if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C14&") {
-		t.Errorf("list request %s should name definitions 12,14", last)
-	}
+	for _, exact := range []bool{false, true} {
+		stub := &pipelineStub{exactPath: exact}
+		p := adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": "Release/"})
+		runs, err := p.List(context.Background(), PipelineRunFilter{})
+		if err != nil {
+			t.Fatalf("exact=%v: %v", exact, err)
+		}
+		if len(runs) != 2 {
+			t.Fatalf("exact=%v: runs = %d", exact, len(runs))
+		}
+		if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C14&") {
+			t.Errorf("exact=%v: list request %s should name definitions 12,14", exact, last)
+		}
+		// A recursive filter answers in one listing (two pages here); an exact
+		// one needs the subfolders, each listed.
+		folders := stub.count("/proj/_apis/build/folders/")
+		if !exact && folders != 0 || exact && folders != 1 {
+			t.Errorf("exact=%v: folders calls = %d", exact, folders)
+		}
 
-	stub = &pipelineStub{}
-	p = adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": `\`})
-	if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil {
-		t.Fatal(err)
-	}
-	if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C14%2C30%2C31&") {
-		t.Errorf("root folder: list request %s should name every definition", last)
-	}
+		stub = &pipelineStub{exactPath: exact}
+		p = adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": `\`})
+		if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil {
+			t.Fatalf("exact=%v root: %v", exact, err)
+		}
+		if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C14%2C30%2C31%2C40&") {
+			t.Errorf("exact=%v: root folder list request %s should name every definition", exact, last)
+		}
 
-	p = adoPipeline(t, &pipelineStub{}, map[string]string{"DefinitionId": "", "PipelineFolder": `\Nope`})
-	if _, err := p.List(context.Background(), PipelineRunFilter{}); err == nil || !strings.Contains(err.Error(), `\Nope`) {
-		t.Errorf("empty folder: err = %v", err)
+		p = adoPipeline(t, &pipelineStub{exactPath: exact}, map[string]string{"DefinitionId": "", "PipelineFolder": `\Nope`})
+		if _, err := p.List(context.Background(), PipelineRunFilter{}); err == nil || !strings.Contains(err.Error(), `\Nope`) {
+			t.Errorf("exact=%v: empty folder: err = %v", exact, err)
+		}
 	}
 }
 
@@ -573,5 +622,79 @@ func TestParseDefinitionIDs(t *testing.T) {
 		if got := NormalizePipelineFolder(in); got != want {
 			t.Errorf("NormalizePipelineFolder(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// pipelines lists a folder source's pipelines (kept for a while, so a second
+// call asks Azure DevOps nothing); list's pipeline filter, by id or exact
+// name in any case, sends only that pipeline's id to the builds call.
+func TestAdoPipelinePipelinesAndFilter(t *testing.T) {
+	stub := &pipelineStub{}
+	p := adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": `\Release`})
+	infos, cached, err := p.Pipelines(context.Background())
+	if err != nil || cached {
+		t.Fatalf("pipelines: %v, cached %v", err, cached)
+	}
+	if len(infos) != 2 || infos[0].ID != 12 || infos[0].Name != "P12" || infos[0].Folder != `\Release` ||
+		infos[1].ID != 14 || infos[1].Folder != `\Release\Services\Api` || !strings.HasSuffix(infos[1].WebURL, "/_build?definitionId=14") {
+		t.Fatalf("pipelines = %+v", infos)
+	}
+	before := stub.count("/proj/_apis/build/definitions")
+	if _, cached, _ := p.Pipelines(context.Background()); !cached {
+		t.Error("second pipelines call wasn't cached")
+	}
+	for _, sel := range []string{"p14", "14"} {
+		stub.requests = nil
+		if _, err := p.List(context.Background(), PipelineRunFilter{Pipeline: sel}); err != nil {
+			t.Fatalf("pipeline %q: %v", sel, err)
+		}
+		if len(stub.requests) != 1 || !strings.Contains(stub.requests[0], "definitions=14&") {
+			t.Errorf("pipeline %q: requests = %v, want one builds call for definition 14", sel, stub.requests)
+		}
+	}
+	if stub.count("/proj/_apis/build/definitions") != 0 || before == 0 {
+		t.Error("the folder was looked up again within the cache time")
+	}
+	_, err = p.List(context.Background(), PipelineRunFilter{Pipeline: "Nope"})
+	if err == nil || !strings.Contains(err.Error(), "P12 (id 12, folder \\Release)") {
+		t.Errorf("unknown pipeline: err = %v", err)
+	}
+}
+
+// An IDs source's pipelines are read by id, in the configured order; an id
+// Azure DevOps doesn't return is kept with a note.
+func TestAdoPipelinePipelinesByID(t *testing.T) {
+	stub := &pipelineStub{}
+	p := adoPipeline(t, stub, map[string]string{"DefinitionId": "14, 99, 12"})
+	infos, _, err := p.Pipelines(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 3 || infos[0].ID != 14 || infos[0].Name != "P14" || infos[1].ID != 99 || infos[1].Note == "" || infos[2].ID != 12 {
+		t.Fatalf("pipelines = %+v", infos)
+	}
+	if !strings.Contains(stub.requests[0], "definitionIds=14%2C99%2C12") || !strings.Contains(stub.requests[0], "queryOrder=definitionNameAscending") {
+		t.Errorf("definitions request = %s", stub.requests[0])
+	}
+	// Listing all of an IDs source's runs needs no pipeline lookup.
+	stub.requests = nil
+	if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil || len(stub.requests) != 1 {
+		t.Errorf("list: %v, requests %v", err, stub.requests)
+	}
+}
+
+func TestMatchPipeline(t *testing.T) {
+	all := []PipelineInfo{{ID: 1, Name: "Deploy", Folder: `\A`}, {ID: 2, Name: "deploy", Folder: `\B`}, {ID: 3, Name: "CI", File: "ci.yml"}}
+	if m, err := matchPipeline(all, "CI.YML"); err != nil || m.ID != 3 {
+		t.Errorf("file match: %+v, %v", m, err)
+	}
+	if m, err := matchPipeline(all, "2"); err != nil || m.ID != 2 {
+		t.Errorf("id match: %+v, %v", m, err)
+	}
+	if _, err := matchPipeline(all, "Deploy"); err == nil || !strings.Contains(err.Error(), "id 1, folder \\A") || !strings.Contains(err.Error(), "id 2, folder \\B") {
+		t.Errorf("shared name: err = %v", err)
+	}
+	if _, err := matchPipeline(all, "dep"); err == nil {
+		t.Error("a partial name must not match")
 	}
 }

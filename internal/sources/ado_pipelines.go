@@ -259,14 +259,134 @@ func inFolder(path, folder string) bool {
 	return strings.EqualFold(path, folder) || strings.HasPrefix(strings.ToLower(path), strings.ToLower(folder)+`\`)
 }
 
-// folderDefinitions pages through the project's pipeline definitions and
-// returns the ids of those in c.folder or its subfolders.
-func (c *adoPipelineClient) folderDefinitions(ctx context.Context) ([]int, error) {
+func (c *adoPipelineClient) pipelinesKey() string {
+	if c.folder != "" {
+		return "folder|" + strings.ToLower(c.folder)
+	}
+	ids := make([]string, len(c.definitionIDs))
+	for i, id := range c.definitionIDs {
+		ids[i] = strconv.Itoa(id)
+	}
+	return "ids|" + strings.Join(ids, ",")
+}
+
+// resolvesPipelines: a folder's runs are listed by its pipelines' ids.
+func (c *adoPipelineClient) resolvesPipelines() bool { return c.folder != "" }
+
+// pipelines reads the source's pipelines: the folder's (subfolders
+// included), sorted by folder and name, or the configured ids in their
+// order — an id the server doesn't return is kept with a note.
+func (c *adoPipelineClient) pipelines(ctx context.Context) ([]PipelineInfo, error) {
+	info := func(d adoDefinitionRef) PipelineInfo {
+		return PipelineInfo{ID: int64(d.ID), Name: d.Name, Folder: NormalizePipelineFolder(d.Path),
+			WebURL: fmt.Sprintf("%s/_build?definitionId=%d", c.webBase(), d.ID)}
+	}
+	if c.folder != "" {
+		defs, err := c.folderDefinitions(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]PipelineInfo, 0, len(defs))
+		for _, d := range defs {
+			out = append(out, info(d))
+		}
+		sort.SliceStable(out, func(i, j int) bool {
+			if fi, fj := strings.ToLower(out[i].Folder), strings.ToLower(out[j].Folder); fi != fj {
+				return fi < fj
+			}
+			return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
+		})
+		return out, nil
+	}
+	if len(c.definitionIDs) == 0 {
+		return nil, fmt.Errorf("no pipeline definition to list — use a pipeline-run source")
+	}
+	byID := map[int]adoDefinitionRef{}
+	for start := 0; start < len(c.definitionIDs); start += adoDefinitionsPerListing {
+		batch := c.definitionIDs[start:min(start+adoDefinitionsPerListing, len(c.definitionIDs))]
+		ids := make([]string, len(batch))
+		for i, id := range batch {
+			ids[i] = strconv.Itoa(id)
+		}
+		q := url.Values{}
+		q.Set("definitionIds", strings.Join(ids, ","))
+		if err := c.pageDefinitions(ctx, q, "pipelines "+strings.Join(ids, ","), func(d adoDefinitionRef) { byID[d.ID] = d }); err != nil {
+			return nil, err
+		}
+	}
+	out := make([]PipelineInfo, 0, len(c.definitionIDs))
+	for _, id := range c.definitionIDs {
+		if d, ok := byID[id]; ok {
+			out = append(out, info(d))
+		} else {
+			out = append(out, PipelineInfo{ID: int64(id), WebURL: fmt.Sprintf("%s/_build?definitionId=%d", c.webBase(), id),
+				Note: "not returned by Azure DevOps: deleted, or not visible to this source's credentials"})
+		}
+	}
+	return out, nil
+}
+
+// folderDefinitions returns the pipelines in c.folder and its subfolders.
+// Azure DevOps filters by folder itself (definitions?path=), so the
+// project's other pipelines are never listed. Whether that filter takes in
+// subfolders isn't documented: when the folder's listing holds a pipeline of
+// a subfolder it did; otherwise the folder's subfolders are read from the
+// folders API and each is listed the same way.
+func (c *adoPipelineClient) folderDefinitions(ctx context.Context) ([]adoDefinitionRef, error) {
+	found := map[int]adoDefinitionRef{}
+	recursive, err := c.definitionsInPath(ctx, c.folder, found)
+	if err != nil {
+		return nil, err
+	}
+	if !recursive {
+		subs, err := c.subfolders(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, sub := range subs {
+			if _, err := c.definitionsInPath(ctx, sub, found); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("no pipeline is in folder %s (or its subfolders)", c.folder)
+	}
+	out := make([]adoDefinitionRef, 0, len(found))
+	for _, d := range found {
+		out = append(out, d)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// definitionsInPath lists definitions?path=folder, adding to found those
+// in c.folder or below it (the server's path filter is checked, not
+// trusted). It reports whether any lay in a subfolder of folder.
+func (c *adoPipelineClient) definitionsInPath(ctx context.Context, folder string, found map[int]adoDefinitionRef) (bool, error) {
+	below := false
 	q := url.Values{}
-	q.Set("api-version", c.version)
+	q.Set("path", folder)
+	err := c.pageDefinitions(ctx, q, "pipelines in folder "+folder, func(d adoDefinitionRef) {
+		if !inFolder(d.Path, c.folder) {
+			return
+		}
+		found[d.ID] = d
+		if !strings.EqualFold(NormalizePipelineFolder(d.Path), folder) && inFolder(d.Path, folder) {
+			below = true
+		}
+	})
+	return below, err
+}
+
+// pageDefinitions pages through a filtered definitions listing. queryOrder
+// is set because the continuation token of an unordered listing is a
+// timestamp the server rejects as ambiguous on the next page.
+func (c *adoPipelineClient) pageDefinitions(ctx context.Context, q url.Values, what string, each func(adoDefinitionRef)) error {
+	q.Set("queryOrder", "definitionNameAscending")
 	q.Set("$top", "1000")
+	q.Set("api-version", c.version)
 	base := c.apiBase() + "/build/definitions?" + q.Encode()
-	var ids []int
 	token := ""
 	seen := map[string]bool{}
 	for {
@@ -276,33 +396,51 @@ func (c *adoPipelineClient) folderDefinitions(ctx context.Context) ([]int, error
 		}
 		data, header, err := c.api.getRawWithHeader(ctx, c.client, u)
 		if err != nil {
-			return nil, fmt.Errorf("listing pipelines in folder %s: %w", c.folder, err)
+			return fmt.Errorf("listing %s: %w", what, err)
 		}
 		var page struct {
 			Value []adoDefinitionRef `json:"value"`
 		}
 		if err := json.Unmarshal(data, &page); err != nil {
-			return nil, fmt.Errorf("definitions response is not valid JSON: %w", err)
+			return fmt.Errorf("definitions response is not valid JSON: %w", err)
 		}
 		for _, d := range page.Value {
-			if inFolder(d.Path, c.folder) {
-				ids = append(ids, d.ID)
-			}
+			each(d)
 		}
 		token = header.Get("x-ms-continuationtoken")
 		if token == "" {
-			break
+			return nil
 		}
 		if seen[token] {
-			return nil, fmt.Errorf("definitions endpoint returned continuation token %q twice", token)
+			return fmt.Errorf("definitions endpoint returned continuation token %q twice", token)
 		}
 		seen[token] = true
 	}
-	if len(ids) == 0 {
-		return nil, fmt.Errorf("no pipeline is in folder %s (or its subfolders)", c.folder)
+}
+
+// subfolders lists the folders below c.folder (any depth) from the build
+// folders API, a preview API on every version.
+func (c *adoPipelineClient) subfolders(ctx context.Context) ([]string, error) {
+	q := url.Values{}
+	q.Set("queryOrder", "folderAscending")
+	q.Set("api-version", previewVersion(c.version))
+	var page struct {
+		Value []struct {
+			Path string `json:"path"`
+		} `json:"value"`
 	}
-	sort.Ints(ids)
-	return ids, nil
+	u := c.apiBase() + "/build/folders/" + url.PathEscape(c.folder) + "?" + q.Encode()
+	if err := c.getJSON(ctx, u, &page); err != nil {
+		return nil, fmt.Errorf("listing subfolders of %s: %w", c.folder, err)
+	}
+	var out []string
+	for _, f := range page.Value {
+		p := NormalizePipelineFolder(f.Path)
+		if !strings.EqualFold(p, c.folder) && inFolder(p, c.folder) {
+			out = append(out, p)
+		}
+	}
+	return out, nil
 }
 
 func (c *adoPipelineClient) apiBase() string {
@@ -335,16 +473,17 @@ func (c *adoPipelineClient) getJSON(ctx context.Context, u string, v any) error 
 // Azure DevOps Server.
 const adoDefinitionsPerListing = 100
 
-// list returns the newest runs of the source's pipelines. The builds API
+// list returns the newest runs of the source's pipelines, or of f.only when
+// set (a folder's pipelines, or the one f.Pipeline names). The builds API
 // merges the runs of the definitions one call names; more definitions than
 // one call takes are listed in batches, each batch's newest f.Top runs then
 // merged newest first and cut to f.Top.
 func (c *adoPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error) {
 	ids := c.definitionIDs
-	if c.folder != "" {
-		var err error
-		if ids, err = c.folderDefinitions(ctx); err != nil {
-			return nil, err
+	if f.only != nil {
+		ids = make([]int, len(f.only))
+		for i, id := range f.only {
+			ids[i] = int(id)
 		}
 	}
 	if len(ids) == 0 {
