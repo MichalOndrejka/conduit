@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +75,20 @@ func (p *pipelineStub) handler(t *testing.T) http.HandlerFunc {
 		q := r.URL.Query()
 		path := strings.TrimPrefix(r.URL.Path, "/proj/_apis/")
 		switch {
+		case path == "build/definitions":
+			// Two pages: the continuation token leads to the second.
+			if q.Get("continuationToken") == "" {
+				w.Header().Set("x-ms-continuationtoken", "page2")
+				writeJSON(w, map[string]any{"value": []any{
+					map[string]any{"id": 12, "name": "CI", "path": `\Release`},
+					map[string]any{"id": 30, "name": "Other", "path": `\ReleaseNotes`},
+					map[string]any{"id": 31, "name": "Root", "path": `\`},
+				}})
+				return
+			}
+			writeJSON(w, map[string]any{"value": []any{
+				map[string]any{"id": 14, "name": "Deploy", "path": `\Release\Services\Api`},
+			}})
 		case path == "build/builds":
 			writeJSON(w, map[string]any{"value": []any{build(3, "20261014.3", "failed", "refs/heads/main"),
 				build(4, "20261014.4", "succeeded", "refs/heads/main")}})
@@ -473,3 +488,90 @@ func TestLRUCacheEvictsLeastRecentlyUsed(t *testing.T) {
 
 // bom is the UTF-8 byte order mark ADO puts before a log's first line.
 const bom = string(rune(0xFEFF))
+
+// More definitions than one builds call takes are listed in batches, and
+// the batches' runs merged newest first and cut to the requested number.
+func TestAdoPipelineListBatchesDefinitions(t *testing.T) {
+	stub := &pipelineStub{}
+	ids := make([]string, adoDefinitionsPerListing+50)
+	for i := range ids {
+		ids[i] = strconv.Itoa(i + 1)
+	}
+	p := adoPipeline(t, stub, map[string]string{"DefinitionId": strings.Join(ids, ",")})
+	runs, err := p.List(context.Background(), PipelineRunFilter{Top: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := stub.count("/proj/_apis/build/builds?"); n != 2 {
+		t.Fatalf("builds calls = %d, want 2: %v", n, stub.requests)
+	}
+	if !strings.Contains(stub.requests[1], fmt.Sprintf("definitions=%d%%2C", adoDefinitionsPerListing+1)) ||
+		strings.Contains(stub.requests[1], "definitions=1%2C") {
+		t.Errorf("second batch = %s", stub.requests[1])
+	}
+	// The stub answers builds 3 and 4 to each call: merged by queue time (equal
+	// here, so newest id first) and cut to 3.
+	if len(runs) != 3 || runs[0].ID != 4 || runs[2].ID != 3 {
+		t.Errorf("runs = %+v", runs)
+	}
+}
+
+func TestAdoPipelineListSeveralDefinitions(t *testing.T) {
+	stub := &pipelineStub{}
+	p := adoPipeline(t, stub, map[string]string{"DefinitionId": " 12, 14 ,,12"})
+	if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stub.requests[0], "definitions=12%2C14&") {
+		t.Errorf("list request %s doesn't name definitions 12,14", stub.requests[0])
+	}
+}
+
+// A folder source lists the runs of every pipeline in the folder and its
+// subfolders, read from every page of definitions; a folder whose name only
+// starts the same (\ReleaseNotes) isn't included.
+func TestAdoPipelineListFolder(t *testing.T) {
+	stub := &pipelineStub{}
+	p := adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": "Release/"})
+	runs, err := p.List(context.Background(), PipelineRunFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 2 || stub.count("/proj/_apis/build/definitions") != 2 {
+		t.Fatalf("runs = %d, requests = %v", len(runs), stub.requests)
+	}
+	if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C14&") {
+		t.Errorf("list request %s should name definitions 12,14", last)
+	}
+
+	stub = &pipelineStub{}
+	p = adoPipeline(t, stub, map[string]string{"DefinitionId": "", "PipelineFolder": `\`})
+	if _, err := p.List(context.Background(), PipelineRunFilter{}); err != nil {
+		t.Fatal(err)
+	}
+	if last := stub.requests[len(stub.requests)-1]; !strings.Contains(last, "definitions=12%2C14%2C30%2C31&") {
+		t.Errorf("root folder: list request %s should name every definition", last)
+	}
+
+	p = adoPipeline(t, &pipelineStub{}, map[string]string{"DefinitionId": "", "PipelineFolder": `\Nope`})
+	if _, err := p.List(context.Background(), PipelineRunFilter{}); err == nil || !strings.Contains(err.Error(), `\Nope`) {
+		t.Errorf("empty folder: err = %v", err)
+	}
+}
+
+func TestParseDefinitionIDs(t *testing.T) {
+	ids, err := ParseDefinitionIDs("42, 7,42")
+	if err != nil || len(ids) != 2 || ids[0] != 42 || ids[1] != 7 {
+		t.Errorf("ids = %v, err = %v", ids, err)
+	}
+	for _, bad := range []string{"", " , ", "4x", "0", "-3", "1, 2.5"} {
+		if _, err := ParseDefinitionIDs(bad); err == nil {
+			t.Errorf("%q: want an error", bad)
+		}
+	}
+	for in, want := range map[string]string{"Release/Services": `\Release\Services`, `\Release\`: `\Release`, "": `\`, `\`: `\`} {
+		if got := NormalizePipelineFolder(in); got != want {
+			t.Errorf("NormalizePipelineFolder(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

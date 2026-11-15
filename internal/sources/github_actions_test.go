@@ -49,6 +49,32 @@ func TestGitHubPipelineList(t *testing.T) {
 	}
 }
 
+// Several workflows: each is listed, and the runs are merged newest first
+// and cut to the requested number.
+func TestGitHubPipelineListSeveralWorkflows(t *testing.T) {
+	f := newFakeGitHub(t)
+	run := func(id int, created string) map[string]any {
+		return map[string]any{"id": id, "name": "W", "run_number": id, "status": "completed", "conclusion": "success", "created_at": created}
+	}
+	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows/ci.yml/runs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []any{run(3, "2026-10-03T00:00:00Z"), run(1, "2026-10-01T00:00:00Z")}})
+	})
+	f.HandleFunc("/api/v3/repos/acme/app/actions/workflows/release.yml/runs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"workflow_runs": []any{run(4, "2026-10-04T00:00:00Z"), run(2, "2026-10-02T00:00:00Z")}})
+	})
+	runs, err := f.pipeline(t, map[string]string{"Workflow": "ci.yml, release.yml"}).List(context.Background(), PipelineRunFilter{Top: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, r := range runs {
+		ids = append(ids, r.ID)
+	}
+	if fmt.Sprint(ids) != "[4 3 2]" {
+		t.Errorf("ids = %v, want [4 3 2]", ids)
+	}
+}
+
 // A run re-run to green still lists attempt 1's failed job with its
 // annotations; its log is read on request; changes come from comparing with
 // the previous run on the branch.

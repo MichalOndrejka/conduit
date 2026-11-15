@@ -66,7 +66,7 @@ var APIConfigKeys = []string{
 	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
 	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
-	"FetchMode", "DefinitionId", "Runs",
+	"FetchMode", "DefinitionId", "PipelineFolder", "Runs",
 }
 
 // PresetConfigKeys are UI-only fields the friendly platform forms (e.g. Azure
@@ -119,8 +119,17 @@ func Validate(srcType string, cfg map[string]string) string {
 			if cfg["Platform"] != "ado" {
 				return "Pipeline Runs sources require the Azure DevOps provider."
 			}
-			if n, err := strconv.Atoi(strings.TrimSpace(cfg["DefinitionId"])); err != nil || n <= 0 {
-				return "Pipeline definition ID must be a positive number."
+			ids, folder := strings.TrimSpace(cfg["DefinitionId"]), strings.TrimSpace(cfg["PipelineFolder"])
+			switch {
+			case ids != "" && folder != "":
+				return "Give either pipeline definition IDs (DefinitionId) or a pipeline folder (PipelineFolder), not both."
+			case folder != "":
+			case ids == "":
+				return "Pipeline definition IDs (DefinitionId) or a pipeline folder (PipelineFolder) is required."
+			default:
+				if _, err := sources.ParseDefinitionIDs(ids); err != nil {
+					return "Pipeline definition IDs must be positive numbers, separated by commas."
+				}
 			}
 			if msg := validateRuns(cfg); msg != "" {
 				return msg
@@ -186,8 +195,8 @@ func validateGitHub(srcType string, cfg map[string]string) string {
 		}
 	}
 	if srcType == models.SourcePipelineRun {
-		if strings.TrimSpace(cfg["Workflow"]) == "" {
-			return "Workflow is required: its file name (e.g. ci.yml) or numeric ID."
+		if len(sources.SplitPipelineList(cfg["Workflow"])) == 0 {
+			return "Workflow is required: one or more file names (e.g. ci.yml) or numeric IDs, separated by commas."
 		}
 		return validateRuns(cfg)
 	}

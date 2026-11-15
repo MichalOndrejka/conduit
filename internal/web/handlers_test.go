@@ -990,3 +990,24 @@ func TestLiveSourcesHaveNoSyncControls(t *testing.T) {
 		t.Error("live source form still offers sync/preview or lacks Runs")
 	}
 }
+
+// The Azure DevOps Pipeline Runs form chooses pipelines by IDs or by folder
+// (sub-tabs), opening on the one the source uses; saving the folder tab
+// stores PipelineFolder alone.
+func TestPipelineRunFormIDsOrFolder(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "ci", Name: "CI builds", Type: models.SourcePipelineRun,
+		Config: map[string]string{"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example/org", "AdoProject": "proj", "DefinitionId": "12, 14"}})
+	form := bodyString(t, h.get("/sources/ci/edit"))
+	if !strings.Contains(form, `name="DefinitionId"`) || !strings.Contains(form, `value="12, 14"`) ||
+		!strings.Contains(form, `name="PipelineFolder"`) || !strings.Contains(form, `value="ids" class="pipeline-scope sr-only" checked`) {
+		t.Error("IDs source form lacks the IDs/Folder sub-tabs or doesn't open on IDs")
+	}
+
+	mustSave(t, h, models.SourceDefinition{ID: "rel", Name: "Release", Type: models.SourcePipelineRun,
+		Config: map[string]string{"Provider": "api", "Platform": "ado", "AdoOrg": "https://ado.example/org", "AdoProject": "proj", "PipelineFolder": `\Release`}})
+	form = bodyString(t, h.get("/sources/rel/edit"))
+	if !strings.Contains(form, `value="folder" class="pipeline-scope sr-only" checked`) || !strings.Contains(form, `value="\Release"`) {
+		t.Error("folder source form doesn't open on the Folder sub-tab")
+	}
+}

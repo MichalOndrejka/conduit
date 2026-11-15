@@ -61,7 +61,8 @@ func manageRequestSchema() map[string]any {
 				"Azure DevOps keys: " + strings.Join(sourcemgmt.APIConfigKeys, ", ") +
 				" (plus UI preset keys " + strings.Join(sourcemgmt.PresetConfigKeys, ", ") + "). " +
 				"GitHub keys: " + strings.Join(sourcemgmt.GitHubConfigKeys, ", ") +
-				" (GitHubUrl https://github.com or a GitHub Enterprise Server URL; Workflow is a pipeline-run's workflow file name or ID). " +
+				" (GitHubUrl https://github.com or a GitHub Enterprise Server URL; Workflow is a pipeline-run's comma-separated workflow file names or IDs). " +
+				"Azure DevOps pipeline-run sources take DefinitionId (comma-separated definition ids) or PipelineFolder (e.g. Release/Services, subfolders included), not both. " +
 				"Token, Password and ApiKeyValue take the NAME of a stored credential from list mode, never a secret value.",
 		}
 	}

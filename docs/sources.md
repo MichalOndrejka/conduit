@@ -56,7 +56,7 @@ Fetches from github.com or a GitHub Enterprise Server through the GitHub REST AP
 | Fetch as | `FetchMode` | Requirements / Test Cases: `files` (default) or `workitems` (issues). |
 | Issue types | `WorkItemTypes` | Issues. Comma-separated organization issue types (Bug, Feature, …), picked from tiles loaded from `GET /orgs/{owner}/issue-types`; an issue of any of them is fetched. Empty = every issue, typed or not. Combines with Labels: an issue needs one of the labels and one of the types. Personal accounts and GitHub Enterprise Server versions without issue types have none to pick. |
 | Labels | `Labels` | Issues. Comma-separated; an issue with any of them is fetched. Empty = every issue. |
-| Workflow | `Workflow` | Pipeline Runs. Workflow file name (`ci.yml`) or numeric ID. |
+| Workflows | `Workflow` | Pipeline Runs. One or more workflow file names (`ci.yml`) or numeric IDs, comma-separated (`ci.yml, release.yml`). A listing reads each workflow's latest runs and merges them, newest first. |
 | Runs | `Runs` | Pipeline Runs. How many of the latest runs `search_pipeline_run` lists when the agent doesn't ask for a number (default `5`, at most `100`). |
 | Verify SSL | `VerifySSL` | `false` skips TLS verification (self-hosted servers with private CAs). |
 
@@ -65,7 +65,7 @@ What each source type fetches:
 - **Source Code / Test Code / Documentation** (and Requirements / Test Cases in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. The branch is downloaded as a single tarball (`/repos/{owner}/{repo}/tarball/{branch}`) and read as it streams in, so a sync costs one API request, plus one to look up the default branch when `Branch` is empty, whatever the repository size. A download cut off part-way is restarted.
 - **Commit History**: one document per commit with its full message and the patch of every changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case.
 - **Work Items** (and Requirements / Test Cases in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out; `search_pull_request` reads them live. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
-- **Pipeline Runs**: not synced. The source names the workflow (`Workflow`) and `search_pipeline_run` reads its runs live — see [Pipeline Runs](#pipeline-runs). A run's details list each failed job of every attempt (so a run re-run to green still shows attempt 1's failures) with its failed steps, the failed jobs' annotations, the commits since the previous run of the workflow on the branch (compare API) and the artifacts it uploaded (metadata only). A job's log is read on request; logs GitHub has already deleted are noted. GitHub has no test results API, so there are no tests.
+- **Pipeline Runs**: not synced. The source names one or more workflows (`Workflow`) and `search_pipeline_run` reads their runs live — see [Pipeline Runs](#pipeline-runs). A run's details list each failed job of every attempt (so a run re-run to green still shows attempt 1's failures) with its failed steps, the failed jobs' annotations, the commits since the previous run of the workflow on the branch (compare API) and the artifacts it uploaded (metadata only). A job's log is read on request; logs GitHub has already deleted are noted. GitHub has no test results API, so there are no tests.
 
 - **Pull Requests**: not synced; see [Pull Requests](#pull-requests).
 
@@ -111,7 +111,12 @@ The type picker shows the project's own work item types, loaded from Azure DevOp
 
 ### Azure DevOps Pipeline Runs
 
-See [Pipeline Runs](#pipeline-runs). On the Azure DevOps tab a source takes `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), **Pipeline definition ID** (`DefinitionId`, the `definitionId` in the pipeline's URL, required) and **Runs** (`Runs`, optional, default `5`). `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
+See [Pipeline Runs](#pipeline-runs). On the Azure DevOps tab a source takes `AdoOrg`, `AdoProject`, `AdoApiVersion` (default `7.1`), the pipelines, and **Runs** (`Runs`, optional, default `5`). The **Pipelines** sub-tabs choose the pipelines one of two ways:
+
+- **IDs**: `DefinitionId`, one or more `definitionId`s from the pipelines' URLs, comma-separated (`42, 57`).
+- **Folder**: `PipelineFolder`, a pipelines folder such as `\Release\Services` (`Release/Services` works too). Every pipeline in that folder and its subfolders counts; `\` is the whole project. The folder is looked up on each listing (`build/definitions`, every page), so pipelines added to it later are included.
+
+A source sets one of the two, never both. The runs of all its pipelines are listed together, newest first, in one `build/builds?definitions=…` call per 100 pipelines (keeping the URL under IIS's default query-string limit on Azure DevOps Server); with more than 100, each call's newest runs are merged and cut to the requested number. `Url` is stored as `{org}/{project}` only so the form re-opens pre-filled.
 
 ### Requirements and Test Cases (dual-mode)
 
@@ -138,13 +143,13 @@ Set `AuthType` to `apikey`, `ApiKeyHeader` to the header name your API expects (
 
 ## Pipeline Runs
 
-Pipeline Runs sources (`pipeline-run`) are **never synced**. One source names one pipeline — an Azure DevOps build definition (YAML or classic) or a GitHub Actions workflow — and the credentials to read it. [`search_pipeline_run`](mcp-tools.md#search_pipeline_run) asks the provider on every call, so its answers are always current, and nothing about runs is stored in Qdrant. The Sources page marks such a source **Live**; it has no Sync button, and `source_sync trigger` answers `live_not_synced` for it.
+Pipeline Runs sources (`pipeline-run`) are **never synced**. One source names one or more pipelines — Azure DevOps build definitions (YAML or classic) by ID or by folder, or GitHub Actions workflows — and the credentials to read them. [`search_pipeline_run`](mcp-tools.md#search_pipeline_run) asks the provider on every call, so its answers are always current, and nothing about runs is stored in Qdrant. The Sources page marks such a source **Live**; it has no Sync button, and `source_sync trigger` answers `live_not_synced` for it.
 
 What a call reads (Azure DevOps; GitHub reads the equivalents):
 
 | Mode | Requests |
 |---|---|
-| `list` | one `build/builds?definitions=…&$top=N` call, filtered by result, status, branch, reason and requester |
+| `list` | one `build/builds?definitions=…&$top=N` call per 100 of the source's pipelines (after the definitions listing of a folder source), filtered by result, status, branch, reason and requester |
 | `get` | the run itself, its timeline plus one per earlier attempt of a rerun job, its changes and artifacts; unless the run is green with a single attempt, also its test runs, the failed results of each test run whose statistics show failures (or don't say), the passed results of each test run that may hold retried tests, and the attachments of each test run and failed or flaky test |
 | `log` | the run itself and one step log |
 

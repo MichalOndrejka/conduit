@@ -65,7 +65,7 @@ func RegisterPipelineTool(s *server.MCPServer, srcs SourceLister, store secrets.
 	tool := mcp.NewTool("search_pipeline_run",
 		mcp.WithDescription(`Read pipeline runs (Azure DevOps builds, GitHub Actions workflow runs) live from the `+
 			`provider. Read-only; nothing is indexed, so every answer is current. `+
-			`{"mode":"list"} returns the latest runs of a configured pipeline, newest first (5 by default), with result, `+
+			`{"mode":"list"} returns the latest runs of a source's pipelines (one or several; each run names its pipeline), newest first (5 by default), with result, `+
 			`status, reason, branch, commit, requester, timing and web_url — filter by result, status, branch, reason `+
 			`or requested_for (e.g. last failed build on main: {"mode":"list","result":"failed","branch":"main","top":1}). `+
 			`{"mode":"get","run_id":...} (or "url": a run link with buildId=… or …/actions/runs/…) explains one run: `+

@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -62,19 +63,48 @@ type githubAnnotation struct {
 	Message         string `json:"message"`
 }
 
-// githubPipelineClient reads one repository's workflow runs; workflow ("" when
-// resolved from a run URL) scopes listings.
+// githubPipelineClient reads one repository's workflow runs; workflows
+// (none when resolved from a run URL) scope listings.
 type githubPipelineClient struct {
-	g        *GitHubSource
-	workflow string
+	g         *GitHubSource
+	workflows []string
 }
 
 func (c *githubPipelineClient) cacheScope() string { return "github|" + c.g.repoAPI() }
 
+// list returns the newest runs across the source's workflows: each
+// workflow's newest f.Top runs, merged newest first and cut to f.Top.
 func (c *githubPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error) {
-	if c.workflow == "" {
+	if len(c.workflows) == 0 {
 		return nil, fmt.Errorf("no workflow to list — use a pipeline-run source")
 	}
+	var out []PipelineRunSummary
+	for _, wf := range c.workflows {
+		runs, err := c.listWorkflow(ctx, wf, f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, runs...)
+	}
+	if len(c.workflows) > 1 {
+		sort.SliceStable(out, func(i, j int) bool {
+			ti, tj := parseTime(out[i].Queued), parseTime(out[j].Queued)
+			if !ti.Equal(tj) {
+				return ti.After(tj)
+			}
+			return out[i].ID > out[j].ID
+		})
+		if len(out) > f.Top {
+			out = out[:f.Top]
+		}
+	}
+	if out == nil {
+		out = []PipelineRunSummary{}
+	}
+	return out, nil
+}
+
+func (c *githubPipelineClient) listWorkflow(ctx context.Context, workflow string, f PipelineRunFilter) ([]PipelineRunSummary, error) {
 	q := url.Values{}
 	q.Set("per_page", strconv.Itoa(f.Top))
 	if f.Branch != "" {
@@ -95,9 +125,9 @@ func (c *githubPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([
 	var page struct {
 		WorkflowRuns []githubRun `json:"workflow_runs"`
 	}
-	listURL := fmt.Sprintf("%s/actions/workflows/%s/runs?%s", c.g.repoAPI(), url.PathEscape(c.workflow), q.Encode())
+	listURL := fmt.Sprintf("%s/actions/workflows/%s/runs?%s", c.g.repoAPI(), url.PathEscape(workflow), q.Encode())
 	if _, err := c.g.getJSON(ctx, listURL, &page); err != nil {
-		return nil, fmt.Errorf("listing runs of workflow %q: %w", c.workflow, err)
+		return nil, fmt.Errorf("listing runs of workflow %q: %w", workflow, err)
 	}
 	out := make([]PipelineRunSummary, 0, len(page.WorkflowRuns))
 	for i := range page.WorkflowRuns {

@@ -105,6 +105,20 @@ func TestValidatePipelineRun(t *testing.T) {
 	if msg := Validate(models.SourcePipelineRun, cfg); msg != "" {
 		t.Errorf("Runs=20 rejected: %q", msg)
 	}
+	cfg = valid()
+	cfg["DefinitionId"] = "12, 14"
+	if msg := Validate(models.SourcePipelineRun, cfg); msg != "" {
+		t.Errorf("several definition ids rejected: %q", msg)
+	}
+	cfg = valid()
+	cfg["DefinitionId"], cfg["PipelineFolder"] = "", `\Release`
+	if msg := Validate(models.SourcePipelineRun, cfg); msg != "" {
+		t.Errorf("pipeline folder rejected: %q", msg)
+	}
+	cfg["DefinitionId"] = "12"
+	if msg := Validate(models.SourcePipelineRun, cfg); msg == "" {
+		t.Error("both DefinitionId and PipelineFolder: expected a validation error")
+	}
 	for key, bad := range map[string]string{"DefinitionId": "abc", "Runs": "0", "Platform": ""} {
 		cfg := valid()
 		cfg[key] = bad
@@ -120,6 +134,14 @@ func TestValidatePipelineRun(t *testing.T) {
 	gh := map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "app", "Workflow": "ci.yml"}
 	if msg := Validate(models.SourcePipelineRun, gh); msg != "" {
 		t.Errorf("valid GitHub pipeline-run config rejected: %q", msg)
+	}
+	gh["Workflow"] = "ci.yml, release.yml"
+	if msg := Validate(models.SourcePipelineRun, gh); msg != "" {
+		t.Errorf("several workflows rejected: %q", msg)
+	}
+	gh["Workflow"] = " , "
+	if msg := Validate(models.SourcePipelineRun, gh); msg == "" {
+		t.Error("blank workflow list: expected a validation error")
 	}
 	delete(gh, "Workflow")
 	if msg := Validate(models.SourcePipelineRun, gh); msg == "" {

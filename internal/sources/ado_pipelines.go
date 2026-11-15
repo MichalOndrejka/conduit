@@ -219,24 +219,90 @@ func testNameOf(r adoTestResult) string {
 	return r.TestCaseTitle
 }
 
-// adoPipelineClient reads one Azure DevOps project's runs; definitionID
-// (0 when resolved from a run URL) scopes listings.
+// adoPipelineClient reads one Azure DevOps project's runs. Listings are
+// scoped to definitionIDs, or to every pipeline under folder (subfolders
+// included, resolved on each listing so pipelines added later count); a
+// client resolved from a run URL has neither and can't list.
 type adoPipelineClient struct {
-	api          *APISource // auth, headers and TLS settings of the matched source
-	client       *http.Client
-	org          string
-	project      string
-	version      string
-	definitionID int
+	api           *APISource // auth, headers and TLS settings of the matched source
+	client        *http.Client
+	org           string
+	project       string
+	version       string
+	definitionIDs []int
+	folder        string
 }
 
-func newAdoPipelineClient(src *models.SourceDefinition, store secrets.Reader, org, project string, definitionID int) *adoPipelineClient {
+func newAdoPipelineClient(src *models.SourceDefinition, store secrets.Reader, org, project string) *adoPipelineClient {
 	api := &APISource{src: src, secrets: store}
 	return &adoPipelineClient{
 		api: api, client: api.httpClient(),
 		org: strings.TrimRight(org, "/"), project: project,
-		version: adoAPIVersion(src), definitionID: definitionID,
+		version: adoAPIVersion(src),
 	}
+}
+
+// adoDefinitionRef is one pipeline definition as the definitions listing
+// returns it.
+type adoDefinitionRef struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Path string `json:"path"`
+}
+
+// inFolder reports whether a definition path lies in folder or below it.
+func inFolder(path, folder string) bool {
+	path = NormalizePipelineFolder(path)
+	if folder == `\` {
+		return true
+	}
+	return strings.EqualFold(path, folder) || strings.HasPrefix(strings.ToLower(path), strings.ToLower(folder)+`\`)
+}
+
+// folderDefinitions pages through the project's pipeline definitions and
+// returns the ids of those in c.folder or its subfolders.
+func (c *adoPipelineClient) folderDefinitions(ctx context.Context) ([]int, error) {
+	q := url.Values{}
+	q.Set("api-version", c.version)
+	q.Set("$top", "1000")
+	base := c.apiBase() + "/build/definitions?" + q.Encode()
+	var ids []int
+	token := ""
+	seen := map[string]bool{}
+	for {
+		u := base
+		if token != "" {
+			u += "&continuationToken=" + url.QueryEscape(token)
+		}
+		data, header, err := c.api.getRawWithHeader(ctx, c.client, u)
+		if err != nil {
+			return nil, fmt.Errorf("listing pipelines in folder %s: %w", c.folder, err)
+		}
+		var page struct {
+			Value []adoDefinitionRef `json:"value"`
+		}
+		if err := json.Unmarshal(data, &page); err != nil {
+			return nil, fmt.Errorf("definitions response is not valid JSON: %w", err)
+		}
+		for _, d := range page.Value {
+			if inFolder(d.Path, c.folder) {
+				ids = append(ids, d.ID)
+			}
+		}
+		token = header.Get("x-ms-continuationtoken")
+		if token == "" {
+			break
+		}
+		if seen[token] {
+			return nil, fmt.Errorf("definitions endpoint returned continuation token %q twice", token)
+		}
+		seen[token] = true
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("no pipeline is in folder %s (or its subfolders)", c.folder)
+	}
+	sort.Ints(ids)
+	return ids, nil
 }
 
 func (c *adoPipelineClient) apiBase() string {
@@ -264,12 +330,57 @@ func (c *adoPipelineClient) getJSON(ctx context.Context, u string, v any) error 
 	return nil
 }
 
+// adoDefinitionsPerListing caps the definition ids one builds call names,
+// keeping its query string well under IIS's default 2048-byte limit on
+// Azure DevOps Server.
+const adoDefinitionsPerListing = 100
+
+// list returns the newest runs of the source's pipelines. The builds API
+// merges the runs of the definitions one call names; more definitions than
+// one call takes are listed in batches, each batch's newest f.Top runs then
+// merged newest first and cut to f.Top.
 func (c *adoPipelineClient) list(ctx context.Context, f PipelineRunFilter) ([]PipelineRunSummary, error) {
-	if c.definitionID <= 0 {
+	ids := c.definitionIDs
+	if c.folder != "" {
+		var err error
+		if ids, err = c.folderDefinitions(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if len(ids) == 0 {
 		return nil, fmt.Errorf("no pipeline definition to list — use a pipeline-run source")
 	}
+	out := []PipelineRunSummary{}
+	for start := 0; start < len(ids); start += adoDefinitionsPerListing {
+		runs, err := c.listDefinitions(ctx, ids[start:min(start+adoDefinitionsPerListing, len(ids))], f)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, runs...)
+	}
+	if len(ids) > adoDefinitionsPerListing {
+		sort.SliceStable(out, func(i, j int) bool {
+			ti, tj := parseTime(out[i].Queued), parseTime(out[j].Queued)
+			if !ti.Equal(tj) {
+				return ti.After(tj)
+			}
+			return out[i].ID > out[j].ID
+		})
+		if len(out) > f.Top {
+			out = out[:f.Top]
+		}
+	}
+	return out, nil
+}
+
+// listDefinitions is one builds call: the newest f.Top runs across ids.
+func (c *adoPipelineClient) listDefinitions(ctx context.Context, ids []int, f PipelineRunFilter) ([]PipelineRunSummary, error) {
+	defs := make([]string, len(ids))
+	for i, id := range ids {
+		defs[i] = strconv.Itoa(id)
+	}
 	q := url.Values{}
-	q.Set("definitions", strconv.Itoa(c.definitionID))
+	q.Set("definitions", strings.Join(defs, ","))
 	q.Set("queryOrder", "queueTimeDescending")
 	q.Set("$top", strconv.Itoa(f.Top))
 	q.Set("api-version", c.version)

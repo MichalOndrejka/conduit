@@ -1,7 +1,7 @@
 // Pipeline runs, read live from Azure DevOps or GitHub Actions for the
 // search_pipeline_run tool. Pipeline-run sources are not synced: a source
-// only names the pipeline (definition or workflow) and the credentials, and
-// every tool call asks the provider.
+// only names the pipelines (Azure DevOps definitions by id or by folder, or
+// GitHub workflows) and the credentials, and every tool call asks the provider.
 //
 // A finished run hardly changes, so the details and logs of completed runs
 // are kept in an in-process cache (see pipeline_cache.go), keyed by the
@@ -184,8 +184,8 @@ type pipelineBackend interface {
 	log(ctx context.Context, s *PipelineRunSummary, logID int64) (string, error)
 }
 
-// PipelineProvider reads one pipeline's runs (or, resolved from a run URL,
-// any run of the project or repository).
+// PipelineProvider reads the runs of a source's pipelines (or, resolved from
+// a run URL, any run of the project or repository).
 type PipelineProvider struct {
 	b          pipelineBackend
 	defaultTop int
@@ -244,7 +244,7 @@ func (p *PipelineProvider) Log(ctx context.Context, runID, logID int64) (text st
 	return text, false, nil
 }
 
-// PipelineProviderFor reads the runs of the pipeline a pipeline-run source
+// PipelineProviderFor reads the runs of the pipelines a pipeline-run source
 // names.
 func PipelineProviderFor(src *models.SourceDefinition, store secrets.Reader) (*PipelineProvider, error) {
 	if src.Type != models.SourcePipelineRun {
@@ -260,24 +260,72 @@ func PipelineProviderFor(src *models.SourceDefinition, store secrets.Reader) (*P
 		if err != nil {
 			return nil, err
 		}
-		workflow := strings.TrimSpace(src.GetConfig("Workflow"))
-		if workflow == "" {
+		workflows := SplitPipelineList(src.GetConfig("Workflow"))
+		if len(workflows) == 0 {
 			return nil, fmt.Errorf("source %q names no workflow", src.Name)
 		}
-		return &PipelineProvider{b: &githubPipelineClient{g: g, workflow: workflow}, defaultTop: top}, nil
+		return &PipelineProvider{b: &githubPipelineClient{g: g, workflows: workflows}, defaultTop: top}, nil
 	case "", "api", "custom":
 		org, project, _ := adoSourceScope(src)
 		if org == "" || project == "" {
 			return nil, fmt.Errorf("source %q doesn't name an Azure DevOps organization and project", src.Name)
 		}
-		def, err := strconv.Atoi(strings.TrimSpace(src.GetConfig("DefinitionId")))
-		if err != nil || def <= 0 {
-			return nil, fmt.Errorf("source %q has no numeric DefinitionId (got %q)", src.Name, src.GetConfig("DefinitionId"))
+		c := newAdoPipelineClient(src, store, org, project)
+		if folder := strings.TrimSpace(src.GetConfig("PipelineFolder")); folder != "" {
+			c.folder = NormalizePipelineFolder(folder)
+		} else {
+			ids, err := ParseDefinitionIDs(src.GetConfig("DefinitionId"))
+			if err != nil {
+				return nil, fmt.Errorf("source %q: %w", src.Name, err)
+			}
+			c.definitionIDs = ids
 		}
-		return &PipelineProvider{b: newAdoPipelineClient(src, store, org, project, def), defaultTop: top}, nil
+		return &PipelineProvider{b: c, defaultTop: top}, nil
 	default:
 		return nil, fmt.Errorf("source %q has provider %q, which has no pipelines", src.Name, src.GetConfig("Provider"))
 	}
+}
+
+// SplitPipelineList splits a comma-separated list of pipeline ids or
+// workflows, dropping blanks and repeats.
+func SplitPipelineList(s string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" || seen[strings.ToLower(part)] {
+			continue
+		}
+		seen[strings.ToLower(part)] = true
+		out = append(out, part)
+	}
+	return out
+}
+
+// ParseDefinitionIDs parses DefinitionId: one or more comma-separated
+// positive Azure DevOps pipeline definition ids.
+func ParseDefinitionIDs(s string) ([]int, error) {
+	parts := SplitPipelineList(s)
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("no pipeline definition id given")
+	}
+	ids := make([]int, 0, len(parts))
+	for _, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("pipeline definition id %q is not a positive number", p)
+		}
+		ids = append(ids, n)
+	}
+	return ids, nil
+}
+
+// NormalizePipelineFolder turns a pipeline folder as typed ("Release/Services",
+// "\Release\Services\") into Azure DevOps' form ("\Release\Services"); the
+// root is "\".
+func NormalizePipelineFolder(s string) string {
+	s = strings.ReplaceAll(strings.TrimSpace(s), "/", `\`)
+	return `\` + strings.Trim(s, `\`)
 }
 
 // ResolvedPipelineRun is a run URL matched to the source whose credentials
@@ -324,7 +372,7 @@ func ResolvePipelineRunURL(rawURL string, all []models.SourceDefinition, store s
 		case "", "api", "custom":
 			if ref, rank, ok := matchAdoRun(src, u); ok {
 				c = &candidate{src: src, rank: rank, id: ref.id, build: func() (pipelineBackend, error) {
-					return newAdoPipelineClient(src, store, ref.org, ref.project, 0), nil
+					return newAdoPipelineClient(src, store, ref.org, ref.project), nil
 				}}
 			}
 		}

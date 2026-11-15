@@ -213,12 +213,31 @@
         </div>
       </div>
       {{else if eq $s.Type "pipeline-run"}}
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Pipeline definition ID <span class="text-red-400">*</span> {{template "tip" "The definitionId in the pipeline's URL."}}</label>
-          <input type="number" name="DefinitionId" min="1" required value="{{$s.GetConfig `DefinitionId`}}" placeholder="42"
+      {{$byFolder := ne ($s.GetConfig `PipelineFolder`) ""}}
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-1">Pipelines {{template "tip" "IDs: list pipelines by their definitionId. Folder: every pipeline in a pipelines folder and its subfolders, looked up on each call so new pipelines are picked up. Runs of all the pipelines are listed together, newest first."}}</label>
+        <div class="tabs" role="tablist">
+          <label class="tab">
+            <input type="radio" name="AdoPipelineScope" value="ids" class="pipeline-scope sr-only" {{if not $byFolder}}checked{{end}} onchange="updatePipelineScope()">
+            IDs
+          </label>
+          <label class="tab">
+            <input type="radio" name="AdoPipelineScope" value="folder" class="pipeline-scope sr-only" {{if $byFolder}}checked{{end}} onchange="updatePipelineScope()">
+            Folder
+          </label>
+        </div>
+        <div id="pipeline-ids-fields" class="{{if $byFolder}}hidden{{end}} tab-panel p-4">
+          <label class="block text-sm font-medium text-slate-300 mb-1">Pipeline definition IDs <span class="text-red-400">*</span> {{template "tip" "The definitionId in each pipeline's URL, comma-separated, e.g. 42, 57."}}</label>
+          <input name="DefinitionId" required pattern="\s*\d+\s*(,\s*\d+\s*)*,?\s*" value="{{$s.GetConfig `DefinitionId`}}" placeholder="42, 57"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
+        <div id="pipeline-folder-fields" class="{{if not $byFolder}}hidden{{end}} tab-panel p-4">
+          <label class="block text-sm font-medium text-slate-300 mb-1">Folder <span class="text-red-400">*</span> {{template "tip" `The folder path as the Pipelines page shows it, e.g. \Release\Services. Subfolders are included; \ is every pipeline of the project.`}}</label>
+          <input name="PipelineFolder" required value="{{$s.GetConfig `PipelineFolder`}}" placeholder="\Release\Services"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         {{template "pipeline-runs" .}}
       </div>
       {{else}}
@@ -319,8 +338,8 @@
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Workflow <span class="text-red-400">*</span> {{template "tip" "The workflow's file name in .github/workflows (e.g. ci.yml), or its numeric ID."}}</label>
-          <input name="Workflow" required value="{{$s.GetConfig `Workflow`}}" placeholder="ci.yml"
+          <label class="block text-sm font-medium text-slate-300 mb-1">Workflows <span class="text-red-400">*</span> {{template "tip" "Each workflow's file name in .github/workflows (e.g. ci.yml) or its numeric ID, comma-separated. Runs of all of them are listed together, newest first."}}</label>
+          <input name="Workflow" required value="{{$s.GetConfig `Workflow`}}" placeholder="ci.yml, release.yml"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
         {{template "pipeline-runs" .}}
@@ -390,7 +409,18 @@ function setTab(name) {
   document.getElementById('f-provider').value = isGitHub ? 'github' : 'api';
   document.getElementById('f-platform').value = isAdo ? 'ado' : '';
   updateFetchMode();
+  updatePipelineScope();
   loadTypes();
+}
+
+// Azure DevOps Pipeline Runs: the IDs / Folder sub-tabs. The hidden panel's
+// input is disabled, so only the chosen one is saved.
+function updatePipelineScope() {
+  if (!document.getElementById('pipeline-ids-fields')) return;
+  var el = document.querySelector('#ado-block input.pipeline-scope:checked');
+  var folder = currentTab === 'ado' && el && el.value === 'folder';
+  toggleBlock('pipeline-ids-fields', currentTab === 'ado' && !folder);
+  toggleBlock('pipeline-folder-fields', folder);
 }
 
 // Each provider tab has its own "Fetch as" radio group (one shared name
@@ -429,8 +459,9 @@ function prepareSubmit() {
     var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
       ((SOURCE_TYPE === 'requirements' || SOURCE_TYPE === 'test-case') && currentFetchMode() === 'workitems');
     if (SOURCE_TYPE === 'pipeline-run') {
-      // Pipeline runs are fetched from AdoOrg/AdoProject/DefinitionId (see
-      // fetchAdoPipelineRuns) — this URL is only stored, like work items'.
+      // Pipeline runs are read from AdoOrg/AdoProject and DefinitionId or
+      // PipelineFolder (see PipelineProviderFor) — this URL is only stored,
+      // like work items'.
       document.getElementById('ado-url').value = org + '/' + proj;
     } else if (isWorkItemMode) {
       // Work items are fetched by a server-side WIQL query + batch fetch
