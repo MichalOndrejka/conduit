@@ -103,7 +103,10 @@ func (s *SourceConfigStore) Delete(id string) error {
 			out = append(out, src)
 		}
 	}
-	return s.write(id, out)
+	if err := s.write(id, out); err != nil {
+		return err
+	}
+	return s.DeleteSyncState(id)
 }
 
 // RenameCredentialReferences cascades a credential rename into source configs.
@@ -220,6 +223,10 @@ func (s *SourceConfigStore) ResetAllSyncStatus(status string) error {
 		sources[i].SyncStatus = status
 		sources[i].SyncError = nil
 		sources[i].LastSyncedAt = nil
+		// The vectors are gone: a source's state would skip what it read before.
+		if err := s.DeleteSyncState(sources[i].ID); err != nil {
+			return err
+		}
 	}
 	return s.write("", sources)
 }

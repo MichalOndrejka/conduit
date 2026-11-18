@@ -255,6 +255,14 @@ func withRequestParam(fields []filterField, sorts []sortField) mcp.ToolOption {
 	}
 }
 
+// workItemHistoryNote tells a work item search tool's caller about history
+// records (Azure DevOps work items only).
+const workItemHistoryNote = ` Azure DevOps work items also have their history: one record per revision ` +
+	`saying who changed which fields from what to what, and when, plus the comment added. Results hold the ` +
+	`items as they are now unless you ask for history: for "who changed X", "what did Y change last week", ` +
+	`"when did this move to Resolved" filter record "change" with id, changed_by ("me" works), changed_field ` +
+	`and since/until.`
+
 // RegisterTools registers all MCP tools. Called once at startup.
 func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.Service) {
 
@@ -312,9 +320,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	makeSearchTool(models.CollectionWorkItems, "search_workitem",
 		"Semantic search over work items (bugs, tasks, defects). Each holds every field, a Links section (parent, "+
 			"children, related items as #id; pull requests as !id; commits by SHA; builds by id) and the whole discussion. "+
-			"Filter by id, project, type, state, iteration path, assignee or tags.")
+			"Filter by id, project, type, state, iteration path, assignee or tags."+workItemHistoryNote)
 	makeSearchTool(models.CollectionRequirements, "search_requirement",
-		"Semantic search over requirements (features, user stories, epics).")
+		"Semantic search over requirements (features, user stories, epics)."+workItemHistoryNote)
 	makeSearchTool(models.CollectionSourceCode, "search_source_code",
 		"Semantic search over production source code (classes, methods, functions). "+
 			"Does not include test files — use search_test_code for tests.")
@@ -322,7 +330,7 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		"Semantic search over test code — unit tests, integration tests and specs. "+
 			"Use this to find test coverage, test patterns, or examples of how code is tested.")
 	makeSearchTool(models.CollectionTestCases, "search_testcase",
-		"Semantic search over test cases including test steps.")
+		"Semantic search over test cases including test steps."+workItemHistoryNote)
 	makeSearchTool(models.CollectionDocumentation, "search_documentation",
 		"Semantic search over wiki pages, repo documentation and uploaded documents.")
 	makeSearchTool(models.CollectionCommits, "search_commit",

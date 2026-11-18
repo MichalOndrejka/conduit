@@ -131,6 +131,85 @@ func TestListModeOptionsAndErrors(t *testing.T) {
 	}
 }
 
+// "What did I change last week": work item history records by "me" since a
+// date, newest change first.
+func TestWorkItemHistoryListByMeSinceDate(t *testing.T) {
+	synced := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
+	qd := &fakeQdrant{}
+	s, ctx := setupWithSources(t, qd, staticSources{{ID: "s1", LastSyncedAt: &synced, Identity: []string{"Ann Lee", "ann@corp"}}})
+
+	res := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "list", "filters": map[string]any{"record": "change", "changed_by": "me",
+			"changed_field": "State", "since": "2026-11-10"},
+	}})
+	if res.IsError {
+		t.Fatalf("list failed: %s", resultText(t, res))
+	}
+	body := qd.lastScrollBody
+	if order, _ := body["order_by"].(map[string]any); order["key"] != models.FilterDateKey || order["direction"] != "desc" {
+		t.Errorf("order_by = %v, want newest change first", body["order_by"])
+	}
+	filter, _ := json.Marshal(body["filter"])
+	for _, want := range []string{`"key":"f_record","match":{"value":"change"}`, `"ann lee"`, `"ann@corp"`,
+		`"key":"f_changed_field","match":{"value":"state"}`, `"key":"f_date","range":{"gte":`} {
+		if !strings.Contains(string(filter), want) {
+			t.Errorf("filter lacks %s: %s", want, filter)
+		}
+	}
+}
+
+// Work item tools leave history records out unless asked for, and "item"
+// excludes history rather than requiring a field older or file-based
+// documents don't have.
+func TestWorkItemToolsLeaveHistoryOutByDefault(t *testing.T) {
+	synced := time.Date(2026, 11, 18, 9, 0, 0, 0, time.UTC)
+	qd := &fakeQdrant{}
+	s, ctx := setupWithSources(t, qd, staticSources{{ID: "s1", LastSyncedAt: &synced, Identity: []string{"Ann"}}})
+	notChange := `"must_not":[{"key":"f_record","match":{"value":"change"}}`
+	isChange := `{"key":"f_record","match":{"value":"change"}}`
+	for _, tc := range []struct {
+		tool    string
+		filters map[string]any
+		want    string
+	}{
+		{"search_workitem", nil, notChange},
+		{"search_workitem", map[string]any{"id": "1234"}, notChange},
+		{"search_workitem", map[string]any{"record": "item"}, notChange},
+		{"search_requirement", map[string]any{"record": "item"}, notChange},
+		{"search_workitem", map[string]any{"record": "change"}, `"must":[` + isChange},
+		{"search_workitem", map[string]any{"changed_by": "me"}, isChange},
+		{"search_workitem", map[string]any{"record": []any{"item", "change"}}, ""},
+	} {
+		req := map[string]any{"mode": "list"}
+		if tc.filters != nil {
+			req["filters"] = tc.filters
+		}
+		res := callTool(t, s, ctx, tc.tool, map[string]any{"request": req})
+		if res.IsError {
+			t.Fatalf("%s %v: %s", tc.tool, tc.filters, resultText(t, res))
+		}
+		filter, _ := json.Marshal(qd.lastScrollBody["filter"])
+		switch {
+		case tc.want == "" && strings.Contains(string(filter), "f_record"):
+			t.Errorf("%s %v: both kinds asked for, filter = %s", tc.tool, tc.filters, filter)
+		case tc.want != "" && !strings.Contains(string(filter), tc.want):
+			t.Errorf("%s %v: filter = %s, want %s", tc.tool, tc.filters, filter, tc.want)
+		}
+		if tc.want == isChange && strings.Contains(string(filter), "must_not\":[{\"key\":\"f_record") {
+			t.Errorf("%s %v: history asked for but excluded: %s", tc.tool, tc.filters, filter)
+		}
+	}
+	if res := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "list", "filters": map[string]any{"record": "revision"}}}); !res.IsError {
+		t.Error(`record "revision" accepted`)
+	}
+	// Tools without history are untouched.
+	callTool(t, s, ctx, "search_source_code", map[string]any{"request": map[string]any{"mode": "list"}})
+	if filter, _ := json.Marshal(qd.lastScrollBody["filter"]); strings.Contains(string(filter), "f_record") {
+		t.Errorf("source code filter = %s", filter)
+	}
+}
+
 func TestListIndexesCoverEverySortKey(t *testing.T) {
 	idx := ListIndexes()
 	if o := idx[models.CollectionCommits]; len(o) != 1 || o[0].Key != models.FilterDateKey || o[0].Schema != "integer" {

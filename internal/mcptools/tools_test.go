@@ -495,19 +495,17 @@ func TestSearchToolRejectsBadFilterDate(t *testing.T) {
 	}
 }
 
-// Work item sources are already scoped to their area paths, and work items
-// aren't searched by date — neither is a work item filter.
-func TestWorkItemSearchRejectsAreaPathAndDateFilters(t *testing.T) {
+// Work item sources are already scoped to their area paths, so area path
+// isn't a work item filter.
+func TestWorkItemSearchRejectsAreaPathFilter(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	for _, f := range []string{"area_path", "since", "until"} {
-		result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
-			"mode": "semantic_search", "query": "x", "page": float64(1),
-			"filters": map[string]any{f: "2024-01-01"},
-		}})
-		if !result.IsError || !strings.Contains(resultText(t, result), "unknown filter") {
-			t.Errorf("filter %q: expected an unknown filter error, got %s", f, resultText(t, result))
-		}
+	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		"mode": "semantic_search", "query": "x", "page": float64(1),
+		"filters": map[string]any{"area_path": `Payments\Team A`},
+	}})
+	if !result.IsError || !strings.Contains(resultText(t, result), "unknown filter") {
+		t.Errorf("expected an unknown filter error, got %s", resultText(t, result))
 	}
 }
 

@@ -34,7 +34,9 @@ tool_name(request: { mode: "list", filters?: {...}, order_by?: str, direction?: 
 
 **Conduit is a cache.** Only syncs talk to Azure DevOps or GitHub; a search tool call reads the index and nothing else. The two exceptions are [`search_pipeline_run`](#search_pipeline_run) and [`search_pull_request`](#search_pull_request), which read the provider live and index nothing. Every response carries `as_of`, when each source in the results last synced (`"never"` if it hasn't). For a question about right now, the agent calls `source_sync` (`trigger`, then `status` until `completed`) and asks again.
 
-**`"me"`** works in person filters (`author`, `assigned_to`). Each sync records the source token's owner (Azure DevOps `connectionData`, GitHub `/user`), and `me` matches the owners of every enabled source. Before any source has synced, `me` is an error that says so.
+**`"me"`** works in person filters (`author`, `assigned_to`, `changed_by`). Each sync records the source token's owner (Azure DevOps `connectionData`, GitHub `/user`), and `me` matches the owners of every enabled source. Before any source has synced, `me` is an error that says so.
+
+**`work_item_type`** matches the singular type names Azure DevOps and GitHub use, and a plural is read as its singular: `Software Requirements` finds items of type `Software Requirement`, `User Stories` finds `User Story`.
 
 `semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).
 
@@ -71,12 +73,25 @@ Answers "the latest …", "the last failed …", "every … matching …" withou
 | Tool | `order_by` |
 |---|---|
 | `search_commit` | `authored` (default) |
+| `search_workitem` | `changed` (default): a history record's change date, an item's last-changed date |
 | others | none yet — documents come in storage order |
 
 Conduit creates the sort indexes in the background at startup, so the first listing doesn't wait for one to build. Sort keys and filter values are computed at sync. Documents synced before Conduit stored a key don't carry it and don't appear in a listing sorted by it until their source syncs again.
 
 ```
 search_commit(request={"mode":"list","filters":{"author":"me","since":"2026-11-01"}})
+search_workitem(request={"mode":"list","filters":{"record":"change","changed_by":"me","since":"2026-11-10"}})
+```
+
+### Work item history
+
+Azure DevOps work item sources also index each item's history: one record per revision (`record: "change"`) with who made it, when, every changed field as `old → new` and the comment added. `search_workitem`, `search_requirement` and `search_testcase` filter them by `changed_by`, `changed_field` (`System.State` or `State`; `Comment` for comments), `id` and `since`/`until`.
+
+History is left out unless asked for, so looking an item up by `id`, `state` or a query isn't swamped by one record per revision. It's included with `record: "change"` (history only), `record: ["item","change"]` (both), or any `changed_by` / `changed_field` filter, which only history records carry. `record: "item"`, the default, means "not a history record", so it also covers items synced before history existed and requirements or test cases kept as repository files. Those files have no change date, so a `since`/`until` filter leaves them out. See [sources.md](sources.md#azure-devops-work-items) for how they're synced.
+
+```
+search_workitem(request={"mode":"semantic_search","query":"moved to Resolved","page":1,
+                         "filters":{"id":"1234","record":"change","changed_field":"State"}})
 ```
 
 ### `mode: "semantic_search"` — ranked, natural-language search
@@ -112,7 +127,7 @@ When a result names another item by its ID (a work item `#1234`, a commit SHA), 
 
 | Tool | Searches | Best for |
 |---|---|---|
-| `search_workitem` | Work items — bugs, tasks, user stories, features, epics, with their links and whole discussion (filter `id` opens one by its ID: `1234`, `#1234` or `AB#1234`) | Finding related issues, checking if a bug's been filed, sprint scope, following a parent or linked item |
+| `search_workitem` | Work items — bugs, tasks, user stories, features, epics, with their links and whole discussion (filter `id` opens one by its ID: `1234`, `#1234` or `AB#1234`), plus each Azure DevOps item's [history](#work-item-history) | Finding related issues, checking if a bug's been filed, sprint scope, following a parent or linked item, who changed what and when |
 | `search_requirement` | Requirements — features, user stories, epics | Finding relevant requirements, acceptance criteria |
 | `search_source_code` | Production source code (classes, methods, functions) — no tests | Finding implementations, locating where a concept is defined |
 | `search_test_code` | Test code — unit, integration, specs | Finding test coverage, patterns, and examples |

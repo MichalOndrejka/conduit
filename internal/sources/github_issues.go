@@ -258,6 +258,8 @@ func (g *GitHubSource) issueDocument(is githubIssue, comments []githubComment) m
 	filters.Add(models.FilterState, is.State)
 	filters.Add(models.FilterAssignedTo, assignees...)
 	filters.Add(models.FilterTag, labels...)
+	filters.Add(models.FilterRecord, "item")
+	filters.Date = parseTime(is.UpdatedAt) // last changed, like Azure DevOps items
 	return models.SourceDocument{
 		ID:          fmt.Sprintf("%s_gh_issue_%d", g.src.ID, is.Number),
 		Text:        strings.TrimSpace(sb.String()),

@@ -39,6 +39,13 @@ var (
 		"a pull request's linked work items"}
 	fCommit = filterField{name: models.FilterCommit, desc: "Commit SHA, full or abbreviated (7 or more characters): " +
 		"opens the commit another result refers to"}
+	fRecord = filterField{name: models.FilterRecord, desc: `"item" (the default) for the work items as they are now, ` +
+		`"change" for their history — one record per revision: who changed which fields from what to what, and when. ` +
+		`History is left out unless this is "change" (or both) or changed_by / changed_field is set`}
+	fChangedBy = filterField{name: models.FilterChangedBy, desc: `Who made a change (history records): display name ` +
+		`or unique name (email); "me" for the token owner`, person: true}
+	fChangedField = filterField{name: models.FilterChangedField, desc: "Field a change touched (history records), " +
+		"reference or short name, e.g. System.State or State, AssignedTo, StoryPoints; Comment for added comments"}
 )
 
 func dateFields(what string) []filterField {
@@ -50,9 +57,16 @@ func dateFields(what string) []filterField {
 
 var (
 	repoFileFilters = []filterField{fProject, fRepository, fPath, fExtension}
-	// Area path and date aren't offered: a work item source is already scoped
-	// to its area paths, and work items are searched by content, not age.
-	workItemFilters = []filterField{fProject, fWIType, fState, fIteration, fAssigned, fTag, fWorkItemID}
+	// Area path isn't offered: a work item source is already scoped to its
+	// area paths. The date is a history record's change date, an item's
+	// last-changed date.
+	workItemFilters = append([]filterField{fProject, fWIType, fState, fIteration, fAssigned, fTag, fWorkItemID,
+		fRecord, fChangedBy, fChangedField}, dateFields("change date (for an item: when it was last changed)")...)
+	// Requirements and test cases kept as repository files have no change
+	// date, and the date filters say so rather than drop them silently.
+	reqTestFilters = append(append(append([]filterField{}, repoFileFilters...), workItemFilters[1:len(workItemFilters)-2]...),
+		dateFields("change date — only work items have one (for an item: when it was last changed); "+
+			"repository files have none and are left out by a date filter")...)
 )
 
 // collectionFilters lists the filters each search tool's collection
@@ -60,8 +74,8 @@ var (
 // items, so they accept both sets.
 var collectionFilters = map[string][]filterField{
 	models.CollectionWorkItems:     workItemFilters,
-	models.CollectionRequirements:  append(append([]filterField{}, repoFileFilters...), workItemFilters[1:]...),
-	models.CollectionTestCases:     append(append([]filterField{}, repoFileFilters...), workItemFilters[1:]...),
+	models.CollectionRequirements:  reqTestFilters,
+	models.CollectionTestCases:     reqTestFilters,
 	models.CollectionSourceCode:    repoFileFilters,
 	models.CollectionTestCode:      repoFileFilters,
 	models.CollectionDocumentation: repoFileFilters,
@@ -103,16 +117,21 @@ func parseFilters(raw any, fields []filterField) ([]rag.FieldCondition, error) {
 // parseFiltersFor is parseFilters with "me" on a person field replaced by
 // me, the identities the sources recorded at sync.
 func parseFiltersFor(raw any, fields []filterField, me []string) ([]rag.FieldCondition, error) {
-	if raw == nil {
-		return nil, nil
-	}
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("request.filters must be an object")
+	obj := map[string]any{}
+	if raw != nil {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("request.filters must be an object")
+		}
+		obj = m
 	}
 	byName := make(map[string]filterField, len(fields))
 	for _, f := range fields {
 		byName[f.name] = f
+	}
+	recordConds, err := recordConditions(obj, byName)
+	if err != nil {
+		return nil, err
 	}
 
 	keys := make([]string, 0, len(obj))
@@ -127,6 +146,9 @@ func parseFiltersFor(raw any, fields []filterField, me []string) ([]rag.FieldCon
 		f, ok := byName[k]
 		if !ok {
 			return nil, fmt.Errorf("unknown filter %q — this tool supports: %s", k, filterNames(fields))
+		}
+		if k == models.FilterRecord {
+			continue // recordConditions
 		}
 		if f.date {
 			s, ok := obj[k].(string)
@@ -181,7 +203,59 @@ func parseFiltersFor(raw any, fields []filterField, me []string) ([]rag.FieldCon
 	if dateRange.Gte != nil || dateRange.Lte != nil {
 		conds = append(conds, rag.FieldCondition{Key: models.FilterDateKey, Range: &dateRange})
 	}
-	return conds, nil
+	return append(conds, recordConds...), nil
+}
+
+// historyRecord matches work item history records (one revision each).
+var historyRecord = rag.FieldCondition{Key: models.FilterKey(models.FilterRecord), Match: rag.Match{Value: "change"}}
+
+// recordConditions is how a tool offering the record filter treats work
+// item history. "item" is anything that isn't a history record, so items
+// indexed before records were stored, and requirements or test cases kept
+// as repository files, count too. History records only appear when asked
+// for — record "change", or a filter that only they carry (changed_by,
+// changed_field) — so looking up an item by id or state isn't swamped by
+// one record per revision.
+func recordConditions(obj map[string]any, byName map[string]filterField) ([]rag.FieldCondition, error) {
+	if _, offered := byName[models.FilterRecord]; !offered {
+		return nil, nil
+	}
+	raw, given := obj[models.FilterRecord]
+	if !given {
+		_, by := obj[models.FilterChangedBy]
+		_, field := obj[models.FilterChangedField]
+		if by || field {
+			return []rag.FieldCondition{historyRecord}, nil
+		}
+		not := historyRecord
+		not.Not = true
+		return []rag.FieldCondition{not}, nil
+	}
+	values, err := filterStrings(raw)
+	if err != nil {
+		return nil, fmt.Errorf("request.filters.record: %w", err)
+	}
+	var item, change bool
+	for _, v := range values {
+		switch strings.ToLower(strings.TrimSpace(v)) {
+		case "item":
+			item = true
+		case "change":
+			change = true
+		default:
+			return nil, fmt.Errorf(`request.filters.record: %q is not "item" or "change"`, v)
+		}
+	}
+	switch {
+	case item && change:
+		return nil, nil
+	case change:
+		return []rag.FieldCondition{historyRecord}, nil
+	default:
+		not := historyRecord
+		not.Not = true
+		return []rag.FieldCondition{not}, nil
+	}
 }
 
 func filterStrings(v any) ([]string, error) {

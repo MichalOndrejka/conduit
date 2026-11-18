@@ -20,6 +20,35 @@ type Source interface {
 	FetchDocuments(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error)
 }
 
+// StatefulSource is a source that carries state from one sync to the next
+// (e.g. where a change feed left off), so that it reads only what's new of
+// data that never changes once written.
+type StatefulSource interface {
+	// SetSyncState hands over, before FetchDocuments, the state the last
+	// successful sync left (nil: none) and how many of the source's history
+	// records the index holds — none while the state says there should be
+	// some means they were deleted, and the source starts over.
+	SetSyncState(state []byte, indexedHistory int)
+	// SyncResult, after FetchDocuments, says how to index the documents and
+	// what state to keep once they are stored; nil: a plain full replace,
+	// nothing to keep.
+	SyncResult() *SyncResult
+}
+
+// SyncResult is how a StatefulSource's documents are indexed.
+type SyncResult struct {
+	// State is kept for the next sync, and only once this sync's documents
+	// are stored: a failed sync starts again from the previous state.
+	State []byte
+	// KeepHistory keeps the source's already-indexed history records
+	// (record = change) and adds the new ones; everything else of the
+	// source is replaced as usual. False rebuilds the history too.
+	KeepHistory bool
+	// RemoveHistoryIDs are work item ids whose history records are deleted:
+	// the items left the source.
+	RemoveHistoryIDs []string
+}
+
 // New creates the implementation for a source definition. Provider selects
 // the fetch mechanism; the source *type* only selects the target collection.
 func New(src *models.SourceDefinition, store secrets.Reader) (Source, error) {

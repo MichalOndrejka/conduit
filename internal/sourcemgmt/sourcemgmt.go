@@ -259,6 +259,9 @@ func (m *Manager) Save(ctx context.Context, oldCollection string, src *models.So
 		}
 		src.SyncStatus = "idle"
 		src.LastSyncedAt = nil
+		if err := m.sources.DeleteSyncState(src.ID); err != nil {
+			log.Printf("warning: could not reset the sync state of source %s: %v", src.ID, err)
+		}
 	}
 	return m.sources.Save(*src)
 }

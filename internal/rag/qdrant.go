@@ -63,6 +63,9 @@ type FieldCondition struct {
 	Key   string `json:"key"`
 	Match Match  `json:"match,omitzero"`
 	Range *Range `json:"range,omitempty"`
+	// Not turns the condition into an exclusion when a search builds its
+	// filter (must_not); a point without the key isn't excluded.
+	Not bool `json:"-"`
 }
 
 type Match struct {
@@ -293,10 +296,17 @@ func (v *VectorStore) Upsert(ctx context.Context, collection string, points []Po
 // without deleting their vectors (they reappear immediately if the source is
 // re-enabled, no re-sync needed). Shared by VectorStore.Search and
 // SearchService.PatternSearch.
-func buildFilter(must []FieldCondition, excludeSourceIDs []string) *Filter {
+func buildFilter(conds []FieldCondition, excludeSourceIDs []string) *Filter {
 	var f *Filter
-	if len(must) > 0 {
-		f = &Filter{Must: must}
+	for _, c := range conds {
+		if f == nil {
+			f = &Filter{}
+		}
+		if c.Not {
+			f.MustNot = append(f.MustNot, c)
+		} else {
+			f.Must = append(f.Must, c)
+		}
 	}
 	if len(excludeSourceIDs) > 0 {
 		if f == nil {

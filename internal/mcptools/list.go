@@ -27,6 +27,12 @@ var collectionSorts = map[string][]sortField{
 	models.CollectionCommits: {
 		{name: "authored", key: models.FilterDateKey, schema: "integer", desc: "Author date"},
 	},
+	// Requirements and test cases aren't sorted: those kept as repository
+	// files have no change date and would drop out of the list.
+	models.CollectionWorkItems: {
+		{name: "changed", key: models.FilterDateKey, schema: "integer",
+			desc: `Change date: when a history record's change was made, when an item was last changed`},
+	},
 }
 
 // ListIndexes are the sort keys of every collection, so startup can create
