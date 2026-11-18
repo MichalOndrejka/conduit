@@ -59,6 +59,32 @@ func TestIDFilterAcceptsReferenceForms(t *testing.T) {
 	}
 }
 
+// Plural work item types match the singular names the sources store.
+func TestWorkItemTypeFilterIsSingular(t *testing.T) {
+	for in, want := range map[string]string{
+		"Software Requirements": "software requirement",
+		"Software Requirement":  "software requirement",
+		"Bugs":                  "bug",
+		"User Stories":          "user story",
+		"Test Cases":            "test case",
+		"Issues":                "issue",
+		"Epics":                 "epic",
+		"Processes":             "process",
+		"Process":               "process",
+		"Status":                "status",
+		"Analysis":              "analysis",
+		"Task":                  "task",
+	} {
+		if got := NormalizeFilterValue(FilterWorkItemType, in); got != want {
+			t.Errorf("NormalizeFilterValue(work_item_type, %q) = %q, want %q", in, got, want)
+		}
+		stored := FilterValues(FilterWorkItemType, want)
+		if !containsString(stored, NormalizeFilterValue(FilterWorkItemType, in)) {
+			t.Errorf("query %q doesn't match stored %v", in, stored)
+		}
+	}
+}
+
 // A commit is findable by any abbreviation from git's 7 characters up.
 func TestCommitFilterStoresPrefixes(t *testing.T) {
 	sha := "ABC123DEF4567890ABC123DEF4567890ABCD1234"

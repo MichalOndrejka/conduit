@@ -58,11 +58,35 @@ func NormalizeFilterValue(field, v string) string {
 		v = strings.TrimPrefix(v, "ab")
 		v = strings.TrimLeft(v, "#!")
 	}
+	if field == FilterWorkItemType {
+		v = singularType(v)
+	}
 	if sep, ok := filterSeparators[field]; ok {
 		v = strings.ReplaceAll(strings.ReplaceAll(v, `\`, sep), "/", sep)
 		v = strings.Trim(v, sep)
 	}
 	return v
+}
+
+// singularType turns a lower-cased work item type's last word singular, so
+// "Software Requirements", "Bugs" or "User Stories" match the types Azure
+// DevOps and GitHub name in the singular ("Software Requirement", "Bug",
+// "User Story"). Words already singular are left as they are, including
+// ones ending in ss, us or is ("Process", "Status", "Analysis").
+func singularType(v string) string {
+	i := strings.LastIndexByte(v, ' ') + 1
+	head, w := v[:i], v[i:]
+	switch {
+	case len(w) > 3 && strings.HasSuffix(w, "ies"):
+		w = w[:len(w)-3] + "y"
+	case strings.HasSuffix(w, "sses"), strings.HasSuffix(w, "shes"),
+		strings.HasSuffix(w, "ches"), strings.HasSuffix(w, "xes"):
+		w = w[:len(w)-2]
+	case strings.HasSuffix(w, "ss"), strings.HasSuffix(w, "us"), strings.HasSuffix(w, "is"):
+	case len(w) > 1 && strings.HasSuffix(w, "s"):
+		w = w[:len(w)-1]
+	}
+	return head + w
 }
 
 // FilterValues returns the normalized values to store for raw. Hierarchical

@@ -29,7 +29,7 @@ var (
 		"a folder matches everything beneath it"}
 	fExtension  = filterField{name: models.FilterExtension, desc: "File extension without the dot, e.g. cs, ts, md"}
 	fAuthor     = filterField{name: models.FilterAuthor, desc: `Commit author's name or email; "me" for the token owner`, person: true}
-	fWIType     = filterField{name: models.FilterWorkItemType, desc: "Work item type, e.g. Bug, Task, User Story"}
+	fWIType     = filterField{name: models.FilterWorkItemType, desc: "Work item type, singular, e.g. Bug, Task, User Story, Software Requirement"}
 	fState      = filterField{name: models.FilterState, desc: "Work item state, e.g. Active, Resolved, Closed"}
 	fIteration  = filterField{name: models.FilterIterationPath, desc: `Iteration path, e.g. Project\Sprint 12 — matches that iteration and every child`}
 	fAssigned   = filterField{name: models.FilterAssignedTo, desc: `Assignee's display name or unique name (email); "me" for the token owner`, person: true}
