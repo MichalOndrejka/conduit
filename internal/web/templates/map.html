@@ -14,6 +14,10 @@
     <div class="flex-1 min-w-0">
       <div id="plotWrap" class="relative overflow-scroll rounded-xl border border-slate-800 bg-slate-950/40" style="height:70vh">
         <svg id="plot" viewBox="0 0 800 520" class="block"></svg>
+        <div id="mapLoading" class="absolute inset-0 flex items-center justify-center" role="status">
+          <svg id="mapLoadingDots" viewBox="0 0 200 130" class="w-64 max-w-[60%]" aria-hidden="true"></svg>
+          <span class="sr-only">Loading vector map</span>
+        </div>
       </div>
     </div>
     <div id="legend" class="flex flex-col gap-2 text-xs md:w-56 shrink-0 md:max-h-[70vh] overflow-y-auto pr-2 md:order-2"></div>
@@ -58,6 +62,22 @@ html:not(.dark) #plotWrap::-webkit-scrollbar-corner {
 html:not(.dark) #plotWrap::-webkit-scrollbar-thumb {
   background-color: #94a3b8;
   border-color: #f1f5f9;
+}
+
+/* Loading placeholder: scattered points that drift and pulse like a map
+   settling into place. */
+#mapLoadingDots circle {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: map-dot 1.8s ease-in-out infinite;
+}
+@keyframes map-dot {
+  0%, 100% { opacity: .15; transform: translate(0, 0) scale(.6); }
+  50%      { opacity: .9;  transform: translate(var(--dx), var(--dy)) scale(1.15); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #mapLoadingDots circle { animation-duration: 3.6s; animation-name: map-dot-fade; }
+  @keyframes map-dot-fade { 0%, 100% { opacity: .2; } 50% { opacity: .8; } }
 }
 </style>
 
@@ -125,7 +145,41 @@ function moveTooltip(e) {
   tooltip.style.top = top + 'px';
 }
 
-fetch('/api/map-data?kind={{.Kind}}').then(r => r.json()).then(data => {
+// Loading animation: three loose clusters of points, each pulsing and
+// drifting on its own delay, shown until the map data arrives.
+const loading = document.getElementById('mapLoading');
+(function drawLoadingDots() {
+  const ns = 'http://www.w3.org/2000/svg';
+  const dots = document.getElementById('mapLoadingDots');
+  const clusters = [[55, 45, 270], [140, 40, 200], [100, 95, 320]];
+  let i = 0;
+  for (const [cx, cy, hue] of clusters) {
+    for (let k = 0; k < 9; k++, i++) {
+      const a = (k / 9) * Math.PI * 2 + i, d = 6 + (k % 3) * 9;
+      const c = document.createElementNS(ns, 'circle');
+      c.setAttribute('cx', (cx + Math.cos(a) * d).toFixed(1));
+      c.setAttribute('cy', (cy + Math.sin(a) * d).toFixed(1));
+      c.setAttribute('r', 3.5 - (k % 3) * 0.6);
+      c.setAttribute('fill', `hsl(${hue}, 70%, 60%)`);
+      c.style.setProperty('--dx', (-Math.cos(a) * 4).toFixed(1) + 'px');
+      c.style.setProperty('--dy', (-Math.sin(a) * 4).toFixed(1) + 'px');
+      c.style.animationDelay = ((i * 137) % 1800) + 'ms';
+      dots.appendChild(c);
+    }
+  }
+})();
+
+fetch('/api/map-data?kind={{.Kind}}').then(r => {
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}).catch(err => {
+  loading.remove();
+  document.getElementById('qdrant-warning-detail').textContent = `(${err.message})`;
+  document.getElementById('qdrant-warning').classList.remove('hidden');
+  return null;
+}).then(data => {
+  if (!data) return;
+  loading.remove();
   const pts = data.points || [];
   if (data.qdrant_error) {
     document.getElementById('qdrant-warning-detail').textContent = `(${data.qdrant_error})`;
