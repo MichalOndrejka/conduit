@@ -1,8 +1,9 @@
-// Repository files for GitHubSource: the branch's whole tree in a single
-// gzipped tarball download (GET /repos/{owner}/{repo}/tarball/{ref}), read as
-// it streams in. A sync costs one API request for the files, plus one to look
-// up the default branch when no Branch is configured, whatever the repository
-// size, so syncing stays far below GitHub's rate limits.
+// Repository files for GitHubSource: each configured branch's or tag's whole
+// tree in a single gzipped tarball download
+// (GET /repos/{owner}/{repo}/tarball/{ref}), read as it streams in. A sync
+// costs one API request per ref for the files, plus one to look up the
+// default branch when no ref is configured, whatever the repository size, so
+// syncing stays far below GitHub's rate limits.
 package sources
 
 import (
@@ -27,7 +28,7 @@ import (
 // still streaming in.
 const archiveDownloadTimeout = 30 * time.Minute
 
-// refPath escapes a branch name for a URL path, keeping its slashes.
+// refPath escapes a branch or tag name for a URL path, keeping its slashes.
 func refPath(ref string) string {
 	parts := strings.Split(ref, "/")
 	for i, p := range parts {
@@ -114,40 +115,48 @@ func (g *GitHubSource) readArchive(ctx context.Context, ref string, patterns []s
 	return files, nil
 }
 
-// fetchFiles embeds every file matching PathFilter, one document per file
-// holding its path and full content.
+// fetchFiles embeds every file matching PathFilter (at most Top per ref) of
+// each configured ref, one document per path and content holding its path,
+// full content and the refs it is in.
 func (g *GitHubSource) fetchFiles(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
-	branch, err := g.branch(ctx)
+	refs, err := g.refs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if progress != nil {
-		progress(models.SyncProgress{Phase: "fetching", Message: "Downloading repository archive"})
-	}
-	files, err := g.readArchive(ctx, branch, parsePathFilter(g.src.GetConfig("PathFilter")), progress)
-	if err != nil {
-		return nil, err
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
-	if top := g.top(); top > 0 && len(files) > top {
-		files = files[:top]
+	patterns := parsePathFilter(g.src.GetConfig("PathFilter"))
+	perRef := make([][]archiveFile, len(refs))
+	for i, ref := range refs {
+		if progress != nil {
+			progress(models.SyncProgress{Phase: "fetching", Message: "Downloading repository archive of " + ref.Name})
+		}
+		files, err := g.readArchive(ctx, ref.Name, patterns, progress)
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(files, func(i, j int) bool { return files[i].path < files[j].path })
+		if top := g.top(); top > 0 && len(files) > top {
+			files = files[:top]
+		}
+		perRef[i] = files
 	}
 
-	docs := make([]models.SourceDocument, 0, len(files))
-	for _, f := range files {
+	merged := mergeRefFiles(refs, perRef)
+	docs := make([]models.SourceDocument, 0, len(merged))
+	for _, f := range merged {
 		body := f.text
 		if f.skipped {
 			body = "(binary or large file skipped)"
 		}
 		props := map[string]string{
-			"title":   f.path,
-			"web_url": g.repoWeb() + "/blob/" + refPath(branch) + "/" + refPath(f.path),
-			"branch":  branch,
+			"title": f.title(),
+			// Linked to the first ref holding this content.
+			"web_url": g.repoWeb() + "/blob/" + refPath(f.refs[0].Name) + "/" + refPath(f.path),
 		}
 		filters := g.scopeFilters(props)
 		addFileFilters(&filters, f.path)
+		addVersionFilters(&filters, props, f.refs)
 		docs = append(docs, models.SourceDocument{
-			ID:         fmt.Sprintf("%s_gh_file_%s", g.src.ID, f.path),
+			ID:         fmt.Sprintf("%s_gh_file_%s", g.src.ID, f.docKey()),
 			Text:       strings.TrimSpace(f.path + "\n\n" + body),
 			Tags:       g.tags(),
 			Properties: props,

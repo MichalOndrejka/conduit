@@ -180,9 +180,9 @@ func TestFetchDocumentsAppliesPathFilterBeforeTop(t *testing.T) {
 	zipBody := repoZip(t, map[string]string{
 		"src/A.cs": "a", "src/B.cs": "b", "doc/guide/intro.md": "# Intro",
 	})
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(defaultBranchShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(zipBody)
-	}))
+	})))
 	defer srv.Close()
 
 	s := &APISource{src: codeSrc(map[string]string{
@@ -204,7 +204,7 @@ func TestFetchDocumentsAppliesPathFilterBeforeTop(t *testing.T) {
 func TestFetchDocumentsRepositoryZipErrors(t *testing.T) {
 	zipBody := repoZip(t, map[string]string{"src/A.cs": "a"})
 	calls := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(defaultBranchShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		if calls == 1 {
 			w.Header().Set("Content-Length", strconv.Itoa(len(zipBody)))
@@ -212,7 +212,7 @@ func TestFetchDocumentsRepositoryZipErrors(t *testing.T) {
 			return
 		}
 		_, _ = w.Write(zipBody)
-	}))
+	})))
 	defer srv.Close()
 	s := &APISource{src: codeSrc(map[string]string{"Url": srv.URL + "/_apis/git/repositories/repo/items"})}
 	docs, err := s.FetchDocuments(context.Background(), nil)
@@ -220,9 +220,9 @@ func TestFetchDocumentsRepositoryZipErrors(t *testing.T) {
 		t.Fatalf("docs %d, calls %d, err %v", len(docs), calls, err)
 	}
 
-	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	bad := httptest.NewServer(defaultBranchShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"value":[]}`))
-	}))
+	})))
 	defer bad.Close()
 	s = &APISource{src: codeSrc(map[string]string{"Url": bad.URL + "/_apis/git/repositories/repo/items"})}
 	if _, err := s.FetchDocuments(context.Background(), nil); err == nil || !strings.Contains(err.Error(), "not a zip") {

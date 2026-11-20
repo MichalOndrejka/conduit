@@ -37,6 +37,9 @@ var (
 	fWorkItemID = filterField{name: models.FilterID, desc: "Work item ID (Azure DevOps) or issue number (GitHub), e.g. 1234 " +
 		"(AB#1234 and #1234 work too): opens the item another result refers to — a Links entry, a commit message, " +
 		"a pull request's linked work items"}
+	fVersion = filterField{name: models.FilterVersion, desc: "Branch or tag of the repository, e.g. main, release/2.0, v2.1: " +
+		"only files and commits in that version. A file or commit that is the same in several versions is embedded " +
+		"once and matches each of them; results name their versions"}
 	fCommit = filterField{name: models.FilterCommit, desc: "Commit SHA, full or abbreviated (7 or more characters): " +
 		"opens the commit another result refers to"}
 	fRecord = filterField{name: models.FilterRecord, desc: `"item" (the default) for the work items as they are now, ` +
@@ -56,7 +59,7 @@ func dateFields(what string) []filterField {
 }
 
 var (
-	repoFileFilters = []filterField{fProject, fRepository, fPath, fExtension}
+	repoFileFilters = []filterField{fProject, fRepository, fVersion, fPath, fExtension}
 	// Area path isn't offered: a work item source is already scoped to its
 	// area paths. The date is a history record's change date, an item's
 	// last-changed date.
@@ -78,7 +81,7 @@ var collectionFilters = map[string][]filterField{
 	models.CollectionSourceCode:    repoFileFilters,
 	models.CollectionTestCode:      repoFileFilters,
 	models.CollectionDocumentation: repoFileFilters,
-	models.CollectionCommits: append([]filterField{fProject, fRepository, fCommit, fAuthor,
+	models.CollectionCommits: append([]filterField{fProject, fRepository, fVersion, fCommit, fAuthor,
 		{name: models.FilterPath, desc: "Changed file or folder path, e.g. src/auth — a folder matches every commit touching a file beneath it"}},
 		dateFields("author date")...),
 }

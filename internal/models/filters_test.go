@@ -98,3 +98,15 @@ func TestCommitFilterStoresPrefixes(t *testing.T) {
 		t.Error("prefixes shorter than 7 characters must not match")
 	}
 }
+
+// A version filter matches a branch or tag however it's written.
+func TestVersionFilterDropsRefPrefixes(t *testing.T) {
+	for _, in := range []string{"refs/heads/Release/2.0", "release/2.0", " RELEASE/2.0 "} {
+		if got := NormalizeFilterValue(FilterVersion, in); got != "release/2.0" {
+			t.Errorf("NormalizeFilterValue(version, %q) = %q", in, got)
+		}
+	}
+	if got := NormalizeFilterValue(FilterVersion, "refs/tags/v1.0"); got != "v1.0" {
+		t.Errorf("tag = %q, want v1.0", got)
+	}
+}

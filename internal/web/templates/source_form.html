@@ -36,26 +36,44 @@
 </div>
 {{end}}
 
-<!-- Branch field shared by every repository-backed source on both tabs. -->
-{{define "branch"}}
-<div>
-  <label class="block text-sm font-medium text-slate-300 mb-1">Branch {{template "tip" "Empty = the repository's default branch."}}</label>
-  <input name="Branch" value="{{.Source.GetConfig `Branch`}}" placeholder="main"
-         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+<!-- Versions picker shared by every repository-backed source on both tabs:
+     Branches / Tags sub-tabs, each listing the repository's refs (loaded by
+     loadRefs) as tick tiles, plus any saved selection. Ticked branches are
+     submitted as Branch, ticked tags as Tags, both comma-separated. -->
+{{define "refs"}}
+<div class="ref-picker">
+  <label class="block text-sm font-medium text-slate-300 mb-1">Versions {{template "tip" "The branches and tags to embed, each one version of the software. Tick in both tabs to combine them; none ticked = the repository's default branch. A file or commit that is the same in several versions is embedded once and found under each of them."}}</label>
+  <div class="tabs" role="tablist">
+    <label class="tab">
+      <input type="radio" name="RefKind" value="branches" class="ref-kind sr-only" checked onchange="showRefKind(this)">
+      Branches<span class="ref-count" data-kind="branches"></span>
+    </label>
+    <label class="tab">
+      <input type="radio" name="RefKind" value="tags" class="ref-kind sr-only" onchange="showRefKind(this)">
+      Tags<span class="ref-count" data-kind="tags"></span>
+    </label>
+  </div>
+  <div class="tab-panel p-4 space-y-3">
+    <p class="ref-status hidden rounded-lg border border-dashed border-slate-700 px-3 py-2 text-sm text-slate-400"></p>
+    <input type="search" class="ref-search hidden w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono"
+           placeholder="Filter" oninput="filterRefTiles(this.closest('.ref-picker'))">
+    <div class="ref-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" data-kind="branches"></div>
+    <div class="ref-grid hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" data-kind="tags"></div>
+  </div>
+  <input type="hidden" name="Branch" class="ref-value" data-kind="branches" value="{{.Source.GetConfig `Branch`}}">
+  <input type="hidden" name="Tags" class="ref-value" data-kind="tags" value="{{.Source.GetConfig `Tags`}}">
 </div>
 {{end}}
 
 <!-- GitHub tab: repository file fields and the issue label filter. -->
 {{define "gh-files"}}
 {{$s := .Source}}
-<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-  {{template "branch" .}}
-  <div>
-    <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md or docs/**. Empty = all files. Each matching file's full content is embedded; binary files and files over 200 KB are skipped."}}</label>
-    <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
-           class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-  </div>
+<div>
+  <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md or docs/**. Empty = all files. Each matching file's full content is embedded; binary files and files over 200 KB are skipped."}}</label>
+  <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
+         class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
 </div>
+{{template "refs" .}}
 {{end}}
 
 {{define "gh-labels"}}
@@ -160,11 +178,11 @@
         <input type="hidden" name="FetchMode" class="fetch-mode-value" value="{{$fetchMode}}">
         <div class="tabs" role="tablist">
           <label class="tab">
-            <input type="radio" name="AdoFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            <input type="radio" name="AdoFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode(); loadRefs()">
             Files
           </label>
           <label class="tab">
-            <input type="radio" name="AdoFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            <input type="radio" name="AdoFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode(); loadRefs()">
             Work Items
           </label>
         </div>
@@ -176,13 +194,13 @@
               <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
                      class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
             </div>
-            {{template "branch" .}}
+            <div>
+              <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
+              <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
+                     class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+            </div>
           </div>
-          <div>
-            <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.md. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
-            <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.md"
-                   class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-          </div>
+          {{template "refs" .}}
         </div>
 
         <div id="fetch-workitems-fields" class="{{if ne $fetchMode "workitems"}}hidden{{end}} tab-panel p-4 space-y-4">
@@ -197,13 +215,13 @@
                class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {{template "branch" .}}
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Most recent first, fetched in pages of 100. Every commit embeds its full message and the complete diff of every changed file."}}</label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Per branch or tag, most recent first, fetched in pages of 100. Every commit embeds its full message and the complete diff of every changed file."}}</label>
           <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
       </div>
+      {{template "refs" .}}
       {{else if eq $s.Type "pull-request"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
@@ -247,13 +265,13 @@
           <input name="AdoRepo" value="{{$s.GetConfig `AdoRepo`}}" placeholder="MyRepo"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
-        {{template "branch" .}}
+        <div>
+          <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.cs, *.ts. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
+          <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.cs, *.ts"
+                 class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
+        </div>
       </div>
-      <div>
-        <label class="block text-sm font-medium text-slate-300 mb-1">File filter {{template "tip" "Comma-separated wildcards, e.g. *.cs, *.ts. Empty = all files. Each matching file's full content is embedded, not just its metadata."}}</label>
-        <input name="PathFilter" value="{{$s.GetConfig `PathFilter`}}" placeholder="*.cs, *.ts"
-               class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
-      </div>
+      {{template "refs" .}}
       {{end}}
 
       <!-- hidden generic fields composed on submit (last, so space-y
@@ -307,11 +325,11 @@
         <input type="hidden" name="FetchMode" class="fetch-mode-value" value="{{$fetchMode}}">
         <div class="tabs" role="tablist">
           <label class="tab">
-            <input type="radio" name="GitHubFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            <input type="radio" name="GitHubFetchMode" value="files" class="fetch-mode sr-only" {{if ne $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode(); loadRefs()">
             Files
           </label>
           <label class="tab">
-            <input type="radio" name="GitHubFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode()">
+            <input type="radio" name="GitHubFetchMode" value="workitems" class="fetch-mode sr-only" {{if eq $fetchMode "workitems"}}checked{{end}} onchange="updateFetchMode(); loadRefs()">
             Issues
           </label>
         </div>
@@ -327,13 +345,13 @@
 
       {{else if eq $s.Type "commit-history"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {{template "branch" .}}
         <div>
-          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Most recent first. Every commit embeds its full message and the patch of each changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case."}}</label>
+          <label class="block text-sm font-medium text-slate-300 mb-1">Max commits {{template "tip" "Per branch or tag, most recent first. Every commit embeds its full message and the patch of each changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case."}}</label>
           <input type="number" name="Top" min="1" value="{{or ($s.GetConfig `Top`) `100`}}" placeholder="100"
                  class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-mono">
         </div>
       </div>
+      {{template "refs" .}}
       {{else if eq $s.Type "pull-request"}}
       {{else if eq $s.Type "pipeline-run"}}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -411,6 +429,7 @@ function setTab(name) {
   updateFetchMode();
   updatePipelineScope();
   loadTypes();
+  loadRefs();
 }
 
 // Azure DevOps Pipeline Runs: the IDs / Folder sub-tabs. The hidden panel's
@@ -744,6 +763,191 @@ function loadTypes() {
     });
   });
 })(); // setTab below loads the active tab's types
+
+// ── Version tiles ───────────────────────────────────────────────────────────
+// A repository-backed source picks the branches and tags to embed from the
+// repository's own, loaded with the form's current (unsaved) values once the
+// fields the lookup needs are filled in. The Branches / Tags sub-tabs only
+// switch which tiles show: both selections are kept and submitted.
+var REF_SOURCES = {
+  ado: {
+    endpoint: '/sources/ado/refs',
+    required: [
+      { name: 'AdoOrg', label: 'Organization URL', empty: function (v) { return !v.replace(/^https?:\/\/[^\/]*\/?$/, ''); } },
+      { name: 'AdoProject', label: 'Project' },
+      { name: 'AdoRepo', label: 'Repository name' },
+      { name: 'Password', label: 'Personal Access Token' }
+    ],
+    watch: ['AdoOrg', 'AdoProject', 'AdoRepo', 'AdoApiVersion', 'Password']
+  },
+  github: {
+    endpoint: '/sources/github/refs',
+    required: [
+      { name: 'GitHubUrl', label: 'Server URL' },
+      { name: 'GitHubOwner', label: 'Owner' },
+      { name: 'GitHubRepo', label: 'Repository' }
+    ],
+    watch: ['GitHubUrl', 'GitHubOwner', 'GitHubRepo', 'Token']
+  }
+};
+
+// refPicker is the tab's picker, or null if this source has none. A
+// Requirements source's picker sits in its Files panel.
+function refPicker(tab) {
+  return document.querySelector('#' + (tab || currentTab) + '-block .ref-picker');
+}
+
+function refValue(picker, kind) {
+  return picker.querySelector('.ref-value[data-kind="' + kind + '"]');
+}
+
+function savedRefs(picker, kind) {
+  return refValue(picker, kind).value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+}
+
+// syncRefValues writes the ticked tiles into the hidden inputs and the tab
+// counts, so a submit, a preview or another lookup always sends them.
+function syncRefValues(picker) {
+  ['branches', 'tags'].forEach(function (kind) {
+    var tiles = picker.querySelectorAll('.ref-grid[data-kind="' + kind + '"] .ref-tile');
+    var ticked = Array.prototype.slice.call(tiles).filter(function (el) { return el.checked; })
+      .map(function (el) { return el.value; });
+    refValue(picker, kind).value = ticked.join(',');
+    picker.querySelector('.ref-count[data-kind="' + kind + '"]').textContent = ticked.length ? ' (' + ticked.length + ')' : '';
+  });
+}
+
+function addRefTile(picker, kind, name, checked, isDefault) {
+  var label = document.createElement('label');
+  label.className = 'group cursor-pointer rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-colors hover:border-violet-600 hover:bg-slate-900 has-[:checked]:border-violet-600 has-[:checked]:bg-violet-950/30';
+  var input = document.createElement('input');
+  input.type = 'checkbox';
+  input.className = 'ref-tile peer sr-only';
+  input.value = name;
+  input.checked = !!checked;
+  input.addEventListener('change', function () { syncRefValues(picker); });
+  var div = document.createElement('div');
+  div.className = 'flex items-center justify-between gap-2 text-sm font-medium font-mono text-white break-all group-hover:text-violet-300 peer-checked:text-violet-300';
+  var span = document.createElement('span');
+  span.textContent = name;
+  div.appendChild(span);
+  if (isDefault) {
+    var badge = document.createElement('span');
+    badge.className = 'shrink-0 rounded-full border border-slate-700 px-2 py-0.5 font-sans text-xs font-normal text-slate-400';
+    badge.textContent = 'default';
+    div.appendChild(badge);
+  }
+  label.appendChild(input);
+  label.appendChild(div);
+  picker.querySelector('.ref-grid[data-kind="' + kind + '"]').appendChild(label);
+}
+
+// renderRefs rebuilds one kind's tiles: the repository's refs, then any
+// saved one it doesn't list (deleted, or a lookup that hasn't run), so a
+// saved selection is never silently dropped.
+function renderRefs(picker, kind, names, defaultBranch) {
+  var selected = savedRefs(picker, kind);
+  picker.querySelector('.ref-grid[data-kind="' + kind + '"]').innerHTML = '';
+  names.forEach(function (n) { addRefTile(picker, kind, n, selected.indexOf(n) >= 0, kind === 'branches' && n === defaultBranch); });
+  selected.forEach(function (n) { if (names.indexOf(n) < 0) addRefTile(picker, kind, n, true, false); });
+  syncRefValues(picker);
+  filterRefTiles(picker);
+}
+
+function activeRefKind(picker) {
+  var el = picker.querySelector('input.ref-kind:checked');
+  return el ? el.value : 'branches';
+}
+
+function showRefKind(el) {
+  var picker = el.closest('.ref-picker');
+  var kind = activeRefKind(picker);
+  picker.querySelectorAll('.ref-grid').forEach(function (g) { g.classList.toggle('hidden', g.dataset.kind !== kind); });
+  var search = picker.querySelector('.ref-search');
+  search.value = '';
+  search.placeholder = kind === 'tags' ? 'Filter tags' : 'Filter branches';
+  filterRefTiles(picker);
+}
+
+// filterRefTiles narrows the shown kind's tiles to the filter text; the
+// filter box appears once there are enough tiles to need it.
+function filterRefTiles(picker) {
+  var kind = activeRefKind(picker);
+  var search = picker.querySelector('.ref-search');
+  var tiles = picker.querySelectorAll('.ref-grid[data-kind="' + kind + '"] .ref-tile');
+  search.classList.toggle('hidden', tiles.length <= 12);
+  var q = search.value.trim().toLowerCase();
+  tiles.forEach(function (t) {
+    t.closest('label').classList.toggle('hidden', q !== '' && t.value.toLowerCase().indexOf(q) < 0);
+  });
+}
+
+function setRefStatus(picker, msg) {
+  var el = picker.querySelector('.ref-status');
+  el.textContent = msg || '';
+  el.classList.toggle('hidden', !msg);
+}
+
+function refreshRefStatus(tab, picker) {
+  var missing = REF_SOURCES[tab].required.filter(function (f) {
+    var v = tabVal(tab, f.name);
+    return f.empty ? f.empty(v) : !v;
+  }).map(function (f) { return f.label; });
+  if (missing.length) {
+    setRefStatus(picker, 'Fill in ' + joinFieldNames(missing) + ' to load the repository\'s branches and tags.');
+    return false;
+  }
+  setRefStatus(picker, picker.refNote || '');
+  return true;
+}
+
+var refsRequest = 0;
+function loadRefs() {
+  var tab = currentTab, picker = refPicker(tab);
+  if (!picker || !REF_SOURCES[tab] || picker.closest(".hidden")) return; // e.g. a Requirements source in Work Items mode
+  picker.refNote = '';
+  if (!refreshRefStatus(tab, picker)) return;
+  var req = ++refsRequest;
+  picker.refNote = 'Loading branches and tags…';
+  refreshRefStatus(tab, picker);
+  var finish = function () { picker.refNote = ''; refreshRefStatus(tab, picker); };
+  fetch(REF_SOURCES[tab].endpoint, { method: 'POST', body: new FormData(document.getElementById('source-form')) })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (req !== refsRequest) return; // a newer request superseded this one
+      finish();
+      if (!res.ok) {
+        showToast('Could not load branches and tags: ' + res.error, 'error');
+        return;
+      }
+      renderRefs(picker, 'branches', res.branches || [], res.default || '');
+      renderRefs(picker, 'tags', res.tags || [], '');
+    })
+    .catch(function (err) {
+      if (req !== refsRequest) return;
+      finish();
+      showToast('Could not load branches and tags: ' + err, 'error');
+    });
+}
+
+(function initRefPickers() {
+  Object.keys(REF_SOURCES).forEach(function (tab) {
+    var picker = refPicker(tab);
+    if (!picker) return;
+    // Each picker's sub-tabs are their own radio group.
+    picker.querySelectorAll('input.ref-kind').forEach(function (r) { r.name = 'RefKind-' + tab; });
+    picker.querySelector('input.ref-kind[value="branches"]').checked = true;
+    showRefKind(picker.querySelector('input.ref-kind'));
+    renderRefs(picker, 'branches', [], '');
+    renderRefs(picker, 'tags', [], '');
+    REF_SOURCES[tab].watch.forEach(function (name) {
+      var el = document.querySelector('#' + tab + '-block [name="' + name + '"]');
+      if (!el) return;
+      el.addEventListener('change', loadRefs);
+      el.addEventListener('input', function () { picker.refNote = ''; refreshRefStatus(tab, picker); });
+    });
+  });
+})(); // setTab below loads the active tab's refs
 
 setTab(INITIAL_TAB);
 </script>

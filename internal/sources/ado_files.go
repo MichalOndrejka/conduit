@@ -1,8 +1,9 @@
 // Azure DevOps repository files for APISource (Source Code, Test Code,
-// Documentation, and Requirements / Test Cases in files mode): the branch's
-// whole tree in a single zip download from the items endpoint
+// Documentation, and Requirements in files mode): each configured branch's or
+// tag's whole tree in a single zip download from the items endpoint
 // (…/items?path=/&$format=zip), filtered locally by PathFilter. A sync costs
-// one request for the files, whatever the repository size.
+// one request per ref for the files, whatever the repository size, plus one
+// to look up the default branch when no ref is configured.
 package sources
 
 import (
@@ -168,41 +169,75 @@ func readRepoZip(name string, patterns []string, progress ProgressCallback) ([]a
 	return files, nil
 }
 
-// fetchAdoRepoFiles embeds every file of the branch matching PathFilter (at
-// most top), one document per file holding its path and full content.
+// fetchAdoRepoFiles embeds every file matching PathFilter (at most top per
+// ref) of each configured ref, one document per path and content holding its
+// path, full content and the refs it is in.
 func (a *APISource) fetchAdoRepoFiles(ctx context.Context, itemsURL string, top int, progress ProgressCallback) ([]models.SourceDocument, error) {
-	zipURL, err := adoRepoZipURL(itemsURL)
+	refs, err := a.adoFileRefs(ctx, itemsURL)
 	if err != nil {
 		return nil, err
 	}
-	if progress != nil {
-		progress(models.SyncProgress{Phase: "fetching", Message: "Downloading repository zip"})
+	patterns := parsePathFilter(a.src.GetConfig("PathFilter"))
+	refURLs := make(map[gitRef]string, len(refs))
+	perRef := make([][]archiveFile, len(refs))
+	for i, ref := range refs {
+		refURL := withAdoItemsRef(itemsURL, ref)
+		refURLs[ref] = refURL
+		zipURL, err := adoRepoZipURL(refURL)
+		if err != nil {
+			return nil, err
+		}
+		if progress != nil {
+			progress(models.SyncProgress{Phase: "fetching", Message: "Downloading repository zip of " + ref.Name})
+		}
+		name, release, err := a.downloadRepoZip(ctx, zipURL)
+		if err != nil {
+			return nil, fmt.Errorf("downloading the repository at %q: %w", ref.Name, err)
+		}
+		files, err := readRepoZip(name, patterns, progress)
+		release()
+		if err != nil {
+			return nil, err
+		}
+		if len(files) > top {
+			files = files[:top]
+		}
+		perRef[i] = files
 	}
-	name, release, err := a.downloadRepoZip(ctx, zipURL)
-	if err != nil {
-		return nil, fmt.Errorf("downloading the repository: %w", err)
-	}
-	defer release()
-	files, err := readRepoZip(name, parsePathFilter(a.src.GetConfig("PathFilter")), progress)
-	if err != nil {
-		return nil, err
-	}
-	if len(files) > top {
-		files = files[:top]
-	}
-	items := make([]any, len(files))
-	for i, f := range files {
-		items[i] = map[string]any{"path": f.path}
-	}
-	docs := a.itemsToDocuments(items, itemsURL)
-	for i, f := range files {
+
+	merged := mergeRefFiles(refs, perRef)
+	docs := make([]models.SourceDocument, len(merged))
+	for i, f := range merged {
+		// Linked to the first ref holding this content.
+		d := a.itemsToDocuments([]any{map[string]any{"path": f.path}}, refURLs[f.refs[0]])[0]
 		body := f.text
 		if f.skipped {
 			body = "(binary or large file skipped)"
 		}
-		docs[i].Text = strings.TrimSpace(f.path + "\n\n" + body)
+		d.Text = strings.TrimSpace(f.path + "\n\n" + body)
 		// Keyed by path whatever IdField says: the zip carries no blob ids.
-		docs[i].ID = fmt.Sprintf("%s_capi_%s", a.src.ID, f.path)
+		d.ID = fmt.Sprintf("%s_capi_%s", a.src.ID, f.docKey())
+		d.Properties["title"] = f.title()
+		addVersionFilters(&d.Filters, d.Properties, f.refs)
+		docs[i] = d
 	}
 	return docs, nil
+}
+
+// adoFileRefs is the refs a file source reads: the one its Url already names,
+// else the configured branches and tags, else the repository's default
+// branch.
+func (a *APISource) adoFileRefs(ctx context.Context, itemsURL string) ([]gitRef, error) {
+	if ref, ok := adoURLRef(itemsURL); ok {
+		return []gitRef{ref}, nil
+	}
+	if refs := configuredRefs(a.src); len(refs) > 0 {
+		return refs, nil
+	}
+	repoBase, _ := AdoItemsAPIBase(itemsURL)
+	branch, err := a.adoDefaultBranch(ctx, a.httpClient(), repoBase, itemsURL)
+	if err != nil {
+		return nil, err
+	}
+	return []gitRef{{Name: branch}}, nil
 }

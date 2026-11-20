@@ -576,11 +576,19 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 	if _, ok := commit["state"]; ok {
 		t.Error("search_commit must not offer the work item filter \"state\"")
 	}
-	// Only one branch is ever embedded per source, so branch isn't a filter.
-	for _, tool := range []string{"search_commit", "search_source_code", "search_requirement"} {
+	// Branches and tags are both versions: one version filter, no branch
+	// filter.
+	for _, tool := range []string{"search_commit", "search_source_code", "search_test_code",
+		"search_documentation", "search_requirement"} {
 		if _, ok := filterProps(tool)["branch"]; ok {
 			t.Errorf("%s must not offer a branch filter", tool)
 		}
+		if _, ok := filterProps(tool)["version"]; !ok {
+			t.Errorf("%s lacks the version filter", tool)
+		}
+	}
+	if _, ok := filterProps("search_workitem")["version"]; ok {
+		t.Error("search_workitem must not offer the version filter")
 	}
 	// Every item another result can name by id is reachable by that id.
 	for tool, field := range map[string]string{

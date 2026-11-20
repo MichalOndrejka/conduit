@@ -9,8 +9,9 @@
 //	GitHubRepo   repository name
 //	Token        credential name of a personal access token (empty: public
 //	             repositories only, at a low rate limit)
-//	Branch       files and commits: branch to read (default: the
-//	             repository's default branch)
+//	Branch       files and commits: comma-separated branches to read
+//	Tags         files and commits: comma-separated tags to read (neither
+//	             set: the repository's default branch; see refs.go)
 //	PathFilter   files: comma-separated wildcards, as for Azure DevOps
 //	Top          commits and issues: max items, most recent first
 //	FetchMode    requirements / test cases: "files" (default) or "workitems"
@@ -184,11 +185,21 @@ func (g *GitHubSource) pages(ctx context.Context, listURL string, each func(data
 	}
 }
 
-// branch returns the configured branch, or the repository's default branch.
-func (g *GitHubSource) branch(ctx context.Context) (string, error) {
-	if b := strings.TrimSpace(g.src.GetConfig("Branch")); b != "" {
-		return b, nil
+// refs returns the configured branches and tags, or the repository's default
+// branch.
+func (g *GitHubSource) refs(ctx context.Context) ([]gitRef, error) {
+	if refs := configuredRefs(g.src); len(refs) > 0 {
+		return refs, nil
 	}
+	b, err := g.defaultBranch(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []gitRef{{Name: b}}, nil
+}
+
+// defaultBranch looks up the repository's default branch.
+func (g *GitHubSource) defaultBranch(ctx context.Context) (string, error) {
 	var repo struct {
 		DefaultBranch string `json:"default_branch"`
 	}

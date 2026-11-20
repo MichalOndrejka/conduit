@@ -118,10 +118,10 @@ func TestArchiveWithoutBatchIsNotShared(t *testing.T) {
 func TestAdoCodeAndTestCodeShareTheRepositoryZip(t *testing.T) {
 	zipBody := repoZip(t, map[string]string{"src/App.cs": "class App {}", "tests/AppTests.cs": "class AppTests {}"})
 	var downloads atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(defaultBranchShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		downloads.Add(1)
 		_, _ = w.Write(zipBody)
-	}))
+	})))
 	defer srv.Close()
 	src := func(typ, filter, password string) *APISource {
 		return &APISource{src: &models.SourceDefinition{ID: typ + password, Type: typ, Config: map[string]string{

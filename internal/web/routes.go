@@ -137,6 +137,8 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sources/preview", s.handleSourcePreview)
 	mux.HandleFunc("POST /sources/ado/workitemtypes", s.handleAdoWorkItemTypes)
 	mux.HandleFunc("POST /sources/github/issuetypes", s.handleGitHubIssueTypes)
+	mux.HandleFunc("POST /sources/ado/refs", s.handleAdoRefs)
+	mux.HandleFunc("POST /sources/github/refs", s.handleGitHubRefs)
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
 	mux.HandleFunc("POST /sources/{id}/toggle", s.handleSourceToggle)
 	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)

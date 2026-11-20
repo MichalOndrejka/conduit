@@ -64,7 +64,7 @@ var APIConfigKeys = []string{
 	"Token", "Username", "Password", "ApiKeyHeader", "ApiKeyValue",
 	"ItemsPath", "IdField", "TitleField", "ContentFields", "WebUrlField",
 	"NextUrlPath", "Top", "VerifySSL",
-	"Branch", "PathFilter", "WorkItemTypes", "AreaPaths",
+	"Branch", "Tags", "PathFilter", "WorkItemTypes", "AreaPaths",
 	"FetchMode", "DefinitionId", "PipelineFolder", "Runs",
 }
 
@@ -79,7 +79,7 @@ var PresetConfigKeys = []string{
 // GitHubConfigKeys are the GitHub source's config fields (see
 // internal/sources/github.go). Token names a stored credential.
 var GitHubConfigKeys = []string{
-	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "PathFilter",
+	"GitHubUrl", "GitHubOwner", "GitHubRepo", "Token", "Branch", "Tags", "PathFilter",
 	"Top", "FetchMode", "WorkItemTypes", "Labels", "Workflow", "Runs", "VerifySSL",
 }
 

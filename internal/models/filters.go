@@ -27,6 +27,7 @@ const (
 	FilterRecord        = "record"         // work item record: item, or change (one revision of its history)
 	FilterChangedBy     = "changed_by"     // who made a work item change: display name and unique name
 	FilterChangedField  = "changed_field"  // fields a work item change touched, reference and short name
+	FilterVersion       = "version"        // branch or tag a repository file or commit was embedded from
 )
 
 // FilterPrefix namespaces filter fields in a chunk's payload; FilterDateKey
@@ -63,6 +64,9 @@ func NormalizeFilterValue(field, v string) string {
 	}
 	if field == FilterWorkItemType {
 		v = singularType(v)
+	}
+	if field == FilterVersion {
+		v = strings.TrimPrefix(strings.TrimPrefix(v, "refs/heads/"), "refs/tags/")
 	}
 	if sep, ok := filterSeparators[field]; ok {
 		v = strings.ReplaceAll(strings.ReplaceAll(v, `\`, sep), "/", sep)

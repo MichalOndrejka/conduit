@@ -176,24 +176,92 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		return a.fetchAdoWorkItems(ctx, a.httpClient(), top, progress)
 	}
 
-	fileContentType := isFileContentType(cfg)
-	if fileContentType {
-		// Files come from Branch, or the repository's default branch when it
-		// is empty (ADO's own default with no versionDescriptor). Applied to
-		// url itself so the documents' web links open the same branch.
-		url = withAdoItemsBranch(url, cfg.GetConfig("Branch"))
-		// A repository's files come as one zip of the whole branch,
-		// filtered locally — never one request per file.
+	if isFileContentType(cfg) {
+		// A repository's files come as one zip per branch or tag, filtered
+		// locally — never one request per file.
 		if _, ok := AdoItemsAPIBase(url); ok {
 			return a.fetchAdoRepoFiles(ctx, url, top, progress)
 		}
 		if !isFileContentBestEffort(cfg) {
 			return nil, fmt.Errorf("%s sources require an Azure DevOps items API Url (…/_apis/git/repositories/{repo}/items)", cfg.Type)
 		}
+		// Not a repository (a wiki, say): its items as they are, at the first
+		// configured branch.
+		if refs := configuredRefs(cfg); len(refs) > 0 {
+			url = withAdoItemsRef(url, refs[0])
+		}
 	}
-	fetchURL := url
 
 	client := a.httpClient()
+	if cfg.Type != models.SourceGitCommits {
+		items, err := a.fetchItems(ctx, client, url, top, false, "", progress)
+		if err != nil {
+			return nil, err
+		}
+		return a.itemsToDocuments(items, url), nil
+	}
+
+	if _, ok := AdoRepoAPIBase(url); !ok {
+		return nil, fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", url)
+	}
+	// Azure DevOps' commits-list endpoint returns no next-page link for
+	// NextUrlPath to follow, and caps a response at adoCommitsPageSize items
+	// — without manually paging via searchCriteria.$top/$skip, a
+	// commit-history source silently stops at that page size regardless of
+	// its own Top setting.
+	if cfg.GetConfig("NextUrlPath") != "" {
+		items, err := a.fetchItems(ctx, client, url, top, false, "", progress)
+		if err != nil {
+			return nil, err
+		}
+		return a.commitDocuments(ctx, client, url, items, progress)
+	}
+	// Unfiltered, ADO's commits endpoint walks every branch's history, which
+	// duplicates commits shared with the default branch and pulls in
+	// throwaway feature-branch work — almost never what a "commit history"
+	// source wants indexed. Each configured branch and tag is listed (Top
+	// commits each), or the repository's default branch when none is; a
+	// commit listed from several is embedded once, with all of them.
+	refs := configuredRefs(cfg)
+	if len(refs) == 0 {
+		repoBase, _ := AdoRepoAPIBase(url)
+		b, err := a.adoDefaultBranch(ctx, client, repoBase, url)
+		if err != nil {
+			return nil, err
+		}
+		refs = []gitRef{{Name: b}}
+	}
+	var commits refCommits[any]
+	for _, ref := range refs {
+		items, err := a.fetchItems(ctx, client, withAdoRefFilter(url, ref), top, true, ref.Name, progress)
+		if err != nil {
+			return nil, err
+		}
+		for i, item := range items {
+			id := fieldString(item, "commitId")
+			if id == "" {
+				return nil, fmt.Errorf("commit item %d of %s has no commitId", i, ref.Name)
+			}
+			commits.add(id, item, ref)
+		}
+	}
+	// Commit enrichment is automatic for commit-history sources only — never
+	// a user-configurable option, and never applied to any other source type.
+	docs, err := a.commitDocuments(ctx, client, url, commits.items, progress)
+	if err != nil {
+		return nil, err
+	}
+	for i := range docs {
+		addVersionFilters(&docs[i].Filters, docs[i].Properties, commits.refs[i])
+	}
+	return docs, nil
+}
+
+// fetchItems reads up to top items from fetchURL, following NextUrlPath, or
+// with adoCommits Azure DevOps' commits paging (searchCriteria.$top/$skip).
+// label names what is listed in progress messages (a ref), if anything.
+func (a *APISource) fetchItems(ctx context.Context, client *http.Client, fetchURL string, top int, adoCommits bool, label string, progress ProgressCallback) ([]any, error) {
+	cfg := a.src
 	itemsPath := cfg.GetConfig("ItemsPath")
 	// progressTotal is left at 0 (meaning "unknown") when top is the
 	// unlimited default — a real Total of math.MaxInt32 would render as a
@@ -202,32 +270,8 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	if top == unlimitedTop {
 		progressTotal = 0
 	}
-	// Azure DevOps' commits-list endpoint returns no next-page link for
-	// NextUrlPath to follow, and caps a response at adoCommitsPageSize items
-	// — without manually paging via searchCriteria.$top/$skip, a
-	// commit-history source silently stops at that page size regardless of
-	// its own Top setting.
-	paginateAdoCommits := cfg.Type == models.SourceGitCommits && cfg.GetConfig("NextUrlPath") == ""
-	if cfg.Type == models.SourceGitCommits {
-		if _, ok := AdoRepoAPIBase(url); !ok {
-			return nil, fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", url)
-		}
-	}
-	if paginateAdoCommits {
-		// Unfiltered, ADO's commits endpoint walks every branch's history,
-		// which duplicates commits shared with the default branch and pulls
-		// in throwaway feature-branch work — almost never what a "commit
-		// history" source wants indexed. An empty Branch means the
-		// repository's default branch.
-		branch := strings.TrimSpace(cfg.GetConfig("Branch"))
-		if branch == "" {
-			b, err := a.adoDefaultBranch(ctx, client, url)
-			if err != nil {
-				return nil, err
-			}
-			branch = b
-		}
-		fetchURL = withAdoBranchFilter(fetchURL, branch)
+	if label != "" {
+		label = " of " + label
 	}
 	skip := 0
 	lastPageFirstID := ""
@@ -236,9 +280,9 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	// maxPages guards against a cyclic NextUrlPath; ADO commit paging can't
 	// cycle (it stops on the first empty page), so it's exempt — capping it
 	// would silently drop the oldest commits of a long history.
-	for page := 0; (paginateAdoCommits || page < maxPages) && pageURL != "" && len(items) < top; page++ {
+	for page := 0; (adoCommits || page < maxPages) && pageURL != "" && len(items) < top; page++ {
 		reqURL := pageURL
-		if paginateAdoCommits {
+		if adoCommits {
 			pageSize := adoCommitsPageSize
 			if top != unlimitedTop && top-len(items) < pageSize {
 				pageSize = top - len(items)
@@ -248,7 +292,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		if progress != nil {
 			progress(models.SyncProgress{
 				Phase: "fetching", Current: len(items), Total: progressTotal,
-				Message: fmt.Sprintf("Fetching page %d", page+1),
+				Message: fmt.Sprintf("Fetching page %d%s", page+1, label),
 			})
 		}
 		data, err := a.fetchPage(ctx, client, reqURL)
@@ -256,7 +300,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 			return nil, err
 		}
 		pageItems := resolveItems(data, itemsPath)
-		if paginateAdoCommits && page > 0 && len(pageItems) > 0 {
+		if adoCommits && page > 0 && len(pageItems) > 0 {
 			// Uncapped paging relies on $skip advancing; a server that ignores
 			// it would otherwise return the same page forever.
 			if first := fieldString(pageItems[0], "commitId"); first != "" && first == lastPageFirstID {
@@ -268,7 +312,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		}
 		items = append(items, pageItems...)
 		pageURL = ""
-		if paginateAdoCommits {
+		if adoCommits {
 			if len(pageItems) > 0 {
 				skip += len(pageItems)
 				pageURL = fetchURL // keep paging; loop guards (Top, maxPages) bound it
@@ -282,12 +326,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	if len(items) > top {
 		items = items[:top]
 	}
-	// Commit enrichment is automatic for commit-history sources only — never
-	// a user-configurable option, and never applied to any other source type.
-	if cfg.Type == models.SourceGitCommits {
-		return a.commitDocuments(ctx, client, url, items, progress)
-	}
-	return a.itemsToDocuments(items, url), nil
+	return items, nil
 }
 
 // commitOutcome is one commit's enrichment result, computed off the main

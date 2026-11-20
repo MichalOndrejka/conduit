@@ -20,6 +20,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/memory"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
+	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/sources"
 )
@@ -327,6 +328,31 @@ func (s *Server) handleGitHubIssueTypes(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true, "types": types, "available": available})
+}
+
+// handleAdoRefs lists the branches and tags of the Azure DevOps repository
+// named in the form (unsaved), for the version picker.
+func (s *Server) handleAdoRefs(w http.ResponseWriter, r *http.Request) {
+	s.writeRepoRefs(w, r, sources.AdoRepoRefs)
+}
+
+// handleGitHubRefs lists the branches and tags of the GitHub repository named
+// in the form (unsaved), for the version picker.
+func (s *Server) handleGitHubRefs(w http.ResponseWriter, r *http.Request) {
+	s.writeRepoRefs(w, r, sources.GitHubRepoRefs)
+}
+
+func (s *Server) writeRepoRefs(w http.ResponseWriter, r *http.Request,
+	list func(context.Context, *models.SourceDefinition, secrets.Reader) (sources.RepoRefs, error)) {
+	src := sourceFromForm(r, &models.SourceDefinition{})
+	ctx, cancel := context.WithTimeout(r.Context(), previewTimeout)
+	defer cancel()
+	refs, err := list(ctx, src, s.secrets)
+	if err != nil {
+		writeJSON(w, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "default": refs.DefaultBranch, "branches": refs.Branches, "tags": refs.Tags})
 }
 
 // handleSourceDelete removes the source and its vectors, mirroring

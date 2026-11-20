@@ -379,7 +379,7 @@ func TestGitHubRetriesRateLimit(t *testing.T) {
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"default_branch": "trunk"})
 	})
-	b, err := f.source(t, models.SourceCodeRepo, nil).branch(context.Background())
+	b, err := f.source(t, models.SourceCodeRepo, nil).defaultBranch(context.Background())
 	if err != nil || b != "trunk" || calls != 2 {
 		t.Errorf("branch = %q, err %v, calls %d; want a retry after the rate-limit 403", b, err, calls)
 	}
@@ -389,7 +389,7 @@ func TestGitHubRetriesRateLimit(t *testing.T) {
 	f2.HandleFunc("/api/v3/repos/acme/app", func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
 	})
-	if _, err := f2.source(t, models.SourceCodeRepo, nil).branch(context.Background()); err == nil ||
+	if _, err := f2.source(t, models.SourceCodeRepo, nil).defaultBranch(context.Background()); err == nil ||
 		!strings.Contains(err.Error(), "not accessible") {
 		t.Errorf("err = %v, want GitHub's message", err)
 	}

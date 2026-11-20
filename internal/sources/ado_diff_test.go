@@ -845,19 +845,23 @@ func TestFetchDocumentsCommitHistoryFiltersByBranch(t *testing.T) {
 	}
 }
 
-func TestWithAdoItemsBranch(t *testing.T) {
+func TestWithAdoItemsRef(t *testing.T) {
 	const base = "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1"
-	cases := []struct{ in, branch, want string }{
-		{base, "", base},
-		{base, "  ", base},
-		{base, "release/2.0", "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1&versionDescriptor.version=release%2F2.0&versionDescriptor.versionType=branch"},
-		{base, "refs/heads/dev", "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1&versionDescriptor.version=dev&versionDescriptor.versionType=branch"},
+	cases := []struct {
+		in   string
+		ref  gitRef
+		want string
+	}{
+		{base, gitRef{}, base},
+		{base, gitRef{Name: "  "}, base},
+		{base, gitRef{Name: "release/2.0"}, "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1&versionDescriptor.version=release%2F2.0&versionDescriptor.versionType=branch"},
+		{base, gitRef{Name: "v2.0", Tag: true}, "https://ado/org/proj/_apis/git/repositories/repo/items?api-version=7.1&versionDescriptor.version=v2.0&versionDescriptor.versionType=tag"},
 		// A version already in the URL wins.
-		{base + "&versionDescriptor.version=v1&versionDescriptor.versionType=tag", "dev", base + "&versionDescriptor.version=v1&versionDescriptor.versionType=tag"},
+		{base + "&versionDescriptor.version=v1&versionDescriptor.versionType=tag", gitRef{Name: "dev"}, base + "&versionDescriptor.version=v1&versionDescriptor.versionType=tag"},
 	}
 	for _, c := range cases {
-		if got := withAdoItemsBranch(c.in, c.branch); got != c.want {
-			t.Errorf("withAdoItemsBranch(%q, %q) = %q, want %q", c.in, c.branch, got, c.want)
+		if got := withAdoItemsRef(c.in, c.ref); got != c.want {
+			t.Errorf("withAdoItemsRef(%q, %+v) = %q, want %q", c.in, c.ref, got, c.want)
 		}
 	}
 }
@@ -898,6 +902,19 @@ func TestFetchDocumentsFilesUseBranch(t *testing.T) {
 // blobsZipShim serves Azure DevOps' Get Blobs Zip (POST …/blobs with a JSON
 // array of ids) from h's per-blob GET …/blobs/{sha} responses, so a stub
 // written for single blobs serves batched downloads too.
+// defaultBranchShim answers the repository lookup a file or commit source
+// without a configured ref makes for its default branch (main), passing
+// every other request to h.
+func defaultBranchShim(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/_apis/git/repositories/repo") {
+			_, _ = w.Write([]byte(`{"defaultBranch":"refs/heads/main"}`))
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func blobsZipShim(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/blobs") {

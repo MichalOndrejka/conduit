@@ -1,6 +1,8 @@
-// Commit history for GitHubSource: the branch's commits, newest first, each
-// with its full message and the patch of every changed file. Unlike Azure
-// DevOps, GitHub returns the patches itself, so nothing is diffed locally.
+// Commit history for GitHubSource: each configured branch's or tag's commits,
+// newest first, each with its full message and the patch of every changed
+// file. A commit listed from several refs is embedded once, with all of them.
+// Unlike Azure DevOps, GitHub returns the patches itself, so nothing is
+// diffed locally.
 //
 // A commit that can't be fetched fails the sync rather than being indexed
 // partially. Where GitHub itself leaves something out (patches of binary or
@@ -58,14 +60,21 @@ type githubCommitDiff struct {
 }
 
 func (g *GitHubSource) fetchCommits(ctx context.Context, progress ProgressCallback) ([]models.SourceDocument, error) {
-	branch, err := g.branch(ctx)
+	refs, err := g.refs(ctx)
 	if err != nil {
 		return nil, err
 	}
-	commits, err := g.listCommits(ctx, branch, progress)
-	if err != nil {
-		return nil, err
+	var listed refCommits[githubCommit]
+	for _, ref := range refs {
+		cs, err := g.listCommits(ctx, ref.Name, progress)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range cs {
+			listed.add(c.SHA, c, ref)
+		}
 	}
+	commits := listed.items
 
 	n := len(commits)
 	diffs := make([]githubCommitDiff, n)
@@ -120,18 +129,18 @@ func (g *GitHubSource) fetchCommits(ctx context.Context, progress ProgressCallba
 
 	docs := make([]models.SourceDocument, n)
 	for i, c := range commits {
-		docs[i] = g.commitDocument(c, diffs[i], branch)
+		docs[i] = g.commitDocument(c, diffs[i], listed.refs[i])
 	}
 	return docs, nil
 }
 
-// listCommits pages through the branch's history until it (or Top) runs
-// out.
-func (g *GitHubSource) listCommits(ctx context.Context, branch string, progress ProgressCallback) ([]githubCommit, error) {
+// listCommits pages through a branch's or tag's history until it (or Top)
+// runs out.
+func (g *GitHubSource) listCommits(ctx context.Context, ref string, progress ProgressCallback) ([]githubCommit, error) {
 	top := g.top()
 	var all []githubCommit
 	seen := map[string]bool{}
-	err := g.pages(ctx, g.repoAPI()+"/commits?sha="+url.QueryEscape(branch), func(data []byte) (int, bool, error) {
+	err := g.pages(ctx, g.repoAPI()+"/commits?sha="+url.QueryEscape(ref), func(data []byte) (int, bool, error) {
 		var page []githubCommit
 		if err := json.Unmarshal(data, &page); err != nil {
 			return 0, false, fmt.Errorf("listing commits: %w", err)
@@ -146,7 +155,7 @@ func (g *GitHubSource) listCommits(ctx context.Context, branch string, progress 
 		if progress != nil {
 			progress(models.SyncProgress{
 				Phase: "fetching", Current: len(all), Total: top,
-				Message: fmt.Sprintf("Listing commits (%d so far)", len(all)),
+				Message: fmt.Sprintf("Listing commits of %s (%d so far)", ref, len(all)),
 			})
 		}
 		return len(page), top == 0 || len(all) < top, nil
@@ -214,7 +223,7 @@ func githubFilePatch(f githubCommitFile, oldPath string) (diff string, missing b
 	}
 }
 
-func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, branch string) models.SourceDocument {
+func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, refs []gitRef) models.SourceDocument {
 	a, cm := c.Commit.Author, c.Commit.Committer
 	var sb strings.Builder
 	sb.WriteString("Commit " + c.SHA + "\n")
@@ -223,7 +232,7 @@ func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, branch
 	if cm.Name != "" && (cm.Name != a.Name || cm.Email != a.Email) {
 		writeField(&sb, "Committer", strings.TrimSpace(cm.Name+" "+angle(cm.Email)))
 	}
-	writeField(&sb, "Branch", branch)
+	writeField(&sb, "Version", refNames(refs))
 	writeField(&sb, "Files changed", strconv.Itoa(d.filesChanged))
 	sb.WriteString("\n" + strings.TrimSpace(c.Commit.Message) + "\n")
 	if d.diff != "" {
@@ -247,10 +256,10 @@ func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, branch
 		"web_url":       webURL,
 		"commit":        c.SHA,
 		"author":        a.Name,
-		"branch":        branch,
 		"files_changed": strconv.Itoa(d.filesChanged),
 	}
 	filters := g.scopeFilters(props)
+	addVersionFilters(&filters, props, refs)
 	filters.Add(models.FilterCommit, c.SHA)
 	filters.Add(models.FilterPath, d.paths...)
 	filters.Add(models.FilterAuthor, a.Name, a.Email)

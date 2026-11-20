@@ -36,6 +36,8 @@ tool_name(request: { mode: "list", filters?: {...}, order_by?: str, direction?: 
 
 **`"me"`** works in person filters (`author`, `assigned_to`, `changed_by`). Each sync records the source token's owner (Azure DevOps `connectionData`, GitHub `/user`), and `me` matches the owners of every enabled source. Before any source has synced, `me` is an error that says so.
 
+**`version`** <a id="versions"></a> narrows repository files and commits to a branch or tag (`main`, `release/2.0`, `v2.1`; `refs/heads/…` and `refs/tags/…` work too), for sources embedding several versions (see [sources.md](sources.md#versions-branches-and-tags)). A file or commit that is the same in several versions is stored once and matches each of them; every result names its versions in `version`. Without the filter, results come from every version.
+
 **`work_item_type`** matches the singular type names Azure DevOps and GitHub use, and a plural is read as its singular: `Software Requirements` finds items of type `Software Requirement`, `User Stories` finds `User Story`.
 
 `semantic_search` and `pattern_search` return a page of up to 5 matches per call: `{ "results": [...], "page": N, "has_more": bool }`. `has_more: true` means call again with `page + 1` for the next batch. When `results` is empty, a `note` explains why (nothing embedded yet, no match, or the last page was already reached).

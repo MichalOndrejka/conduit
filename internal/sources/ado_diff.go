@@ -64,27 +64,29 @@ func withAdoCommitsPaging(commitsURL string, top, skip int) string {
 	return fmt.Sprintf("%s%ssearchCriteria.$top=%d&searchCriteria.$skip=%d", commitsURL, sep, top, skip)
 }
 
-// withAdoBranchFilter appends Azure DevOps' commits-list branch filter
-// (searchCriteria.itemVersion.version) to a commits API URL, scoping the
-// listed commits to a single branch's history instead of every branch in the
+// withAdoRefFilter appends Azure DevOps' commits-list version filter
+// (searchCriteria.itemVersion) to a commits API URL, scoping the listed
+// commits to one branch's or tag's history instead of every branch in the
 // repository.
-func withAdoBranchFilter(commitsURL, branch string) string {
+func withAdoRefFilter(commitsURL string, ref gitRef) string {
 	sep := "?"
 	if strings.Contains(commitsURL, "?") {
 		sep = "&"
 	}
-	return fmt.Sprintf("%s%ssearchCriteria.itemVersion.version=%s", commitsURL, sep, url.QueryEscape(branch))
+	versionType := "branch"
+	if ref.Tag {
+		versionType = "tag"
+	}
+	return fmt.Sprintf("%s%ssearchCriteria.itemVersion.version=%s&searchCriteria.itemVersion.versionType=%s",
+		commitsURL, sep, url.QueryEscape(ref.Name), versionType)
 }
 
 // adoDefaultBranch looks up the default branch (without refs/heads/) of the
-// repository a commits-list URL points at, using that URL's api-version.
-func (a *APISource) adoDefaultBranch(ctx context.Context, client *http.Client, commitsURL string) (string, error) {
-	repoBase, ok := AdoRepoAPIBase(commitsURL)
-	if !ok {
-		return "", fmt.Errorf("not an Azure DevOps commits URL: %q", commitsURL)
-	}
+// repository at repoBase (".../_apis/git/repositories/{repo}"), using
+// apiURL's api-version.
+func (a *APISource) adoDefaultBranch(ctx context.Context, client *http.Client, repoBase, apiURL string) (string, error) {
 	version := "7.1"
-	if u, err := url.Parse(commitsURL); err == nil && u.Query().Get("api-version") != "" {
+	if u, err := url.Parse(apiURL); err == nil && u.Query().Get("api-version") != "" {
 		version = u.Query().Get("api-version")
 	}
 	data, err := a.getRaw(ctx, client, repoBase+"?api-version="+url.QueryEscape(version))
@@ -98,17 +100,16 @@ func (a *APISource) adoDefaultBranch(ctx context.Context, client *http.Client, c
 		return "", fmt.Errorf("repository response is not valid JSON: %w", err)
 	}
 	if repo.DefaultBranch == "" {
-		return "", fmt.Errorf("repository has no default branch (is it empty?); set Branch")
+		return "", fmt.Errorf("repository has no default branch (is it empty?); tick a branch or tag")
 	}
 	return strings.TrimPrefix(repo.DefaultBranch, "refs/heads/"), nil
 }
 
-// withAdoItemsBranch scopes an ADO items-list URL to branch via
-// versionDescriptor. An empty branch, or a URL that already names a version,
-// is left as is.
-func withAdoItemsBranch(itemsURL, branch string) string {
-	branch = strings.TrimPrefix(strings.TrimSpace(branch), "refs/heads/")
-	if branch == "" {
+// withAdoItemsRef scopes an ADO items-list URL to a branch or tag via
+// versionDescriptor. An empty name, or a URL that already names a version, is
+// left as is.
+func withAdoItemsRef(itemsURL string, ref gitRef) string {
+	if strings.TrimSpace(ref.Name) == "" {
 		return itemsURL
 	}
 	u, err := url.Parse(itemsURL)
@@ -119,10 +120,28 @@ func withAdoItemsBranch(itemsURL, branch string) string {
 	if q.Get("versionDescriptor.version") != "" {
 		return itemsURL
 	}
-	q.Set("versionDescriptor.version", branch)
+	q.Set("versionDescriptor.version", ref.Name)
 	q.Set("versionDescriptor.versionType", "branch")
+	if ref.Tag {
+		q.Set("versionDescriptor.versionType", "tag")
+	}
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// adoURLRef is the version an items URL already names in its
+// versionDescriptor (a source whose Url was written by hand).
+func adoURLRef(itemsURL string) (gitRef, bool) {
+	u, err := url.Parse(itemsURL)
+	if err != nil {
+		return gitRef{}, false
+	}
+	q := u.Query()
+	name := q.Get("versionDescriptor.version")
+	if name == "" {
+		return gitRef{}, false
+	}
+	return gitRef{Name: name, Tag: strings.EqualFold(q.Get("versionDescriptor.versionType"), "tag")}, true
 }
 
 // AdoRepoAPIBase derives the ADO git-repository API base
