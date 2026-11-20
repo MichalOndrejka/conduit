@@ -25,7 +25,6 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
-	"github.com/MichalOndrejka/conduit/internal/setup"
 	"github.com/MichalOndrejka/conduit/internal/sourcemgmt"
 	"github.com/MichalOndrejka/conduit/internal/stats"
 	"github.com/MichalOndrejka/conduit/internal/store"
@@ -53,15 +52,6 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	// docker-compose's one-shot step before Conduit starts: pull models and
-	// check GPU placement (see internal/setup). Needs only the config.
-	//   conduit setup
-	if len(os.Args) > 1 && os.Args[1] == "setup" {
-		if err := runSetup(cfg); err != nil {
-			os.Exit(1)
-		}
-		return
-	}
 	// Local-only accuracy evals; evalCmd is set by an untracked eval_local.go.
 	//   conduit eval <retrieval|agent|export|find> [flags]
 	if len(os.Args) > 1 && os.Args[1] == "eval" && evalCmd != nil {
@@ -262,28 +252,6 @@ func listenAddr() string {
 		port = p
 	}
 	return net.JoinHostPort(host, port)
-}
-
-// runSetup prepares the configured embedding and preprocessing models.
-// OLLAMA_GPU_EXPECTED is set by the GPU compose overlays.
-func runSetup(cfg *config.AppConfig) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	ms := []setup.Model{{
-		Name: cfg.Embedding.Model, OllamaURL: setup.OllamaURL(cfg.Embedding.BaseURL), Embedding: true,
-	}}
-	if cfg.Preprocessing.Model != "" {
-		ms = append(ms, setup.Model{
-			Name: cfg.Preprocessing.Model, OllamaURL: setup.OllamaURL(cfg.Preprocessing.BaseURL),
-		})
-	}
-	return setup.Run(ctx, setup.Options{
-		QdrantURL:    strings.TrimRight(cfg.Qdrant.URL, "/"),
-		QdrantAPIKey: cfg.Qdrant.APIKey,
-		Models:       ms,
-		GPUExpected:  os.Getenv("OLLAMA_GPU_EXPECTED"),
-		Out:          os.Stdout,
-	})
 }
 
 // runHealthcheck reports whether this process's own web server answers

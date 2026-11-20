@@ -9,17 +9,19 @@ memory store for MCP clients.
 
 ## Quick start
 
-With [Docker Desktop](https://docs.docker.com/get-docker/):
+With [Docker Desktop](https://docs.docker.com/get-docker/) and
+[Ollama](https://ollama.com/download) running on your machine:
 
 ```
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up
+ollama pull nomic-embed-text-v2-moe
+docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up -d
 ```
 
 Other ways: [Podman](docs/install/podman.md),
 [standalone container](docs/install/standalone.md),
 [from source](docs/install/source.md).
 
-When it logs `Setup done`, open http://localhost:8000, add credentials and a
+Open http://localhost:8000, add credentials and a
 source, and **Sync**. Then point your MCP client at it:
 
 ```json

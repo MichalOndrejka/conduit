@@ -21,7 +21,6 @@ internal/sources/       source abstraction (generic API source for Azure DevOps 
 internal/syncsvc/       sync orchestration (fetch → index, pause/cancel)
 internal/syncctl/       pause/cancel control + progress stores
 internal/health/        background probes with exponential backoff
-internal/setup/         `conduit setup`: compose model pull + GPU check
 internal/sourcemgmt/    source types, config validation, save/delete with vector cleanup
 internal/embedstate/    detects embedding model changes at startup
 internal/store/         conduit-sources.json store

@@ -1,7 +1,8 @@
 # Install as a standalone container
 
-Runs Conduit and Qdrant in containers, against Ollama installed on the host.
-Use it when Ollama must run natively, e.g. an AMD GPU on Windows.
+Runs Conduit and Qdrant with plain `docker run`, against Ollama installed on
+the host. Use it when Compose isn't available; otherwise
+[Docker](docker.md) does the same with one command.
 
 ## Prerequisites
 
