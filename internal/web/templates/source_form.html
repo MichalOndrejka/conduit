@@ -22,7 +22,7 @@
 {{end}}
 
 <!-- Azure DevOps work item fields: the Work Items type and the
-     Requirements/Test Cases Work Items fetch mode. -->
+     Requirements Work Items fetch mode. -->
 {{define "worktype-picker"}}
 {{$s := .Source}}
 <div>
@@ -119,7 +119,7 @@
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
     <div id="ado-block" class="tab-panel p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
-      {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
+      {{$isDualMode := eq $s.Type "requirements"}}
       {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -266,7 +266,7 @@
     <!-- ── GitHub ───────────────────────────────────────────────────── -->
     <div id="github-block" class="hidden tab-panel p-5 space-y-4">
       {{$isWorkItemType := eq $s.Type "work-item"}}
-      {{$isDualMode := or (eq $s.Type "requirements") (eq $s.Type "test-case")}}
+      {{$isDualMode := eq $s.Type "requirements"}}
       {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -431,7 +431,7 @@ function currentFetchMode() {
   return el ? el.value : 'files';
 }
 
-// Dual-mode sources (Requirements, Test Cases) render both the file-glob and
+// Dual-mode sources (Requirements) render both the file-glob and
 // work-item field sets in the DOM (see fetch-files-fields /
 // fetch-workitems-fields) and toggle between them client-side, instead of
 // reloading the page like the tab switch above.
@@ -457,7 +457,7 @@ function prepareSubmit() {
     var org = adoVal('AdoOrg').replace(/\/+$/, '');
     var proj = encodeURIComponent(adoVal('AdoProject'));
     var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
-      ((SOURCE_TYPE === 'requirements' || SOURCE_TYPE === 'test-case') && currentFetchMode() === 'workitems');
+      (SOURCE_TYPE === 'requirements' && currentFetchMode() === 'workitems');
     if (SOURCE_TYPE === 'pipeline-run') {
       // Pipeline runs are read from AdoOrg/AdoProject and DefinitionId or
       // PipelineFolder (see PipelineProviderFor) — this URL is only stored,
@@ -476,7 +476,7 @@ function prepareSubmit() {
     } else {
       var ver = adoVal('AdoApiVersion') || '7.1';
       // "Files" types (Source Code, Test Code, Documentation, and
-      // Requirements/Test Cases in file mode) hit the items endpoint of a
+      // Requirements in file mode) hit the items endpoint of a
       // single named repo, and Commit History hits the commits endpoint of
       // one — the repo name is all the user needs to give, the rest of the
       // path is fixed.

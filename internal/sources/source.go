@@ -52,6 +52,9 @@ type SyncResult struct {
 // New creates the implementation for a source definition. Provider selects
 // the fetch mechanism; the source *type* only selects the target collection.
 func New(src *models.SourceDefinition, store secrets.Reader) (Source, error) {
+	if src.Type == models.RetiredSourceTestCase {
+		return nil, fmt.Errorf("the Test Cases source type was merged into Requirements; recreate this source as a Requirements source")
+	}
 	switch src.GetConfig("Provider") {
 	case "", "api", "custom":
 		return &APISource{src: src, secrets: store}, nil
@@ -75,8 +78,6 @@ func CollectionFor(src *models.SourceDefinition) string {
 		return models.CollectionWorkItems
 	case models.SourceRequirements:
 		return models.CollectionRequirements
-	case models.SourceTestCase:
-		return models.CollectionTestCases
 	case models.SourceGitCommits:
 		return models.CollectionCommits
 	case models.SourcePipelineRun, models.SourcePullRequest:

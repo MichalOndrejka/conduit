@@ -28,8 +28,7 @@ type TypeInfo struct{ Value, Label, Description string }
 // Types drives the UI's type-picker tiles and the MCP tool's type list.
 var Types = []TypeInfo{
 	{models.SourceWorkItemQuery, "Work Items", "Epics, features, stories, bugs and tasks from a work-tracking system."},
-	{models.SourceRequirements, "Requirements", "Product and software requirements, risks and specifications."},
-	{models.SourceTestCase, "Test Cases", "Manual and automated test-case definitions."},
+	{models.SourceRequirements, "Requirements", "Product and software requirements, risks, specifications and test cases."},
 	{models.SourceGitCommits, "Commit History", "Commit history and messages from a repository."},
 	{models.SourcePipelineRun, "Pipeline Runs", "Build pipelines whose runs, steps, logs and tests are read live. Not synced."},
 	{models.SourcePullRequest, "Pull Requests", "A repository whose pull requests, diffs and comment threads are read live. Not synced."},

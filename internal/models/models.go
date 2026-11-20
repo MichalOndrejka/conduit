@@ -13,7 +13,6 @@ const (
 	CollectionRequirements  = "conduit_requirements"
 	CollectionSourceCode    = "conduit_code"
 	CollectionTestCode      = "conduit_testcode"
-	CollectionTestCases     = "conduit_testcases"
 	CollectionDocumentation = "conduit_documentation"
 	CollectionCommits       = "conduit_commits"
 	CollectionExperience    = "conduit_experience"
@@ -22,20 +21,20 @@ const (
 // AllCollections mirrors CollectionNames.ALL in app/models.py.
 var AllCollections = []string{
 	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
-	CollectionTestCode, CollectionTestCases,
+	CollectionTestCode,
 	CollectionDocumentation, CollectionCommits, CollectionExperience,
 }
 
 // RetiredCollections held data that is now read live (pipeline runs, pull
-// requests); startup drops them if they still exist.
-var RetiredCollections = []string{"conduit_pipeline_runs", "conduit_pull_requests"}
+// requests) or whose source type was merged into another (test cases, now
+// Requirements sources); startup drops them if they still exist.
+var RetiredCollections = []string{"conduit_pipeline_runs", "conduit_pull_requests", "conduit_testcases"}
 
 // ── Source types ─────────────────────────────────────────────────────────────
 
 const (
 	SourceWorkItemQuery = "work-item"
 	SourceRequirements  = "requirements"
-	SourceTestCase      = "test-case"
 	SourceCodeRepo      = "code"
 	SourceTestCodeRepo  = "test-code"
 	SourceDocumentation = "documentation"
@@ -43,6 +42,10 @@ const (
 	SourcePipelineRun   = "pipeline-run"
 	SourcePullRequest   = "pull-request"
 )
+
+// RetiredSourceTestCase was the Test Cases source type; test cases are now
+// Requirements sources. A stored source of this type isn't synced.
+const RetiredSourceTestCase = "test-case"
 
 // IsLiveType reports whether sources of type t are read live by their tool
 // (search_pipeline_run, search_pull_request) instead of being synced into

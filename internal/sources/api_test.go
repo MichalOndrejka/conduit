@@ -244,3 +244,20 @@ func TestFactorySelectsProvider(t *testing.T) {
 		t.Error("unknown provider should error")
 	}
 }
+
+// The Test Cases type was merged into Requirements: a leftover source of the
+// old type must not sync (CollectionFor would route it to Documentation).
+func TestNewRejectsRetiredTestCaseType(t *testing.T) {
+	s := src(map[string]string{"Url": "http://example.invalid"})
+	s.Type = models.RetiredSourceTestCase
+	if _, err := New(s, fakeSecrets{}); err == nil || !strings.Contains(err.Error(), "Requirements") {
+		t.Fatalf("New(test-case) = %v, want an error pointing to Requirements", err)
+	}
+	s.Type = models.SourceRequirements
+	if _, err := New(s, fakeSecrets{}); err != nil {
+		t.Fatalf("New(requirements): %v", err)
+	}
+	if got := CollectionFor(s); got != models.CollectionRequirements {
+		t.Fatalf("CollectionFor(requirements) = %q, want %q", got, models.CollectionRequirements)
+	}
+}

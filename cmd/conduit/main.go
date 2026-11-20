@@ -108,14 +108,14 @@ func main() {
 	if err := vectors.EnsureCollections(ensureCtx, models.AllCollections, cfg.Embedding.Dimensions); err != nil {
 		log.Printf("warning: could not create collections yet (retried by the Qdrant health probe): %v", err)
 	}
-	// Pipeline runs and pull requests are read live now; drop what earlier
-	// versions indexed of them.
+	// Pipeline runs and pull requests are read live now, and test cases are
+	// Requirements sources; drop what earlier versions indexed of them.
 	for _, name := range models.RetiredCollections {
 		if vectors.CollectionExists(ensureCtx, name) {
 			if err := vectors.DeleteCollection(ensureCtx, name); err != nil {
 				log.Printf("warning: could not drop retired collection %s: %v", name, err)
 			} else {
-				log.Printf("dropped retired collection %s (now read live)", name)
+				log.Printf("dropped retired collection %s", name)
 			}
 		}
 	}

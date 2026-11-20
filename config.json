@@ -32,7 +32,6 @@
       "commit-history": false,
       "documentation": false,
       "requirements": true,
-      "test-case": false,
       "test-code": true,
       "work-item": true
     },

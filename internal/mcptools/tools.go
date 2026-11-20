@@ -322,15 +322,14 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 			"children, related items as #id; pull requests as !id; commits by SHA; builds by id) and the whole discussion. "+
 			"Filter by id, project, type, state, iteration path, assignee or tags."+workItemHistoryNote)
 	makeSearchTool(models.CollectionRequirements, "search_requirement",
-		"Semantic search over requirements (features, user stories, epics)."+workItemHistoryNote)
+		"Semantic search over requirements (features, user stories, epics, specifications) and test cases "+
+			"with their steps. Narrow by work_item_type (e.g. Test Case) or by path for those kept as files."+workItemHistoryNote)
 	makeSearchTool(models.CollectionSourceCode, "search_source_code",
 		"Semantic search over production source code (classes, methods, functions). "+
 			"Does not include test files — use search_test_code for tests.")
 	makeSearchTool(models.CollectionTestCode, "search_test_code",
 		"Semantic search over test code — unit tests, integration tests and specs. "+
 			"Use this to find test coverage, test patterns, or examples of how code is tested.")
-	makeSearchTool(models.CollectionTestCases, "search_testcase",
-		"Semantic search over test cases including test steps."+workItemHistoryNote)
 	makeSearchTool(models.CollectionDocumentation, "search_documentation",
 		"Semantic search over wiki pages, repo documentation and uploaded documents.")
 	makeSearchTool(models.CollectionCommits, "search_commit",

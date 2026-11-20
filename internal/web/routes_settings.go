@@ -33,7 +33,6 @@ import (
 var preprocSourceTypes = []struct{ Key, Label string }{
 	{"work-item", "Work Items"},
 	{"requirements", "Requirements"},
-	{"test-case", "Test Cases"},
 	{"commit-history", "Commit History"},
 	{"pipeline-run", "Pipeline Runs"},
 	{"pull-request", "Pull Requests"},

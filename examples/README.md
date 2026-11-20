@@ -12,7 +12,7 @@ authenticated with a PAT via basic auth.
 | SeeFood API — Commits | `commit-history` | `git/repositories/seefood-api/commits` |
 | SeeFood App — Commits | `commit-history` | `git/repositories/seefood-app/commits` |
 | SeeFood — Work Items | `work-item` | `wit/workitems?ids=13…30` |
-| SeeFood — Test Cases | `test-case` | `wit/workitems?ids=31…35` |
+| SeeFood — Test Cases | `requirements` | `wit/workitems?ids=31…35` |
 
 ### How to use
 

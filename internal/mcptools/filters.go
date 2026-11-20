@@ -70,12 +70,11 @@ var (
 )
 
 // collectionFilters lists the filters each search tool's collection
-// supports. Requirements and test cases can come from repo files or work
-// items, so they accept both sets.
+// supports. Requirements (test cases included) can come from repo files or
+// work items, so they accept both sets.
 var collectionFilters = map[string][]filterField{
 	models.CollectionWorkItems:     workItemFilters,
 	models.CollectionRequirements:  reqTestFilters,
-	models.CollectionTestCases:     reqTestFilters,
 	models.CollectionSourceCode:    repoFileFilters,
 	models.CollectionTestCode:      repoFileFilters,
 	models.CollectionDocumentation: repoFileFilters,

@@ -93,7 +93,7 @@ func defaults() AppConfig {
 			BaseURL:     "http://" + host + ":11434/v1",
 			Concurrency: 4,
 			SourceTypes: map[string]bool{
-				"work-item": true, "requirements": true, "test-case": true,
+				"work-item": true, "requirements": true,
 				"commit-history": false, "pipeline-run": false, "pull-request": false, "code": false,
 				"test-code": false, "documentation": true,
 			},

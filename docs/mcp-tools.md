@@ -85,7 +85,7 @@ search_workitem(request={"mode":"list","filters":{"record":"change","changed_by"
 
 ### Work item history
 
-Azure DevOps work item sources also index each item's history: one record per revision (`record: "change"`) with who made it, when, every changed field as `old → new` and the comment added. `search_workitem`, `search_requirement` and `search_testcase` filter them by `changed_by`, `changed_field` (`System.State` or `State`; `Comment` for comments), `id` and `since`/`until`.
+Azure DevOps work item sources also index each item's history: one record per revision (`record: "change"`) with who made it, when, every changed field as `old → new` and the comment added. `search_workitem` and `search_requirement` filter them by `changed_by`, `changed_field` (`System.State` or `State`; `Comment` for comments), `id` and `since`/`until`.
 
 History is left out unless asked for, so looking an item up by `id`, `state` or a query isn't swamped by one record per revision. It's included with `record: "change"` (history only), `record: ["item","change"]` (both), or any `changed_by` / `changed_field` filter, which only history records carry. `record: "item"`, the default, means "not a history record", so it also covers items synced before history existed and requirements or test cases kept as repository files. Those files have no change date, so a `since`/`until` filter leaves them out. See [sources.md](sources.md#azure-devops-work-items) for how they're synced.
 
@@ -128,10 +128,9 @@ When a result names another item by its ID (a work item `#1234`, a commit SHA), 
 | Tool | Searches | Best for |
 |---|---|---|
 | `search_workitem` | Work items — bugs, tasks, user stories, features, epics, with their links and whole discussion (filter `id` opens one by its ID: `1234`, `#1234` or `AB#1234`), plus each Azure DevOps item's [history](#work-item-history) | Finding related issues, checking if a bug's been filed, sprint scope, following a parent or linked item, who changed what and when |
-| `search_requirement` | Requirements — features, user stories, epics | Finding relevant requirements, acceptance criteria |
+| `search_requirement` | Requirements — features, user stories, epics, specifications — and test cases with their steps (narrow with `work_item_type`, e.g. `Test Case`, or `path` for files) | Finding relevant requirements, acceptance criteria, expected behaviour, automation status |
 | `search_source_code` | Production source code (classes, methods, functions) — no tests | Finding implementations, locating where a concept is defined |
 | `search_test_code` | Test code — unit, integration, specs | Finding test coverage, patterns, and examples |
-| `search_testcase` | Test case definitions, including steps | Expected behaviour, automation status |
 | `search_documentation` | Wiki pages, repo docs, uploaded documents | Architectural decisions, process docs, ADRs |
 | `search_commit` | Git commit history — messages, authors, file changes (filter `commit` opens one by its full or 7+ character SHA) | When a change was made, which commit introduced a behaviour |
 | `search_pipeline_run` | Build pipeline runs, **live** — a source's pipelines and latest runs, one run's failures and context, every step and test of a run, any step's log with search (see [below](#search_pipeline_run)) | The last (failed) build, why a run failed or needed several attempts, what a run built |

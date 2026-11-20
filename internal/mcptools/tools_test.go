@@ -239,7 +239,7 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 	}
 	want := []string{
 		"search_workitem", "search_requirement", "search_source_code",
-		"search_test_code", "search_testcase", "search_documentation",
+		"search_test_code", "search_documentation",
 		"search_commit", "experience_retrieve", "experience_remember",
 	}
 	for _, name := range want {
@@ -584,7 +584,7 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 	}
 	// Every item another result can name by id is reachable by that id.
 	for tool, field := range map[string]string{
-		"search_workitem": "id", "search_requirement": "id", "search_testcase": "id",
+		"search_workitem": "id", "search_requirement": "id",
 		"search_commit": "commit",
 	} {
 		if filterProps(tool)[field] == nil {
