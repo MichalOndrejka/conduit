@@ -40,5 +40,11 @@ Write-Host "Wrote $(($stores | ForEach-Object { $_.Count } | Measure-Object -Sum
 
 $certsDir = (Resolve-Path $outDir).Path
 Write-Host ""
-Write-Host "Point docker compose at it in this shell (or put CONDUIT_CERTS_DIR in .env):"
-Write-Host "  `$env:CONDUIT_CERTS_DIR = `"$certsDir`""
+# Single quotes in both suggestions: in .env, Compose treats backslash escapes
+# inside double quotes, so "C:\Users\me\repos" would turn \r into a carriage
+# return. Single quotes are literal in both PowerShell and .env.
+$quoted = "'" + $certsDir.Replace("'", "''") + "'"
+Write-Host "Point docker compose at it in this shell:"
+Write-Host "  `$env:CONDUIT_CERTS_DIR = $quoted"
+Write-Host "or add this line to .env (single quotes, not double):"
+Write-Host "  CONDUIT_CERTS_DIR=$quoted"
