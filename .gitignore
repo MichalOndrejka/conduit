@@ -3,7 +3,9 @@
 /conduit.exe
 /tmp/
 
-# Runtime / secrets
+# Runtime / secrets (local runs keep these in the per-user data folder; these
+# entries guard against copies left in the repo by older versions)
+config.json
 conduit-sources.json
 sync-state/
 conduit-settings.json

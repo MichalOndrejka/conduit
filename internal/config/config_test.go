@@ -7,13 +7,15 @@ import (
 	"testing"
 )
 
-// useConfigFile points CONDUIT_CONFIG at a fresh (nonexistent by default)
-// file inside a t.TempDir(), isolating each test from the real config.json
-// in the working directory and from any other test's env var state.
+// useConfigFile points CONDUIT_CONFIG and CONDUIT_DATA_DIR at a fresh
+// t.TempDir() (config.json nonexistent by default), isolating each test from
+// the real per-user data folder and from any other test's env var state.
 func useConfigFile(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "config.json")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
 	t.Setenv("CONDUIT_CONFIG", path)
+	t.Setenv("CONDUIT_DATA_DIR", dir)
 	// Pin host detection so localhost defaults hold even when the tests
 	// themselves run inside a container (e.g. CI).
 	t.Setenv("CONDUIT_IN_CONTAINER", "0")
@@ -56,7 +58,7 @@ func TestLoadInContainerKeepsSavedURLs(t *testing.T) {
 }
 
 func TestLoadDefaultsWhenNoConfigFile(t *testing.T) {
-	useConfigFile(t)
+	path := useConfigFile(t)
 
 	cfg, err := Load()
 	if err != nil {
@@ -77,8 +79,8 @@ func TestLoadDefaultsWhenNoConfigFile(t *testing.T) {
 	if cfg.Chunking.MaxChunkSize != 2000 || cfg.Chunking.Overlap != 200 {
 		t.Errorf("Chunking = %+v, want default 2000/200", cfg.Chunking)
 	}
-	if cfg.SourcesFilePath != "conduit-sources.json" {
-		t.Errorf("SourcesFilePath = %q, want default", cfg.SourcesFilePath)
+	if want := filepath.Join(filepath.Dir(path), "conduit-sources.json"); cfg.SourcesFilePath != want {
+		t.Errorf("SourcesFilePath = %q, want %q", cfg.SourcesFilePath, want)
 	}
 	if !cfg.Preprocessing.SourceTypes["work-item"] || cfg.Preprocessing.SourceTypes["code"] {
 		t.Errorf("Preprocessing.SourceTypes = %+v, want default preset", cfg.Preprocessing.SourceTypes)
@@ -232,10 +234,29 @@ func TestPathReflectsConduitConfigEnvVar(t *testing.T) {
 	}
 }
 
-func TestPathDefaultsWhenEnvVarUnset(t *testing.T) {
+func TestPathDefaultsToPerUserFolderWhenRunLocally(t *testing.T) {
 	t.Setenv("CONDUIT_CONFIG", "")
-	if got := Path(); got != "config.json" {
-		t.Errorf("Path() = %q, want default %q", got, "config.json")
+	t.Setenv("CONDUIT_DATA_DIR", "")
+	t.Setenv("CONDUIT_IN_CONTAINER", "0")
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Skipf("no per-user config folder here: %v", err)
+	}
+	got := Path()
+	if filepath.Dir(filepath.Dir(got)) != base || filepath.Base(got) != "config.json" {
+		t.Errorf("Path() = %q, want config.json in a Conduit folder under %q", got, base)
+	}
+	if name := filepath.Base(filepath.Dir(got)); name != "Conduit" && name != "conduit" {
+		t.Errorf("Path() = %q, want it in a Conduit folder", got)
+	}
+}
+
+func TestPathDefaultsToDataVolumeInContainer(t *testing.T) {
+	t.Setenv("CONDUIT_CONFIG", "")
+	t.Setenv("CONDUIT_DATA_DIR", "")
+	t.Setenv("CONDUIT_IN_CONTAINER", "1")
+	if got, want := Path(), filepath.Join("/data", "config.json"); got != want {
+		t.Errorf("Path() = %q, want %q", got, want)
 	}
 }
 

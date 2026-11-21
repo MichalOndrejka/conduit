@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 )
 
@@ -103,14 +104,34 @@ func defaults() AppConfig {
 	}
 }
 
+// dataDir is where Conduit keeps its state (config.json, sources,
+// credentials, embedding and sync state): CONDUIT_DATA_DIR when set, /data
+// in a container (the image's volume), otherwise the per-user app folder —
+// %AppData%\Conduit on Windows, ~/Library/Application Support/Conduit on
+// macOS, $XDG_CONFIG_HOME/conduit (~/.config/conduit) on Linux — so state
+// never depends on the directory Conduit was started from.
+func dataDir() string {
+	if d := os.Getenv("CONDUIT_DATA_DIR"); d != "" {
+		return d
+	}
+	if InContainer() {
+		return "/data"
+	}
+	if d, err := os.UserConfigDir(); err == nil && d != "" {
+		name := "Conduit"
+		if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+			name = "conduit"
+		}
+		return filepath.Join(d, name)
+	}
+	return "."
+}
+
 func configPath() string {
 	if p := os.Getenv("CONDUIT_CONFIG"); p != "" {
 		return p
 	}
-	if d := os.Getenv("CONDUIT_DATA_DIR"); d != "" {
-		return filepath.Join(d, "config.json")
-	}
-	return "config.json"
+	return filepath.Join(dataDir(), "config.json")
 }
 
 // Load reads config.json (if present) and applies env-var overrides,
@@ -166,13 +187,12 @@ func Load() (*AppConfig, error) {
 			cfg.Search.PatternScanLimit = min(n, MaxPatternScanLimit)
 		}
 	}
-	if v := os.Getenv("CONDUIT_DATA_DIR"); v != "" {
-		if err := os.MkdirAll(v, 0o755); err != nil {
-			return nil, err
-		}
-		if !filepath.IsAbs(cfg.SourcesFilePath) {
-			cfg.SourcesFilePath = filepath.Join(v, filepath.Base(cfg.SourcesFilePath))
-		}
+	dir := dataDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	if !filepath.IsAbs(cfg.SourcesFilePath) {
+		cfg.SourcesFilePath = filepath.Join(dir, filepath.Base(cfg.SourcesFilePath))
 	}
 	return &cfg, nil
 }

@@ -1,6 +1,15 @@
 # Configuration Reference
 
-Conduit stores its runtime configuration in `config.json` (location controlled by `CONDUIT_CONFIG` env var). The **Settings** page in the web UI edits the embedding, Qdrant, preprocessing and search settings; chunking, concurrency and `sources_file_path` are set in the file or by env var.
+Conduit stores its runtime configuration in `config.json` inside its data directory, with the rest of its state (sources, credentials, embedding and sync state). The data directory is:
+
+| Running | Data directory |
+|---------|----------------|
+| Locally (`go run`, the binary) on Windows | `%AppData%\Conduit` |
+| Locally on macOS | `~/Library/Application Support/Conduit` |
+| Locally on Linux | `$XDG_CONFIG_HOME/conduit` (`~/.config/conduit`) |
+| In a container | `/data` (the image's volume) |
+
+`CONDUIT_DATA_DIR` overrides the directory, and `CONDUIT_CONFIG` the config file alone. The folder Conduit is started from doesn't matter; the startup log names the config file and data directory in use. The **Settings** page in the web UI edits the embedding, Qdrant, preprocessing and search settings; chunking, concurrency and `sources_file_path` are set in the file or by env var.
 
 The `localhost` URL defaults below become `host.docker.internal` when Conduit runs in a container (detected via `CONDUIT_IN_CONTAINER`, which the Docker image sets, or `/.dockerenv` / `/run/.containerenv`). Defaults only fill fields absent from `config.json`; saved values and env-var overrides always win.
 
@@ -144,7 +153,7 @@ How many chunks one `pattern_search` call scans before it stops and reports `"tr
 
 ## `sources_file_path`
 
-Path to the JSON file where source definitions are persisted. Defaults to `conduit-sources.json` in the current working directory. Use `CONDUIT_DATA_DIR` to redirect both this file and `config.json` to a shared data directory.
+Path to the JSON file where source definitions are persisted. Defaults to `conduit-sources.json`; a relative path is taken inside the data directory.
 
 ---
 
@@ -152,8 +161,8 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 
 | Variable | Effect |
 |----------|--------|
-| `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in CWD. |
-| `CONDUIT_DATA_DIR` | If set, `config.json`, `conduit-sources.json`, and `credentials.enc.json` are placed here. The Docker image sets it to `/data`. |
+| `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in the data directory. |
+| `CONDUIT_DATA_DIR` | The data directory, holding `config.json`, `conduit-sources.json`, `credentials.enc.json` and the embedding and sync state. Default: the per-user folder above, or `/data` in a container (the Docker image sets it to `/data`). |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
 | `QDRANT_URL` | Overrides `qdrant.url` in config. |
 | `QDRANT_API_KEY` | Overrides `qdrant.api_key`. |

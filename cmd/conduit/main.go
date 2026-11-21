@@ -194,8 +194,8 @@ func main() {
 	srv.RegisterOnShutdown(webServer.CloseEvents)
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- srv.ListenAndServe() }()
-	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s",
-		srv.Addr, cfg.Qdrant.URL, cfg.Embedding.Model)
+	log.Printf("Conduit (Go) listening on %s — qdrant=%s embedding=%s config=%s data=%s",
+		srv.Addr, cfg.Qdrant.URL, cfg.Embedding.Model, config.Path(), dataDir)
 
 	select {
 	case err := <-serveErr:

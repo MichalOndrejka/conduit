@@ -174,6 +174,7 @@ func buildHarness(t *testing.T, qdrantReachable bool) *harness {
 
 	dataDir := t.TempDir()
 	t.Setenv("CONDUIT_CONFIG", filepath.Join(dataDir, "config.json"))
+	t.Setenv("CONDUIT_DATA_DIR", dataDir)
 
 	cfg := &config.AppConfig{}
 	cfg.Embedding.BaseURL = embedSrv.URL
