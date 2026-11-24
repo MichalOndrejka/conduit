@@ -1,8 +1,8 @@
 # Customization
 
-Changes to the [Docker](install/docker.md) and [Podman](install/podman.md)
-installs. Settings go in environment variables or a `.env` file next to where
-you run `compose` (see [`.env.example`](../.env.example)).
+Changes to the [Docker](install/docker.md) install. Settings go in
+environment variables or a `.env` file next to where you run `compose` (see
+[`.env.example`](../.env.example)).
 
 ## Corporate proxy
 
@@ -48,8 +48,7 @@ restart Ollama): `OLLAMA_NUM_PARALLEL` (keep in step with
 
 ## Pin a version
 
-Docker: replace `#main` in the URL with a tag, e.g. `#v1.2.0`. Podman:
-`git checkout v1.2.0` in the clone.
+Replace `#main` in the compose URL with a tag, e.g. `#v1.2.0`.
 
 ## Data
 

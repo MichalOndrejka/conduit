@@ -17,8 +17,7 @@ ollama pull nomic-embed-text-v2-moe
 docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up -d
 ```
 
-Other ways: [Podman](docs/install/podman.md),
-[standalone container](docs/install/standalone.md),
+Other ways: [standalone container](docs/install/standalone.md),
 [from source](docs/install/source.md).
 
 Open http://localhost:8000, add credentials and a
@@ -33,7 +32,7 @@ source, and **Sync**. Then point your MCP client at it:
 
 ## Documentation
 
-- Install: [Docker](docs/install/docker.md), [Podman](docs/install/podman.md),
+- Install: [Docker](docs/install/docker.md),
   [standalone](docs/install/standalone.md), [from source](docs/install/source.md)
 - [Customization](docs/customization.md): corporate proxy, models, data
 - [Configuration](docs/configuration.md)
