@@ -105,9 +105,6 @@ const (
 type APISource struct {
 	src     *models.SourceDefinition
 	secrets secrets.Reader
-	// history is set by SetSyncState for Azure DevOps work item sources:
-	// their sync also records work item history (ado_workitem_history.go).
-	history *historyRun
 }
 
 // isWorkItemQuery reports whether cfg should be fetched via the WIQL

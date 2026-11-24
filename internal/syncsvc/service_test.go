@@ -108,8 +108,15 @@ func (f *fakeQdrant) handler() http.Handler {
 	})
 	mux.HandleFunc("POST /collections/{name}/points/delete", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			Filter *fakeFilter `json:"filter"`
-			Points []string    `json:"points"`
+			Filter *struct {
+				Must []struct {
+					Key   string `json:"key"`
+					Match struct {
+						Value any `json:"value"`
+					} `json:"match"`
+				} `json:"must"`
+			} `json:"filter"`
+			Points []string `json:"points"`
 		}
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
@@ -120,77 +127,20 @@ func (f *fakeQdrant) handler() http.Handler {
 		}
 		if body.Filter != nil {
 			for id, payload := range col {
-				if body.Filter.matches(payload) {
+				match := true
+				for _, cond := range body.Filter.Must {
+					if payload[cond.Key] != cond.Match.Value {
+						match = false
+					}
+				}
+				if match {
 					delete(col, id)
 				}
 			}
 		}
 		_, _ = w.Write([]byte(`{"result": true}`))
 	})
-	mux.HandleFunc("POST /collections/{name}/points/count", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Filter *fakeFilter `json:"filter"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		n := 0
-		for _, payload := range f.collections[r.PathValue("name")] {
-			if body.Filter == nil || body.Filter.matches(payload) {
-				n++
-			}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"result": map[string]any{"count": n}})
-	})
 	return mux
-}
-
-type fakeCondition struct {
-	Key   string `json:"key"`
-	Match struct {
-		Value any   `json:"value"`
-		Any   []any `json:"any"`
-	} `json:"match"`
-}
-
-// holds reports whether payload's value of the key (one value, or a list
-// of them as filter fields are stored) matches.
-func (c fakeCondition) holds(payload map[string]any) bool {
-	vals, ok := payload[c.Key].([]any)
-	if !ok {
-		vals = []any{payload[c.Key]}
-	}
-	wanted := c.Match.Any
-	if c.Match.Value != nil {
-		wanted = append(wanted, c.Match.Value)
-	}
-	for _, v := range vals {
-		for _, w := range wanted {
-			if v == w {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-type fakeFilter struct {
-	Must    []fakeCondition `json:"must"`
-	MustNot []fakeCondition `json:"must_not"`
-}
-
-func (f *fakeFilter) matches(payload map[string]any) bool {
-	for _, c := range f.Must {
-		if !c.holds(payload) {
-			return false
-		}
-	}
-	for _, c := range f.MustNot {
-		if c.holds(payload) {
-			return false
-		}
-	}
-	return true
 }
 
 func (f *fakeQdrant) count(collection string) int {

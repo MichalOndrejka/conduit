@@ -145,7 +145,6 @@ func TestWorkItemDocumentsCarryFilters(t *testing.T) {
 		models.FilterIterationPath: {"payments", `payments\sprint 3`},
 		models.FilterAssignedTo:    {"jane doe", "jane@example.com"},
 		models.FilterTag:           {"auth", "regression"},
-		models.FilterRecord:        {"item"},
 	}
 	for field, w := range want {
 		if got := f.Fields[field]; !reflect.DeepEqual(got, w) {
@@ -155,8 +154,7 @@ func TestWorkItemDocumentsCarryFilters(t *testing.T) {
 	if _, ok := f.Fields["area_path"]; ok {
 		t.Error("work item area path must not be stored as a filter (the source is already scoped to it)")
 	}
-	// The last-changed date, so since/until and the change-date order cover items too.
-	if want := time.Date(2024, 3, 5, 10, 0, 0, 123e6, time.UTC); !f.Date.Equal(want) {
-		t.Errorf("date = %v, want the item's ChangedDate %v", f.Date, want)
+	if !f.Date.IsZero() {
+		t.Errorf("work item date must not be stored as a filter, got %v", f.Date)
 	}
 }

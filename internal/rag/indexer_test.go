@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -373,54 +372,6 @@ func TestIndexBatchReplaceSourceIDDeletesOldVectorsBeforeUpsert(t *testing.T) {
 	match := cond["match"].(map[string]any)
 	if match["value"] != "src-42" {
 		t.Errorf("delete filter value = %v, want src-42", match["value"])
-	}
-}
-
-// A source keeping history replaces everything of its own except the
-// history records, then deletes the history of items it no longer has.
-func TestIndexBatchReplaceKeepsAndDeletesAlso(t *testing.T) {
-	embedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"embedding": []float32{0.1, 0.2, 0.3}}}})
-	}))
-	defer embedSrv.Close()
-	var mu sync.Mutex
-	var deletes []string
-	base := (&minimalQdrant{}).handler()
-	qdSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/points/delete") {
-			body, _ := io.ReadAll(r.Body)
-			mu.Lock()
-			deletes = append(deletes, string(body))
-			mu.Unlock()
-		}
-		base(w, r)
-	}))
-	defer qdSrv.Close()
-	cfg := &config.AppConfig{}
-	cfg.Qdrant.URL = qdSrv.URL
-	cfg.Embedding.BaseURL = embedSrv.URL
-	cfg.Embedding.MaxInputTokens = 8192
-	cfg.Chunking.MaxChunkSize = 2000
-	cfg.Chunking.Overlap = 200
-	indexer := NewDocumentIndexer(NewVectorStore(cfg), NewEmbeddingService(cfg), NewTextChunker(cfg))
-
-	err := indexer.IndexBatch(context.Background(), "conduit_test", []models.SourceDocument{{ID: "d", Text: "hello"}}, IndexBatchOptions{
-		ReplaceSourceID: "src-1",
-		ReplaceKeep:     []FieldCondition{{Key: "f_record", Match: Match{Value: "change"}}},
-		DeleteAlso:      []FieldCondition{{Key: "f_id", Match: Match{Any: []string{"30"}}}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(deletes) != 2 {
-		t.Fatalf("deletes = %v, want the replace and the removed items' history", deletes)
-	}
-	if !strings.Contains(deletes[0], `"must_not":[{"key":"f_record","match":{"value":"change"}}]`) ||
-		!strings.Contains(deletes[0], `"value":"src-1"`) {
-		t.Errorf("replace delete = %s, want the source's vectors except history records", deletes[0])
-	}
-	if !strings.Contains(deletes[1], `"value":"src-1"`) || !strings.Contains(deletes[1], `{"key":"f_id","match":{"any":["30"]}}`) {
-		t.Errorf("second delete = %s, want the source's records of item 30", deletes[1])
 	}
 }
 

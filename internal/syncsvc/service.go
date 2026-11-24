@@ -219,10 +219,6 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		cancelledOutcome()
 		return
 	}
-	stateful, _ := impl.(sources.StatefulSource)
-	if stateful != nil {
-		stateful.SetSyncState(s.syncState(ctx, src, collection))
-	}
 	phaseStart := time.Now()
 	docs, err := impl.FetchDocuments(ctx, func(p models.SyncProgress) {
 		s.progress.Set(sourceID, p)
@@ -291,7 +287,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		return
 	}
 	indexStart := time.Now()
-	opts := rag.IndexBatchOptions{
+	err = s.indexer.IndexBatch(ctx, collection, docs, rag.IndexBatchOptions{
 		Chunks: &run.Chunks,
 		ProgressCb: func(current, total int) {
 			s.progress.Set(sourceID, models.SyncProgress{
@@ -303,34 +299,8 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		Checkpoint: func() error {
 			return s.control.Checkpoint(ctx, sourceID)
 		},
-	}
-	var result *sources.SyncResult
-	if stateful != nil {
-		result = stateful.SyncResult()
-	}
-	if result != nil {
-		// The source knows exactly what it has: an empty result clears it.
-		opts.ReplaceWhenEmpty = true
-	}
-	if result != nil && result.KeepHistory {
-		opts.ReplaceKeep = []rag.FieldCondition{historyRecords}
-		if len(result.RemoveHistoryIDs) > 0 {
-			// Their items aren't fetched any more, so this only takes history.
-			opts.DeleteAlso = []rag.FieldCondition{{
-				Key: models.FilterKey(models.FilterID), Match: rag.Match{Any: result.RemoveHistoryIDs},
-			}}
-		}
-	}
-	err = s.indexer.IndexBatch(ctx, collection, docs, opts)
+	})
 	run.IndexMs = time.Since(indexStart).Milliseconds()
-	if err == nil && result != nil {
-		// Only now that the documents are stored: a sync that fails earlier
-		// reads the same changes again next time.
-		if err := s.store.SaveSyncState(src.ID, result.State); err != nil {
-			log.Printf("warning: saving the sync state of source %s: %v — its next sync reads its history from the start", sourceID, err)
-			_ = s.store.DeleteSyncState(src.ID)
-		}
-	}
 	switch {
 	case isCancelled(err):
 		cancelledOutcome()
@@ -345,35 +315,6 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		finish()
 		record("completed")
 	}
-}
-
-// historyRecords selects history records (one work item revision each),
-// which a source keeping history only ever adds to.
-var historyRecords = rag.FieldCondition{
-	Key: models.FilterKey(models.FilterRecord), Match: rag.Match{Value: "change"},
-}
-
-// syncState is the state src's last successful sync left (nil: none, start
-// over) and how many history records of src the index holds, so the source
-// can tell when they're gone (embedding cleanup, collection recreated for a
-// new model) and carrying on would skip what was read before.
-func (s *Service) syncState(ctx context.Context, src *models.SourceDefinition, collection string) ([]byte, int) {
-	state, err := s.store.SyncState(src.ID)
-	if err != nil {
-		log.Printf("warning: reading the sync state of source %s: %v — starting over", src.ID, err)
-		return nil, 0
-	}
-	if state == nil || src.LastSyncedAt == nil {
-		return nil, 0
-	}
-	n, err := s.indexer.Count(ctx, collection, &rag.Filter{Must: []rag.FieldCondition{
-		{Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID}}, historyRecords,
-	}})
-	if err != nil {
-		log.Printf("warning: counting the history of source %s: %v — starting over", src.ID, err)
-		return nil, 0
-	}
-	return state, n
 }
 
 // isCancelled reports whether err resulted from a sync cancellation — either

@@ -255,14 +255,6 @@ func withRequestParam(fields []filterField, sorts []sortField) mcp.ToolOption {
 	}
 }
 
-// workItemHistoryNote tells a work item search tool's caller about history
-// records (Azure DevOps work items only).
-const workItemHistoryNote = ` Azure DevOps work items also have their history: one record per revision ` +
-	`saying who changed which fields from what to what, and when, plus the comment added. Results hold the ` +
-	`items as they are now unless you ask for history: for "who changed X", "what did Y change last week", ` +
-	`"when did this move to Resolved" filter record "change" with id, changed_by ("me" works), changed_field ` +
-	`and since/until.`
-
 // RegisterTools registers all MCP tools. Called once at startup.
 func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.Service) {
 
@@ -320,10 +312,10 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 	makeSearchTool(models.CollectionWorkItems, "search_workitem",
 		"Semantic search over work items (bugs, tasks, defects). Each holds every field, a Links section (parent, "+
 			"children, related items as #id; pull requests as !id; commits by SHA; builds by id) and the whole discussion. "+
-			"Filter by id, project, type, state, iteration path, assignee or tags."+workItemHistoryNote)
+			"Filter by id, project, type, state, iteration path, assignee or tags.")
 	makeSearchTool(models.CollectionRequirements, "search_requirement",
 		"Semantic search over requirements (features, user stories, epics, specifications) and test cases "+
-			"with their steps. Narrow by work_item_type (e.g. Test Case) or by path for those kept as files."+workItemHistoryNote)
+			"with their steps. Narrow by work_item_type (e.g. Test Case) or by path for those kept as files.")
 	makeSearchTool(models.CollectionSourceCode, "search_source_code",
 		"Semantic search over production source code (classes, methods, functions). "+
 			"Does not include test files — use search_test_code for tests.")

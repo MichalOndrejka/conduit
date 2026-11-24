@@ -2,7 +2,6 @@
 .github
 qdrant_storage/
 conduit-sources.json
-sync-state/
 config.json
 *.local.json
 .env

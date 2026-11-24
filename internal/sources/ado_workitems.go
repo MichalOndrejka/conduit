@@ -20,7 +20,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
@@ -110,7 +109,7 @@ func (a *APISource) fetchAdoWorkItems(ctx context.Context, client *http.Client, 
 	if err != nil {
 		return nil, err
 	}
-	if len(ids) == 0 && a.history == nil {
+	if len(ids) == 0 {
 		return nil, nil
 	}
 
@@ -125,15 +124,7 @@ func (a *APISource) fetchAdoWorkItems(ctx context.Context, client *http.Client, 
 	for i := range items {
 		items[i].comments = discussions[items[i].ID]
 	}
-	docs := a.workItemsToDocuments(items)
-	if a.history != nil {
-		changes, err := a.fetchWorkItemHistory(ctx, client, org, project, apiVersion, ids, progress)
-		if err != nil {
-			return nil, err
-		}
-		docs = append(docs, changes...)
-	}
-	return docs, nil
+	return a.workItemsToDocuments(items), nil
 }
 
 // wiqlWorkItemIDs runs a WIQL query scoped to project (and, if types/areas
@@ -271,7 +262,6 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		area := fieldString(item.Fields, "System.AreaPath")
 		iteration := fieldString(item.Fields, "System.IterationPath")
 		props := map[string]string{
-			"record":    "item",
 			"title":     title,
 			"type":      wiType,
 			"area":      area,
@@ -296,7 +286,6 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		}
 
 		var filters models.DocumentFilters
-		filters.Add(models.FilterRecord, "item")
 		filters.Add(models.FilterID, strconv.Itoa(item.ID))
 		filters.Add(models.FilterProject, project)
 		filters.Add(models.FilterWorkItemType, wiType)
@@ -304,8 +293,6 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 		filters.Add(models.FilterIterationPath, iteration)
 		filters.Add(models.FilterAssignedTo, identityValues(item.Fields["System.AssignedTo"])...)
 		filters.Add(models.FilterTag, strings.Split(fieldString(item.Fields, "System.Tags"), ";")...)
-		// Last changed, so since/until and the list order cover items too.
-		filters.Date, _ = time.Parse(time.RFC3339, fieldString(item.Fields, "System.ChangedDate"))
 
 		docs = append(docs, models.SourceDocument{
 			Filters: filters,

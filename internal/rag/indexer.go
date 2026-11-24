@@ -51,17 +51,6 @@ type IndexBatchOptions struct {
 	// ReplaceSourceID deletes existing vectors tagged with this source_id
 	// after all embeds succeed and before any writes.
 	ReplaceSourceID string
-	// ReplaceKeep exempts the source's vectors matching any of these
-	// conditions from ReplaceSourceID's delete (e.g. history records that
-	// are only ever added to).
-	ReplaceKeep []FieldCondition
-	// DeleteAlso are further deletes, each limited to ReplaceSourceID's
-	// vectors, made together with the replace.
-	DeleteAlso []FieldCondition
-	// ReplaceWhenEmpty makes ReplaceSourceID's delete happen even when there
-	// is nothing to write — for sources that track what they hold, where an
-	// empty batch means the source has nothing (left).
-	ReplaceWhenEmpty bool
 	// Checkpoint is called before dispatching each embed job; returning an
 	// error (e.g. syncctl.ErrSyncCancelled) aborts the run before any Qdrant
 	// write.
@@ -222,12 +211,6 @@ dispatch:
 	}
 
 	if len(points) == 0 {
-		// Nothing to write, but a source that tracks what it holds still drops
-		// what it no longer has (a plain replace keeps its old vectors, as it
-		// always has).
-		if opts.ReplaceSourceID != "" && opts.ReplaceWhenEmpty && d.store.CollectionExists(ctx, collection) {
-			return d.replaceDelete(ctx, collection, opts)
-		}
 		return nil
 	}
 
@@ -263,7 +246,10 @@ dispatch:
 	//   - embed failure → old vectors intact, nothing lost
 	//   - write failure → rollback removes the partial new batch
 	if opts.ReplaceSourceID != "" {
-		if err := d.replaceDelete(ctx, collection, opts); err != nil {
+		filter := &Filter{Must: []FieldCondition{{
+			Key: models.TagKey("source_id"), Match: Match{Value: opts.ReplaceSourceID},
+		}}}
+		if err := d.store.DeleteByFilter(ctx, collection, filter); err != nil {
 			return err
 		}
 	}
@@ -291,30 +277,4 @@ dispatch:
 		*opts.Chunks = len(points)
 	}
 	return nil
-}
-
-// replaceDelete removes the ReplaceSourceID source's vectors, except those
-// matching ReplaceKeep, then each DeleteAlso selection of them.
-func (d *DocumentIndexer) replaceDelete(ctx context.Context, collection string, opts IndexBatchOptions) error {
-	source := FieldCondition{Key: models.TagKey("source_id"), Match: Match{Value: opts.ReplaceSourceID}}
-	if err := d.store.DeleteByFilter(ctx, collection, &Filter{
-		Must: []FieldCondition{source}, MustNot: opts.ReplaceKeep,
-	}); err != nil {
-		return err
-	}
-	for _, c := range opts.DeleteAlso {
-		if err := d.store.DeleteByFilter(ctx, collection, &Filter{Must: []FieldCondition{source, c}}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// Count is the number of vectors in collection matching filter (0 when the
-// collection doesn't exist).
-func (d *DocumentIndexer) Count(ctx context.Context, collection string, filter *Filter) (int, error) {
-	if !d.store.CollectionExists(ctx, collection) {
-		return 0, nil
-	}
-	return d.store.CountExact(ctx, collection, filter)
 }

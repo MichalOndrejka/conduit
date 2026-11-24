@@ -7,7 +7,6 @@
 # entries guard against copies left in the repo by older versions)
 config.json
 conduit-sources.json
-sync-state/
 conduit-settings.json
 conduit-embedding.json
 *.local.json
