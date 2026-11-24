@@ -11,7 +11,7 @@ Events are kept in memory only. Nothing is written to disk, so a restart (includ
 | Event | Recorded |
 |---|---|
 | Every MCP tool call | Tool, mode, latency, error. Search tools also record the query text, filters, page, collection and result count. `experience_retrieve` records the query and which entries came back. |
-| Every sync of a source | Outcome (completed, failed with its phase, or cancelled); total, fetch, preprocess and embed time; documents and chunks; HTTP requests to the source's API and how many it refused for its rate limit, retries included. |
+| Every sync of a source | Outcome (completed, failed with its phase, or cancelled); total, fetch, preprocess and embed time; documents and chunks; what the [incremental sync](sources.md#incremental-sync) did with the documents (embedded new or changed, rewrote metadata only, removed, left unchanged, not refetched) and how many chunks it embedded; HTTP requests to the source's API and how many it refused for its rate limit, retries included. |
 
 The process's first search embeds a query while the model is still loading, so it is marked *cold* and left out of latency figures.
 
@@ -26,7 +26,8 @@ The process's first search embeds a query while the model is still loading, so i
   - calls per tool and the empty-result share per search tool. Every registered tool is listed from the start, at zero until it is called;
   - the searches that found nothing, with their query text and filters;
   - API requests per provider (GitHub, Azure DevOps) across every sync since the process started, retries included, with rate-limit hits, to show how much load Conduit puts on each service;
-  - sync time per source.
+  - sync time per source;
+  - documents changed by each source's latest completed sync: embedded, metadata only and removed, with the unchanged and not-refetched counts at the bar's tip.
 - **Experience:** entries remembered, memories recalled, recall misses, the most-recalled entries, and entries not recalled since the process started.
 
 Every chart mark shows its values on hover and keyboard focus.

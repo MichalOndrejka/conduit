@@ -13,6 +13,7 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -25,7 +26,6 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/embedstate"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
-	"github.com/MichalOndrejka/conduit/internal/sources"
 )
 
 // preprocSourceTypes drives the per-source-type toggles in the preprocessing
@@ -205,15 +205,17 @@ func (s *Server) handleDeleteAllSources(w http.ResponseWriter, r *http.Request) 
 		httpError(w, err)
 		return
 	}
+	// Each source's vectors go first, and a source whose vectors can't be
+	// removed is kept, so nothing indexed is left without its source.
+	var failed []error
 	for i := range srcs {
-		src := &srcs[i]
-		if collection := sources.CollectionFor(src); collection != "" {
-			filter := &rag.Filter{Must: []rag.FieldCondition{{
-				Key: models.TagKey("source_id"), Match: rag.Match{Value: src.ID},
-			}}}
-			_ = s.vectors.DeleteByFilter(r.Context(), collection, filter)
+		if err := s.mgr.Delete(r.Context(), srcs[i].ID); err != nil {
+			failed = append(failed, fmt.Errorf("%s: %w", srcs[i].Name, err))
 		}
-		_ = s.sources.Delete(src.ID)
+	}
+	if len(failed) > 0 {
+		httpError(w, errors.Join(failed...))
+		return
 	}
 	http.Redirect(w, r, "/settings?notice=sources_deleted", http.StatusSeeOther)
 }

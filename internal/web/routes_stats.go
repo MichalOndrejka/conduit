@@ -186,6 +186,29 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		timeBars = append(timeBars, rankedBar{Label: cur.SourceName, Value: float64(cur.DurationMs), Text: row.Duration})
 	}
 	sort.SliceStable(timeBars, func(i, j int) bool { return timeBars[i].Value > timeBars[j].Value })
+
+	// What each source's latest sync changed: documents embedded (new or
+	// changed), given new metadata only, and removed; unchanged ones are
+	// named at the tip, not drawn, so the changes stay readable.
+	var changeBars []stackedBar
+	for _, src := range d.Sources {
+		cur := src.Latest
+		if cur.Status != "completed" {
+			continue
+		}
+		embedded := cur.Added + cur.Updated
+		text := fmt.Sprintf("%d unchanged", cur.Unchanged)
+		if cur.NotRefetched > 0 {
+			text += fmt.Sprintf(" · %d not refetched", cur.NotRefetched)
+		}
+		changeBars = append(changeBars, stackedBar{Label: cur.SourceName,
+			Values: []float64{float64(embedded), float64(cur.MetadataOnly), float64(cur.Deleted)}, Text: text})
+	}
+	data["ChartSourceChanges"] = stackedBars(changeBars, []stackSeries{
+		{Name: "Embedded", Color: "var(--viz-s1)"},
+		{Name: "Metadata Only", Color: "var(--viz-s2)"},
+		{Name: "Removed", Color: "var(--viz-s3)"},
+	}, 1100)
 	data["Sources"] = sources
 	data["ChartSourceTime"] = rankedBars(timeBars, "sync time", 1100)
 

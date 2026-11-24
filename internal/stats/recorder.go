@@ -80,6 +80,19 @@ type SyncRun struct {
 
 	Documents int `json:"documents"`
 	Chunks    int `json:"chunks"`
+	// What the incremental sync did with the documents: embedded new ones
+	// (Added) and changed ones (Updated), rewrote the payload of those whose
+	// metadata alone changed, left Unchanged ones as they were, and deleted
+	// the ones the source no longer has. NotRefetched counts the documents
+	// whose fetch was skipped as provably current; EmbeddedChunks the chunks
+	// embedded (Chunks is the source's total after the sync).
+	Added          int `json:"added,omitempty"`
+	Updated        int `json:"updated,omitempty"`
+	MetadataOnly   int `json:"metadata_only,omitempty"`
+	Unchanged      int `json:"unchanged,omitempty"`
+	Deleted        int `json:"deleted,omitempty"`
+	NotRefetched   int `json:"not_refetched,omitempty"`
+	EmbeddedChunks int `json:"embedded_chunks,omitempty"`
 	// Requests are the HTTP requests the fetch made to the source's API;
 	// RateLimited how many of them the API refused for its rate limit
 	// (retries included).

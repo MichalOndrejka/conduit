@@ -72,10 +72,10 @@ func TestRepoRefsSort(t *testing.T) {
 // each linked to its own version.
 func TestAdoFilesSeveralRefs(t *testing.T) {
 	zips := map[string][]byte{
-		"branch/main": repoZip(t, map[string]string{"src/App.cs": "class App {}", "src/New.cs": "v2"}),
-		"tag/v1.0":    repoZip(t, map[string]string{"src/App.cs": "class App {}", "src/New.cs": "v1"}),
+		"commit/sha-main": repoZip(t, map[string]string{"src/App.cs": "class App {}", "src/New.cs": "v2"}),
+		"commit/sha-v1.0": repoZip(t, map[string]string{"src/App.cs": "class App {}", "src/New.cs": "v1"}),
 	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(adoRefsShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		body, ok := zips[q.Get("versionDescriptor.versionType")+"/"+q.Get("versionDescriptor.version")]
 		if !ok {
@@ -83,7 +83,7 @@ func TestAdoFilesSeveralRefs(t *testing.T) {
 			return
 		}
 		_, _ = w.Write(body)
-	}))
+	})))
 	defer srv.Close()
 	s := &APISource{src: codeSrc(map[string]string{
 		"Url":    srv.URL + "/org/proj/_apis/git/repositories/repo/items?api-version=7.1",
@@ -128,7 +128,7 @@ func TestAdoFilesDefaultBranchIsTheVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotVersion != "main" || len(docs) != 1 || docs[0].Properties["version"] != "main" {
+	if gotVersion != "sha-main" || len(docs) != 1 || docs[0].Properties["version"] != "main" {
 		t.Errorf("version requested %q, docs %+v; want main", gotVersion, docs)
 	}
 }

@@ -5,6 +5,7 @@ package syncsvc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"sync"
@@ -154,8 +155,13 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	s.progress.Set(sourceID, models.SyncProgress{Phase: "fetching"})
 	src.SyncStatus = "syncing"
 	src.SyncError = nil
-	if err := s.store.Save(*src); err != nil {
-		log.Printf("error: saving sync status: %v", err)
+	// What the sync is built from, to tell at the end whether the source
+	// was edited meanwhile.
+	settings := settingsOf(src)
+	if ok, err := s.store.Modify(sourceID, func(cur *models.SourceDefinition) {
+		cur.SyncStatus, cur.SyncError = src.SyncStatus, src.SyncError
+	}); err != nil || !ok {
+		log.Printf("error: saving sync status of source %s: %v (found: %v)", sourceID, err, ok)
 		return
 	}
 	begun = true
@@ -185,8 +191,40 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	finish := func() {
 		s.progress.Clear(sourceID)
 		s.control.Clear(sourceID)
-		if err := s.store.Save(*src); err != nil {
+		// Only the sync's own fields are written back, onto the source as it
+		// is now: an edit made during the sync is kept, not reverted.
+		var current *models.SourceDefinition
+		ok, err := s.store.Modify(sourceID, func(cur *models.SourceDefinition) {
+			reindex := cur.SyncStatus == "needs-reindex" // the index was dropped while syncing
+			cur.SyncStatus, cur.SyncError, cur.SyncErrorPhase = src.SyncStatus, src.SyncError, src.SyncErrorPhase
+			cur.LastSyncedAt, cur.Identity = src.LastSyncedAt, src.Identity
+			// What was indexed is from settings the source no longer has
+			// (or from before the index was dropped): not a completed sync
+			// of the source as it is.
+			if src.SyncStatus == "completed" && (reindex || settingsOf(cur) != settings) {
+				cur.SyncStatus = "needs-reindex"
+			}
+			c := *cur
+			current = &c
+		})
+		pctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		switch {
+		case err != nil:
 			log.Printf("error: saving sync result: %v", err)
+		case !ok:
+			// Deleted while it synced: it stays deleted, and so do the points
+			// the sync wrote after the delete removed the others.
+			log.Printf("source %s was deleted while syncing — removing what the sync indexed", sourceID)
+			if err := s.indexer.PurgeSource(pctx, sourceID, ""); err != nil {
+				log.Printf("error: %v", err)
+			}
+		case sources.CollectionFor(current) != sources.CollectionFor(src):
+			// Its type changed while it synced: what the sync wrote is in the
+			// collection it left.
+			if err := s.indexer.PurgeSource(pctx, sourceID, sources.CollectionFor(current)); err != nil {
+				log.Printf("error: %v", err)
+			}
 		}
 	}
 	cancelledOutcome := func() {
@@ -214,24 +252,91 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	}
 	collection := sources.CollectionFor(src)
 
-	// ── Phase 1: fetch ──────────────────────────────────────────────────────
-	if err := s.control.Checkpoint(ctx, sourceID); err != nil {
-		cancelledOutcome()
-		return
+	// A sync that finds the index changed under it (another process dropped
+	// or rewrote the source's points) runs once more from what is there now.
+	var phase string
+	for attempt := 0; ; attempt++ {
+		phase, err = s.pipeline(ctx, src, impl, collection, run)
+		if attempt == 0 && errors.Is(err, rag.ErrIndexChanged) {
+			log.Printf("warning: %v — syncing source %s again", err, sourceID)
+			continue
+		}
+		break
 	}
+	switch {
+	case isCancelled(err):
+		cancelledOutcome()
+	case err != nil:
+		failedOutcome(phase, err)
+	default:
+		now := time.Now().UTC()
+		src.SyncStatus = "completed"
+		src.LastSyncedAt = &now
+		src.SyncError = nil
+		src.SyncErrorPhase = nil
+		finish()
+		record("completed")
+	}
+}
+
+// pipeline runs one fetch → preprocess → index pass for src, recording its
+// timings and counts in run. On failure it returns the phase that failed.
+//
+// It is incremental: the index's own record of the source (fingerprints on
+// every point) is read first and handed to the fetch, which skips what is
+// provably current (see sources.IndexState); then only new and changed
+// documents are preprocessed and embedded, documents whose metadata alone
+// changed get new payloads, and those the source no longer has are deleted.
+func (s *Service) pipeline(ctx context.Context, src *models.SourceDefinition, impl sources.Source, collection string, run *stats.SyncRun) (string, error) {
+	sourceID := src.ID
+	checkpoint := func() error { return s.control.Checkpoint(ctx, sourceID) }
+	// Built per-sync so a Settings change applies without a restart (the web
+	// server and this service share the same *config.AppConfig).
+	pre := rag.NewDocumentPreprocessor(s.cfg)
+	preprocess := pre.EnabledForType(src.Type)
+	preFP := ""
+	if preprocess {
+		preFP = pre.Fingerprint()
+	}
+
+	// ── Phase 0: what the index holds ───────────────────────────────────────
+	if err := checkpoint(); err != nil {
+		return "", err
+	}
+	s.progress.Set(sourceID, models.SyncProgress{Phase: "fetching", Message: "Reading what is indexed"})
 	phaseStart := time.Now()
-	docs, err := impl.FetchDocuments(ctx, func(p models.SyncProgress) {
+	// The source's points belong in its collection only: any elsewhere (it
+	// changed type, and the cleanup then failed or a sync of the old type
+	// was still writing) would surface in the wrong search tool for good.
+	if err := s.indexer.PurgeSource(ctx, sourceID, collection); err != nil {
+		return "embed", err
+	}
+	fp, err := s.indexer.Prepare(ctx, collection, preFP)
+	if err != nil {
+		return "embed", err
+	}
+	state, err := s.indexer.LoadState(ctx, collection, sourceID)
+	if err != nil {
+		return "embed", err
+	}
+	indexState := &sources.IndexState{IndexFP: fp, State: state}
+
+	// ── Phase 1: fetch ──────────────────────────────────────────────────────
+	if err := checkpoint(); err != nil {
+		return "", err
+	}
+	docs, err := impl.FetchDocuments(sources.WithIndexState(ctx, indexState), func(p models.SyncProgress) {
 		s.progress.Set(sourceID, p)
 	})
 	run.FetchMs = time.Since(phaseStart).Milliseconds()
 	run.Documents = len(docs)
 	if err != nil {
-		if isCancelled(err) {
-			cancelledOutcome()
-			return
+		return "fetch", err
+	}
+	for _, d := range docs {
+		if d.Keep {
+			run.NotRefetched++
 		}
-		failedOutcome("fetch", err)
-		return
 	}
 	// The token owner, so a "me" filter resolves from the cache. Not knowing
 	// it only leaves "me" unresolvable for this source; it doesn't fail the
@@ -244,77 +349,82 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 		}
 	}
 
+	plan, err := s.indexer.Diff(docs, state, fp)
+	if err != nil {
+		return "fetch", err
+	}
+	run.Added = plan.Added
+	run.Updated = len(plan.Embed) - plan.Added
+	run.MetadataOnly = len(plan.MetaOnly)
+	run.Unchanged = plan.Unchanged
+	run.Deleted = len(plan.Deleted)
+	log.Printf("source %s: %d documents — %d new, %d changed, %d metadata only, %d unchanged, %d removed",
+		sourceID, len(docs), run.Added, run.Updated, run.MetadataOnly, run.Unchanged, run.Deleted)
+
 	// ── Phase 1.5: optional LLM preprocessing (summarize before indexing) ──
-	// Built per-sync so a Settings change applies without a restart (the web
-	// server and this service share the same *config.AppConfig). Preprocessing
-	// chunks each document first (with overlap, same as indexing) and
-	// summarizes chunk-by-chunk, so a single large document never becomes one
-	// oversized, expensive LLM call.
+	// Only the documents being embedded. Preprocessing chunks each document
+	// first (with overlap, same as indexing) and summarizes chunk-by-chunk,
+	// so a single large document never becomes one oversized, expensive LLM
+	// call.
 	var preprocessedChunks [][]models.TextChunk
-	if pre := rag.NewDocumentPreprocessor(s.cfg); pre.EnabledForType(src.Type) {
-		if err := s.control.Checkpoint(ctx, sourceID); err != nil {
-			cancelledOutcome()
-			return
+	degraded := make([]bool, len(plan.Embed))
+	if preprocess && len(plan.Embed) > 0 {
+		if err := checkpoint(); err != nil {
+			return "", err
 		}
-		log.Printf("preprocessing %d documents for source %s", len(docs), sourceID)
+		log.Printf("preprocessing %d documents for source %s", len(plan.Embed), sourceID)
 		preStart := time.Now()
-		s.progress.Set(sourceID, models.SyncProgress{Phase: "preprocessing", Total: len(docs)})
-		preprocessedChunks, err = pre.Preprocess(ctx, docs, src.Type, rag.PreprocessOptions{
+		s.progress.Set(sourceID, models.SyncProgress{Phase: "preprocessing", Total: len(plan.Embed)})
+		var mu sync.Mutex
+		preprocessedChunks, err = pre.Preprocess(ctx, plan.Embed, src.Type, rag.PreprocessOptions{
 			ProgressCb: func(current, total int) {
 				s.progress.Set(sourceID, models.SyncProgress{
 					Phase: "preprocessing", Current: current, Total: total,
 				})
 			},
-			Checkpoint: func() error { return s.control.Checkpoint(ctx, sourceID) },
+			Checkpoint: checkpoint,
+			Degraded: func(i int) {
+				mu.Lock()
+				degraded[i] = true
+				mu.Unlock()
+			},
 		})
 		run.PreprocessMs = time.Since(preStart).Milliseconds()
 		if err != nil {
-			if isCancelled(err) {
-				cancelledOutcome()
-				return
-			}
-			failedOutcome("preprocess", err)
-			return
+			return "preprocess", err
 		}
 	}
 
-	log.Printf("indexing %d documents for source %s", len(docs), sourceID)
-	s.progress.Set(sourceID, models.SyncProgress{Phase: "indexing", Total: len(docs)})
-
 	// ── Phase 2: embed & index ──────────────────────────────────────────────
-	if err := s.control.Checkpoint(ctx, sourceID); err != nil {
-		cancelledOutcome()
-		return
+	log.Printf("indexing %d documents for source %s", len(plan.Embed), sourceID)
+	s.progress.Set(sourceID, models.SyncProgress{Phase: "indexing", Total: len(plan.Embed)})
+	if err := checkpoint(); err != nil {
+		return "", err
 	}
 	indexStart := time.Now()
-	err = s.indexer.IndexBatch(ctx, collection, docs, rag.IndexBatchOptions{
-		Chunks: &run.Chunks,
+	res, err := s.indexer.Apply(ctx, collection, sourceID, plan, rag.ApplyOptions{
 		ProgressCb: func(current, total int) {
 			s.progress.Set(sourceID, models.SyncProgress{
 				Phase: "indexing", Current: current, Total: total,
 			})
 		},
-		ReplaceSourceID:   src.ID,
+		Checkpoint:        checkpoint,
 		PrecomputedChunks: preprocessedChunks,
-		Checkpoint: func() error {
-			return s.control.Checkpoint(ctx, sourceID)
-		},
+		Degraded:          degraded,
+		Seal:              indexState.Seal,
 	})
 	run.IndexMs = time.Since(indexStart).Milliseconds()
-	switch {
-	case isCancelled(err):
-		cancelledOutcome()
-	case err != nil:
-		failedOutcome("embed", err)
-	default:
-		now := time.Now().UTC()
-		src.SyncStatus = "completed"
-		src.LastSyncedAt = &now
-		src.SyncError = nil
-		src.SyncErrorPhase = nil
-		finish()
-		record("completed")
+	run.Chunks, run.EmbeddedChunks = res.Chunks, res.Embedded
+	if err != nil {
+		return "embed", err
 	}
+	return "", nil
+}
+
+// settingsOf is everything about src a sync's result depends on.
+func settingsOf(src *models.SourceDefinition) string {
+	cfg, _ := json.Marshal(src.Config) // map keys marshal sorted
+	return src.Type + "\x00" + src.Name + "\x00" + string(cfg)
 }
 
 // isCancelled reports whether err resulted from a sync cancellation — either

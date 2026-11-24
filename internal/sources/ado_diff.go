@@ -219,7 +219,7 @@ func (a *APISource) fetchCommitChanges(ctx context.Context, client *http.Client,
 
 // fetchCommitDiff builds a unified diff of every file changed by commitID,
 // reading each blob on its own (the commit-history sync batches them
-// instead, see commitDocuments).
+// instead, see enrichCommits).
 func (a *APISource) fetchCommitDiff(ctx context.Context, client *http.Client, repoBase, commitID string) (diffText string, filesChanged int, paths []string, err error) {
 	changes, err := a.fetchCommitChanges(ctx, client, repoBase, commitID)
 	if err != nil {

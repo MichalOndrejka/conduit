@@ -89,6 +89,12 @@
     <h3 class="text-sm font-medium text-slate-200 mb-3">Sync time by source</h3>
     {{.ChartSourceTime}}
   </div>
+  {{if .ChartSourceChanges}}
+  <div class="rounded-xl border border-slate-800 p-4">
+    <h3 class="text-sm font-medium text-slate-200 mb-3">Documents changed by the latest sync {{template "tip" "Syncs are incremental: only new and changed documents are embedded, documents whose metadata alone changed get new payloads, and documents the source no longer has are removed. Not refetched counts documents not downloaded again because their indexed copy is provably current (commits by SHA, repository trees by commit)."}}</h3>
+    {{.ChartSourceChanges}}
+  </div>
+  {{end}}
   {{else}}
   <p class="text-sm text-slate-500">No syncs yet.</p>
   {{end}}

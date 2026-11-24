@@ -211,7 +211,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		if err != nil {
 			return nil, err
 		}
-		return a.commitDocuments(ctx, client, url, items, progress)
+		return a.commitDocuments(ctx, client, url, items, nil, progress)
 	}
 	// Unfiltered, ADO's commits endpoint walks every branch's history, which
 	// duplicates commits shared with the default branch and pulls in
@@ -244,12 +244,45 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 	}
 	// Commit enrichment is automatic for commit-history sources only — never
 	// a user-configurable option, and never applied to any other source type.
-	docs, err := a.commitDocuments(ctx, client, url, commits.items, progress)
+	return a.commitDocuments(ctx, client, url, commits.items, commits.refs, progress)
+}
+
+// commitDocuments turns listed commits (refs[i] the refs commit i was listed
+// from, when listed per ref) into documents. A commit the index already
+// holds, current and listed the same way, is a Keep document: its message
+// and diff can't have changed under its SHA, so they aren't refetched.
+func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, commitsURL string, items []any, refs [][]gitRef, progress ProgressCallback) ([]models.SourceDocument, error) {
+	st := indexStateFrom(ctx)
+	docs := make([]models.SourceDocument, len(items))
+	keys := make([]string, len(items))
+	var fetch []any
+	var fetchAt []int
+	for i, item := range items {
+		var itemRefs []gitRef
+		if refs != nil {
+			itemRefs = refs[i]
+		}
+		// Keyed before enrichment rewrites the item's comment.
+		keys[i] = fetchKey(a.src, item, itemRefs)
+		id := a.itemsToDocuments([]any{item}, commitsURL)[0].ID
+		if st.current(id, keys[i]) {
+			docs[i] = models.SourceDocument{ID: id, Keep: true}
+			continue
+		}
+		fetch = append(fetch, item)
+		fetchAt = append(fetchAt, i)
+	}
+	fetched, err := a.enrichCommits(ctx, client, commitsURL, fetch, progress)
 	if err != nil {
 		return nil, err
 	}
-	for i := range docs {
-		addVersionFilters(&docs[i].Filters, docs[i].Properties, commits.refs[i])
+	for j, d := range fetched {
+		i := fetchAt[j]
+		if refs != nil {
+			addVersionFilters(&d.Filters, d.Properties, refs[i])
+		}
+		d.FetchKey = keys[i]
+		docs[i] = d
 	}
 	return docs, nil
 }
@@ -336,7 +369,7 @@ type commitOutcome struct {
 	paths        []string
 }
 
-// commitDocuments turns listed commits into documents, each carrying the
+// enrichCommits turns listed commits into documents, each carrying the
 // commit's full message and complete code diff fetched from Azure DevOps.
 // Each commit's change list (and, if truncated, full message) is read with
 // bounded concurrency; the file versions the diffs need are then downloaded
@@ -344,7 +377,7 @@ type commitOutcome struct {
 // Any commit that still can't be fetched after retries fails the whole sync:
 // indexing a partial result would silently miss changes, whereas failing
 // leaves the previous index intact.
-func (a *APISource) commitDocuments(ctx context.Context, client *http.Client, commitsURL string, items []any, progress ProgressCallback) ([]models.SourceDocument, error) {
+func (a *APISource) enrichCommits(ctx context.Context, client *http.Client, commitsURL string, items []any, progress ProgressCallback) ([]models.SourceDocument, error) {
 	repoBase, ok := AdoRepoAPIBase(commitsURL)
 	if !ok {
 		return nil, fmt.Errorf("commit-history sources require an Azure DevOps commits API Url (got %q)", commitsURL)

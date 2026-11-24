@@ -132,6 +132,16 @@ type SourceDocument struct {
 	// Sort holds numeric sort keys (dates as Unix seconds, durations,
 	// counts), stored on every chunk as SortKey(name) for the list mode.
 	Sort map[string]float64 `json:"-"`
+
+	// FetchKey, when set, identifies the fetched inputs the document was
+	// built from, other than content-addressed ones (a commit's listing entry
+	// and refs, not its immutable diff). It is stored on every chunk so a
+	// later sync can tell the document needs no refetch.
+	FetchKey string `json:"-"`
+	// Keep marks a document the source did not refetch because its stored
+	// copy is provably current (see sources.IndexState): it carries only ID,
+	// and the indexer leaves its stored chunks as they are.
+	Keep bool `json:"-"`
 }
 
 type TextChunk struct {
@@ -156,6 +166,15 @@ const (
 	PayloadSourceDocID = "source_doc_id"
 	PayloadChunkIndex  = "chunk_index"
 	PayloadTotalChunks = "total_chunks"
+	// Incremental sync fingerprints, stored on every chunk of a document:
+	// the hash of what was embedded, of the rest of the payload, of the
+	// settings the embedding depended on, the source's fetch key, and the
+	// seal stamped on all of a source's points when a sync completes.
+	PayloadContentHash = "content_hash"
+	PayloadMetaHash    = "meta_hash"
+	PayloadIndexFP     = "index_fp"
+	PayloadFetchKey    = "fetch_key"
+	PayloadSeal        = "seal"
 	TagPrefix          = "tag_"
 	PropPrefix         = "prop_"
 )

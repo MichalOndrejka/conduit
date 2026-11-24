@@ -9,6 +9,7 @@ package sources
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -177,13 +178,30 @@ func (a *APISource) fetchAdoRepoFiles(ctx context.Context, itemsURL string, top 
 	if err != nil {
 		return nil, err
 	}
+	// Each ref is read at the commit it points to now, resolved first: what
+	// is downloaded is exactly that tree, so a sync that completed from the
+	// same commits (the seal) left nothing to fetch.
+	repoBase, _ := AdoItemsAPIBase(itemsURL)
+	shas := make([]string, len(refs))
+	for i, ref := range refs {
+		if shas[i], err = a.adoRefCommit(ctx, repoBase, itemsURL, ref); err != nil {
+			return nil, err
+		}
+	}
+	st := indexStateFrom(ctx)
+	seal := st.sealFor(a.src, itemsURL, refs, shas)
+	if st.sealed(seal) {
+		st.Seal = seal
+		return st.keepAll(), nil
+	}
+
 	patterns := parsePathFilter(a.src.GetConfig("PathFilter"))
 	refURLs := make(map[gitRef]string, len(refs))
 	perRef := make([][]archiveFile, len(refs))
 	for i, ref := range refs {
 		refURL := withAdoItemsRef(itemsURL, ref)
 		refURLs[ref] = refURL
-		zipURL, err := adoRepoZipURL(refURL)
+		zipURL, err := adoRepoZipURL(withAdoCommitVersion(refURL, shas[i]))
 		if err != nil {
 			return nil, err
 		}
@@ -221,7 +239,71 @@ func (a *APISource) fetchAdoRepoFiles(ctx context.Context, itemsURL string, top 
 		addVersionFilters(&d.Filters, d.Properties, f.refs)
 		docs[i] = d
 	}
+	if st != nil {
+		st.Seal = seal
+	}
 	return docs, nil
+}
+
+// withAdoCommitVersion points an items URL at commit sha.
+func withAdoCommitVersion(itemsURL, sha string) string {
+	u, err := url.Parse(itemsURL)
+	if err != nil {
+		return itemsURL
+	}
+	q := u.Query()
+	q.Set("versionDescriptor.version", sha)
+	q.Set("versionDescriptor.versionType", "commit")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// adoRefCommit resolves ref to the commit it points to now (a tag peeled to
+// its commit). An items URL naming a commit itself needs no lookup.
+func (a *APISource) adoRefCommit(ctx context.Context, repoBase, itemsURL string, ref gitRef) (string, error) {
+	version := "7.1"
+	if u, err := url.Parse(itemsURL); err == nil {
+		q := u.Query()
+		if q.Get("api-version") != "" {
+			version = q.Get("api-version")
+		}
+		if strings.EqualFold(q.Get("versionDescriptor.versionType"), "commit") && q.Get("versionDescriptor.version") == ref.Name {
+			return ref.Name, nil
+		}
+	}
+	full := "heads/" + ref.Name
+	if ref.Tag {
+		full = "tags/" + ref.Name
+	}
+	data, err := a.getRaw(ctx, a.httpClient(), fmt.Sprintf("%s/refs?filter=%s&peelTags=true&api-version=%s",
+		repoBase, url.QueryEscape(full), url.QueryEscape(version)))
+	if err != nil {
+		return "", fmt.Errorf("resolving %q to a commit: %w", ref.Name, err)
+	}
+	var refs struct {
+		Value []struct {
+			Name           string `json:"name"`
+			ObjectID       string `json:"objectId"`
+			PeeledObjectID string `json:"peeledObjectId"`
+		} `json:"value"`
+	}
+	if err := json.Unmarshal(data, &refs); err != nil {
+		return "", fmt.Errorf("resolving %q to a commit: response is not valid JSON: %w", ref.Name, err)
+	}
+	// The filter matches by prefix: heads/main also lists heads/main-old.
+	for _, r := range refs.Value {
+		if r.Name == "refs/"+full {
+			if r.PeeledObjectID != "" {
+				return r.PeeledObjectID, nil
+			}
+			return r.ObjectID, nil
+		}
+	}
+	kind := "branch"
+	if ref.Tag {
+		kind = "tag"
+	}
+	return "", fmt.Errorf("the repository has no %s %q", kind, ref.Name)
 }
 
 // adoFileRefs is the refs a file source reads: the one its Url already names,

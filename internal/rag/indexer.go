@@ -27,6 +27,48 @@ func makeChunkID(docID string, chunkIndex int) string {
 	return uuid.NewSHA1(idNamespace, []byte(docID+"_chunk_"+strconv.Itoa(chunkIndex))).String()
 }
 
+// pointIDFor is the ID of chunk index of a document of total chunks: a
+// single-chunk document's point is keyed by the document alone.
+func pointIDFor(docID string, index, total int) string {
+	if total == 1 {
+		return makeID(docID)
+	}
+	return makeChunkID(docID, index)
+}
+
+// metaPayload is the part of a chunk's payload that comes from its document
+// rather than from the chunk: tags, properties, filters and sort keys.
+func metaPayload(doc *models.SourceDocument) map[string]any {
+	payload := map[string]any{}
+	for k, v := range doc.Tags {
+		payload[models.TagKey(k)] = v
+	}
+	for k, v := range doc.Properties {
+		payload[models.PropKey(k)] = v
+	}
+	for k, v := range doc.Filters.Fields {
+		payload[models.FilterKey(k)] = v
+	}
+	if d := doc.Filters.Date; !d.IsZero() {
+		payload[models.FilterDateKey] = d.Unix()
+	}
+	for k, v := range doc.Sort {
+		payload[models.SortKey(k)] = v
+	}
+	return payload
+}
+
+// chunkPayload is the full payload of one chunk of doc.
+func chunkPayload(doc *models.SourceDocument, chunk models.TextChunk, total int, nowMs int64) map[string]any {
+	payload := metaPayload(doc)
+	payload[models.PayloadText] = chunk.Text
+	payload[models.PayloadIndexedAtMs] = nowMs
+	payload[models.PayloadSourceDocID] = doc.ID
+	payload[models.PayloadChunkIndex] = strconv.Itoa(chunk.Index)
+	payload[models.PayloadTotalChunks] = strconv.Itoa(total)
+	return payload
+}
+
 type DocumentIndexer struct {
 	store     *VectorStore
 	embedding *EmbeddingService
@@ -83,131 +125,9 @@ func (d *DocumentIndexer) IndexBatch(
 	// service's configured concurrency) since each call is one blocking HTTP
 	// round-trip to Ollama; sequential embedding was the dominant cost of a
 	// sync run.
-	type embedJob struct {
-		docIdx      int
-		doc         *models.SourceDocument
-		chunk       models.TextChunk
-		totalChunks int
-	}
-
-	var jobs []embedJob
-	remaining := make([]int, len(docs)) // chunks left to embed, per document — drives progress
-	for i := range docs {
-		var chunks []models.TextChunk
-		if opts.PrecomputedChunks != nil && opts.PrecomputedChunks[i] != nil {
-			chunks = opts.PrecomputedChunks[i]
-		} else {
-			chunks = d.chunker.ChunkDocument(&docs[i])
-		}
-		chunks = WithChunkHeaders(docs[i].ChunkHeader, chunks)
-		remaining[i] = len(chunks)
-		for _, chunk := range chunks {
-			jobs = append(jobs, embedJob{docIdx: i, doc: &docs[i], chunk: chunk, totalChunks: len(chunks)})
-		}
-	}
-
-	points := make([]Point, len(jobs))
-
-	workCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var (
-		wg       sync.WaitGroup
-		sem      = make(chan struct{}, d.embedding.concurrency())
-		mu       sync.Mutex
-		firstErr error
-		doneDocs int
-	)
-
-	// Documents with no chunks (empty text) never get a job below, so they're
-	// "done" immediately.
-	for _, n := range remaining {
-		if n == 0 {
-			doneDocs++
-			if opts.ProgressCb != nil {
-				opts.ProgressCb(doneDocs, len(docs))
-			}
-		}
-	}
-
-dispatch:
-	for jobIdx, job := range jobs {
-		if opts.Checkpoint != nil {
-			if err := opts.Checkpoint(); err != nil {
-				cancel()
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-				break dispatch
-			}
-		}
-		select {
-		case <-workCtx.Done():
-			break dispatch
-		default:
-		}
-
-		wg.Add(1)
-		sem <- struct{}{}
-		go func(jobIdx int, job embedJob) {
-			defer wg.Done()
-			defer func() { <-sem }()
-
-			vector, err := d.embedding.Embed(workCtx, job.chunk.Text)
-			if err != nil {
-				mu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				mu.Unlock()
-				cancel()
-				return
-			}
-
-			pointID := makeChunkID(job.doc.ID, job.chunk.Index)
-			if job.totalChunks == 1 {
-				pointID = makeID(job.doc.ID)
-			}
-			payload := map[string]any{
-				models.PayloadText:        job.chunk.Text,
-				models.PayloadIndexedAtMs: nowMs,
-				models.PayloadSourceDocID: job.doc.ID,
-				models.PayloadChunkIndex:  strconv.Itoa(job.chunk.Index),
-				models.PayloadTotalChunks: strconv.Itoa(job.totalChunks),
-			}
-			for k, v := range job.doc.Tags {
-				payload[models.TagKey(k)] = v
-			}
-			for k, v := range job.doc.Properties {
-				payload[models.PropKey(k)] = v
-			}
-			for k, v := range job.doc.Filters.Fields {
-				payload[models.FilterKey(k)] = v
-			}
-			if d := job.doc.Filters.Date; !d.IsZero() {
-				payload[models.FilterDateKey] = d.Unix()
-			}
-			for k, v := range job.doc.Sort {
-				payload[models.SortKey(k)] = v
-			}
-			points[jobIdx] = Point{ID: pointID, Vector: vector, Payload: payload}
-
-			mu.Lock()
-			remaining[job.docIdx]--
-			if remaining[job.docIdx] == 0 {
-				doneDocs++
-				if opts.ProgressCb != nil {
-					opts.ProgressCb(doneDocs, len(docs))
-				}
-			}
-			mu.Unlock()
-		}(jobIdx, job)
-	}
-	wg.Wait()
-	if firstErr != nil {
-		return firstErr
+	points, _, err := d.embedDocs(ctx, docs, opts.PrecomputedChunks, opts.ProgressCb, opts.Checkpoint, nowMs, nil)
+	if err != nil {
+		return err
 	}
 
 	if len(points) == 0 {
@@ -218,26 +138,7 @@ dispatch:
 	// recreate it if an existing collection was sized for a different
 	// embedding model — its vectors are in the wrong space and unusable
 	// regardless of source, so every source touching it must be re-synced.
-	size := len(points[0].Vector)
-	if err := func() error {
-		d.collMu.Lock()
-		defer d.collMu.Unlock()
-		if !d.store.CollectionExists(ctx, collection) {
-			return d.store.CreateCollection(ctx, collection, size)
-		}
-		existing, err := d.store.VectorSize(ctx, collection)
-		if err != nil {
-			return err
-		}
-		if existing == size {
-			return nil
-		}
-		log.Printf("collection %s vector size %d != %d — recreating for new embedding model", collection, existing, size)
-		if err := d.store.DeleteCollection(ctx, collection); err != nil {
-			return err
-		}
-		return d.store.CreateCollection(ctx, collection, size)
-	}(); err != nil {
+	if _, err := d.ensureCollection(ctx, collection, len(points[0].Vector)); err != nil {
 		return err
 	}
 
@@ -277,4 +178,153 @@ dispatch:
 		*opts.Chunks = len(points)
 	}
 	return nil
+}
+
+// ensureCollection creates collection for vectors of size, or recreates it
+// if an existing one was sized for a different embedding model — its
+// vectors are in the wrong space and unusable regardless of source, so
+// every source touching it must be re-synced. recreated reports that the
+// collection was emptied (or is new).
+func (d *DocumentIndexer) ensureCollection(ctx context.Context, collection string, size int) (recreated bool, err error) {
+	d.collMu.Lock()
+	defer d.collMu.Unlock()
+	if !d.store.CollectionExists(ctx, collection) {
+		return true, d.store.CreateCollection(ctx, collection, size)
+	}
+	existing, err := d.store.VectorSize(ctx, collection)
+	if err != nil {
+		return false, err
+	}
+	if existing == size {
+		return false, nil
+	}
+	log.Printf("collection %s vector size %d != %d — recreating for new embedding model", collection, existing, size)
+	if err := d.store.DeleteCollection(ctx, collection); err != nil {
+		return false, err
+	}
+	return true, d.store.CreateCollection(ctx, collection, size)
+}
+
+// embedDocs chunks docs (or takes precomputed[i] for document i when set),
+// adds chunk headers and embeds every chunk concurrently (bounded by the
+// embedding service's configured concurrency, since each call is one
+// blocking HTTP round-trip). It returns the points in document order and,
+// parallel to them, the index of the document each belongs to. decorate,
+// when set, adds to each chunk's payload. No Qdrant writes happen here.
+func (d *DocumentIndexer) embedDocs(
+	ctx context.Context, docs []models.SourceDocument, precomputed [][]models.TextChunk,
+	progressCb func(done, total int), checkpoint func() error, nowMs int64,
+	decorate func(docIdx int, payload map[string]any),
+) (points []Point, docOf []int, err error) {
+	type embedJob struct {
+		docIdx      int
+		doc         *models.SourceDocument
+		chunk       models.TextChunk
+		totalChunks int
+	}
+
+	var jobs []embedJob
+	remaining := make([]int, len(docs)) // chunks left to embed, per document — drives progress
+	for i := range docs {
+		var chunks []models.TextChunk
+		if precomputed != nil && precomputed[i] != nil {
+			chunks = precomputed[i]
+		} else {
+			chunks = d.chunker.ChunkDocument(&docs[i])
+		}
+		chunks = WithChunkHeaders(docs[i].ChunkHeader, chunks)
+		remaining[i] = len(chunks)
+		for _, chunk := range chunks {
+			jobs = append(jobs, embedJob{docIdx: i, doc: &docs[i], chunk: chunk, totalChunks: len(chunks)})
+		}
+	}
+
+	points = make([]Point, len(jobs))
+
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var (
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, d.embedding.concurrency())
+		mu       sync.Mutex
+		firstErr error
+		doneDocs int
+	)
+
+	// Documents with no chunks (empty text) never get a job below, so they're
+	// "done" immediately.
+	for _, n := range remaining {
+		if n == 0 {
+			doneDocs++
+			if progressCb != nil {
+				progressCb(doneDocs, len(docs))
+			}
+		}
+	}
+
+dispatch:
+	for jobIdx, job := range jobs {
+		if checkpoint != nil {
+			if err := checkpoint(); err != nil {
+				cancel()
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				break dispatch
+			}
+		}
+		select {
+		case <-workCtx.Done():
+			break dispatch
+		default:
+		}
+
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(jobIdx int, job embedJob) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			vector, err := d.embedding.Embed(workCtx, job.chunk.Text)
+			if err != nil {
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+				}
+				mu.Unlock()
+				cancel()
+				return
+			}
+
+			pointID := pointIDFor(job.doc.ID, job.chunk.Index, job.totalChunks)
+			payload := chunkPayload(job.doc, job.chunk, job.totalChunks, nowMs)
+			if decorate != nil {
+				decorate(job.docIdx, payload)
+			}
+			points[jobIdx] = Point{ID: pointID, Vector: vector, Payload: payload}
+
+			mu.Lock()
+			remaining[job.docIdx]--
+			if remaining[job.docIdx] == 0 {
+				doneDocs++
+				if progressCb != nil {
+					progressCb(doneDocs, len(docs))
+				}
+			}
+			mu.Unlock()
+		}(jobIdx, job)
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, nil, firstErr
+	}
+	docOf = make([]int, len(jobs))
+	for i, job := range jobs {
+		docOf[i] = job.docIdx
+	}
+	return points, docOf, nil
+
 }

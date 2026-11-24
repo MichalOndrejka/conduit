@@ -1,6 +1,7 @@
 package web
 
 import (
+	"slices"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -505,8 +506,33 @@ func TestSourceDeleteRemovesSourceAndVectors(t *testing.T) {
 	}
 	h.qd.mu.Lock()
 	defer h.qd.mu.Unlock()
-	if len(h.qd.deleteFilterCalls) != 1 {
-		t.Errorf("DeleteByFilter calls = %v, want exactly one", h.qd.deleteFilterCalls)
+	// Every source collection: a type change whose cleanup failed may have
+	// left points outside the current one.
+	want := 0
+	for _, c := range models.AllCollections {
+		if c != models.CollectionExperience {
+			want++
+		}
+	}
+	if len(h.qd.deleteFilterCalls) != want || !slices.Contains(h.qd.deleteFilterCalls, models.CollectionBacklog) {
+		t.Errorf("DeleteByFilter calls = %v, want every source collection", h.qd.deleteFilterCalls)
+	}
+}
+
+// A source whose indexed data can't be removed is kept, so the delete can be
+// retried instead of orphaning its vectors.
+func TestSourceDeleteKeepsSourceWhenVectorsRemain(t *testing.T) {
+	h := newHarness(t)
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Sticky", Type: "backlog"})
+	h.qd.mu.Lock()
+	h.qd.failDeletes = true
+	h.qd.mu.Unlock()
+
+	if resp := h.postForm("/sources/s1/delete", nil); resp.StatusCode < 400 {
+		t.Errorf("status = %d, want an error", resp.StatusCode)
+	}
+	if got, _ := h.sources.Get("s1"); got == nil {
+		t.Error("source deleted although its vectors weren't")
 	}
 }
 

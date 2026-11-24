@@ -7,6 +7,7 @@ package sourcemgmt
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
@@ -262,8 +263,10 @@ func (m *Manager) Save(ctx context.Context, oldCollection string, src *models.So
 	return m.sources.Save(*src)
 }
 
-// Delete removes a source's indexed vectors (best-effort) and the source
-// record itself. A missing source is not an error.
+// Delete removes a source's indexed vectors and then the source record
+// itself. If the vectors can't be removed the source is kept and the error
+// returned, so the delete can be retried — the record is the only handle on
+// them. A missing source is not an error.
 func (m *Manager) Delete(ctx context.Context, id string) error {
 	src, err := m.sources.Get(id)
 	if err != nil {
@@ -272,9 +275,15 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	if src == nil {
 		return nil
 	}
-	// Best-effort vector cleanup — the source record is removed either way.
-	if coll := sources.CollectionFor(src); coll != "" {
-		_ = m.vectors.DeleteByFilter(ctx, coll, sourceFilter(src.ID))
+	// Every source collection, not only the current type's: a type change
+	// whose cleanup failed can have left points in another.
+	for _, coll := range models.AllCollections {
+		if coll == models.CollectionExperience {
+			continue
+		}
+		if err := m.vectors.DeleteByFilter(ctx, coll, sourceFilter(src.ID)); err != nil && !errors.Is(err, rag.ErrCollectionNotFound) {
+			return fmt.Errorf("removing the source's indexed data from %s (the source was kept; try again): %w", coll, err)
+		}
 	}
 	return m.sources.Delete(src.ID)
 }

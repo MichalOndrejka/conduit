@@ -37,6 +37,7 @@ type fakeQdrant struct {
 	count       map[string]int              // collection -> points/count() response
 
 	deleteFilterCalls []string // collections DeleteByFilter was called against
+	failDeletes       bool     // answer deletes with HTTP 500
 	createCalls       []string
 	deleteCollCalls   []string
 	indexCalls        []string // collections a payload index was created on
@@ -98,6 +99,10 @@ func (q *fakeQdrant) handler() http.HandlerFunc {
 		case r.Method == http.MethodPost && strings.HasSuffix(path, "/points/delete"):
 			name := collOf("/points/delete")
 			q.deleteFilterCalls = append(q.deleteFilterCalls, name)
+			if q.failDeletes {
+				http.Error(w, `{"status":{"error":"down"}}`, http.StatusInternalServerError)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"result": true})
 
 		case r.Method == http.MethodGet && strings.HasPrefix(path, "/collections/"):

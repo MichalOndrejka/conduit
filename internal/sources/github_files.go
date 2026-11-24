@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/MichalOndrejka/conduit/internal/models"
+	"github.com/MichalOndrejka/conduit/internal/rag"
 )
 
 // archiveDownloadTimeout bounds one repository archive download. It replaces
@@ -44,12 +45,13 @@ type archiveFile struct {
 	skipped bool // binary or over maxRepoFileBytes
 }
 
-// readArchive downloads the tarball of ref — shared with the other sources
+// readArchive downloads the tarball of commit sha (ref names it in
+// messages) — shared with the other sources
 // of the sync batch that read the same tarball with the same token — and
 // returns every file matching patterns. A download that fails part-way is
 // restarted from the beginning.
-func (g *GitHubSource) readArchive(ctx context.Context, ref string, patterns []string, progress ProgressCallback) ([]archiveFile, error) {
-	tarURL := g.repoAPI() + "/tarball/" + refPath(ref)
+func (g *GitHubSource) readArchive(ctx context.Context, sha, ref string, patterns []string, progress ProgressCallback) ([]archiveFile, error) {
+	tarURL := g.repoAPI() + "/tarball/" + url.PathEscape(sha)
 	name, release, err := fetchArchive(ctx, "github|"+tarURL+"|"+g.src.GetConfig("Token"), func(ctx context.Context) (string, error) {
 		client := *g.client
 		client.Timeout = archiveDownloadTimeout
@@ -123,13 +125,29 @@ func (g *GitHubSource) fetchFiles(ctx context.Context, progress ProgressCallback
 	if err != nil {
 		return nil, err
 	}
+	// Each ref is read at the commit it points to now, resolved first: what
+	// is downloaded is exactly that tree, so a sync that completed from the
+	// same commits (the seal) left nothing to fetch.
+	shas := make([]string, len(refs))
+	for i, ref := range refs {
+		if shas[i], err = g.refCommit(ctx, ref); err != nil {
+			return nil, err
+		}
+	}
+	st := indexStateFrom(ctx)
+	seal := st.sealFor(g.src, g.repoAPI(), refs, shas)
+	if st.sealed(seal) {
+		st.Seal = seal
+		return st.keepAll(), nil
+	}
+
 	patterns := parsePathFilter(g.src.GetConfig("PathFilter"))
 	perRef := make([][]archiveFile, len(refs))
 	for i, ref := range refs {
 		if progress != nil {
 			progress(models.SyncProgress{Phase: "fetching", Message: "Downloading repository archive of " + ref.Name})
 		}
-		files, err := g.readArchive(ctx, ref.Name, patterns, progress)
+		files, err := g.readArchive(ctx, shas[i], ref.Name, patterns, progress)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +181,27 @@ func (g *GitHubSource) fetchFiles(ctx context.Context, progress ProgressCallback
 			Filters:    filters,
 		})
 	}
+	if st != nil {
+		st.Seal = seal
+	}
 	return docs, nil
+}
+
+// refCommit resolves ref to the SHA of the commit it points to now.
+func (g *GitHubSource) refCommit(ctx context.Context, ref gitRef) (string, error) {
+	full := "heads/" + ref.Name
+	if ref.Tag {
+		full = "tags/" + ref.Name
+	}
+	data, _, err := g.get(ctx, g.repoAPI()+"/commits/"+refPath(full), "application/vnd.github.sha")
+	if err != nil {
+		return "", fmt.Errorf("resolving %q of %s/%s to a commit: %w", ref.Name, g.owner, g.repo, err)
+	}
+	sha := strings.TrimSpace(string(data))
+	if sha == "" || strings.ContainsAny(sha, " \t\r\n{}<>\"") {
+		return "", fmt.Errorf("resolving %q of %s/%s to a commit: unexpected response %q", ref.Name, g.owner, g.repo, rag.Truncate(sha, 80))
+	}
+	return sha, nil
 }
 
 // prepare returns the request setup for this source: the Accept media type

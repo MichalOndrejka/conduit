@@ -117,6 +117,8 @@ Maximum characters per chunk. The chunker splits at sentence boundaries or newli
 
 Characters of overlap between consecutive chunks. Overlap preserves context at chunk boundaries. Default `200`. Set to `0` to disable.
 
+Chunking is read at startup. After a change and a restart, each source's next sync re-embeds the documents whose chunks change (see [Incremental sync](sources.md#incremental-sync)); no manual re-index is needed.
+
 ---
 
 ## Preprocessing (optional LLM summarization)

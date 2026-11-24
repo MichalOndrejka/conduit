@@ -135,3 +135,56 @@ func (s *EmbeddingService) Embed(ctx context.Context, text string) ([]float32, e
 	}
 	return parsed.Data[0].Embedding, nil
 }
+
+// ModelDigest returns the digest Ollama reports for the configured model
+// (GET /api/tags beside the OpenAI-compatible /v1), so re-pulling the same
+// tag with different weights is told apart from the model embedded with
+// before. It is "" for an endpoint that isn't Ollama or doesn't list the
+// model; only failing to reach the endpoint at all is an error.
+func (s *EmbeddingService) ModelDigest(ctx context.Context) (string, error) {
+	ec := s.cfg.Embedding
+	root := strings.TrimSuffix(strings.TrimRight(ec.BaseURL, "/"), "/v1")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, root+"/api/tags", nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("reading the embedding model's digest: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return "", fmt.Errorf("reading the embedding model's digest: %w", err)
+	}
+	if resp.StatusCode >= 500 {
+		// A failing server, not a missing endpoint: guessing "no digest"
+		// would change the fingerprint and re-embed everything.
+		return "", fmt.Errorf("reading the embedding model's digest: HTTP %d", resp.StatusCode)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", nil // not an Ollama server
+	}
+	var tags struct {
+		Models []struct {
+			Name   string `json:"name"`
+			Model  string `json:"model"`
+			Digest string `json:"digest"`
+		} `json:"models"`
+	}
+	if json.Unmarshal(data, &tags) != nil {
+		return "", nil
+	}
+	want := ec.Model
+	if !strings.Contains(want, ":") {
+		want += ":latest"
+	}
+	for _, m := range tags.Models {
+		for _, name := range []string{m.Name, m.Model} {
+			if name == ec.Model || name == want {
+				return m.Digest, nil
+			}
+		}
+	}
+	return "", nil
+}

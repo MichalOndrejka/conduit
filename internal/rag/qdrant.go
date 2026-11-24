@@ -355,6 +355,28 @@ func (v *VectorStore) Retrieve(ctx context.Context, collection string, ids []str
 	return resp.Result, nil
 }
 
+// RetrieveWithVectors is Retrieve returning each point's vector too.
+func (v *VectorStore) RetrieveWithVectors(ctx context.Context, collection string, ids []string) ([]ScrolledPoint, error) {
+	body := map[string]any{"ids": ids, "with_payload": true, "with_vector": true}
+	var resp struct {
+		Result []ScrolledPoint `json:"result"`
+	}
+	if err := v.do(ctx, http.MethodPost, "/collections/"+collection+"/points", body, &resp); err != nil {
+		if errors.Is(err, ErrCollectionNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return resp.Result, nil
+}
+
+// SetPayload merges payload into every point matching filter, keeping their
+// other payload keys and vectors.
+func (v *VectorStore) SetPayload(ctx context.Context, collection string, payload map[string]any, filter *Filter) error {
+	body := map[string]any{"payload": payload, "filter": filter}
+	return v.do(ctx, http.MethodPost, "/collections/"+collection+"/points/payload?wait=true", body, nil)
+}
+
 // ScrollFields is Scroll returning only the named payload fields (no
 // vectors) — far less to transfer when scanning a large collection.
 func (v *VectorStore) ScrollFields(

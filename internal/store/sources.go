@@ -90,6 +90,25 @@ func (s *SourceConfigStore) Save(source models.SourceDefinition) error {
 	return s.write(source.ID, sources)
 }
 
+// Modify applies fn to the stored source id under the store's lock and
+// saves it, reporting false (and storing nothing) when there is none — it
+// was deleted meanwhile and must not come back.
+func (s *SourceConfigStore) Modify(id string, fn func(*models.SourceDefinition)) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sources, err := s.read()
+	if err != nil {
+		return false, err
+	}
+	for i := range sources {
+		if sources[i].ID == id {
+			fn(&sources[i])
+			return true, s.write(id, sources)
+		}
+	}
+	return false, nil
+}
+
 func (s *SourceConfigStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

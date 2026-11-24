@@ -891,8 +891,9 @@ func TestFetchDocumentsFilesUseBranch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotVersion != "dev" || gotType != "branch" {
-		t.Errorf("versionDescriptor = %q/%q, want dev/branch", gotVersion, gotType)
+	// The branch is read at the commit it was resolved to.
+	if gotVersion != "sha-dev" || gotType != "commit" {
+		t.Errorf("versionDescriptor = %q/%q, want sha-dev/commit", gotVersion, gotType)
 	}
 	if len(docs) != 1 || !strings.Contains(docs[0].Properties["web_url"], "version=GBdev") {
 		t.Errorf("docs = %+v, want one doc linking to GBdev", docs)
@@ -905,7 +906,24 @@ func TestFetchDocumentsFilesUseBranch(t *testing.T) {
 // defaultBranchShim answers the repository lookup a file or commit source
 // without a configured ref makes for its default branch (main), passing
 // every other request to h.
+// adoRefsShim answers Azure DevOps' refs lookup: every branch or tag X
+// points to commit "sha-X".
+func adoRefsShim(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/refs") {
+			name := r.URL.Query().Get("filter")
+			_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]string{
+				{"name": "refs/" + name + "-other", "objectId": "wrong"},
+				{"name": "refs/" + name, "objectId": "sha-" + name[strings.IndexByte(name, '/')+1:]},
+			}})
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 func defaultBranchShim(h http.Handler) http.Handler {
+	h = adoRefsShim(h)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/_apis/git/repositories/repo") {
 			_, _ = w.Write([]byte(`{"defaultBranch":"refs/heads/main"}`))
@@ -916,7 +934,7 @@ func defaultBranchShim(h http.Handler) http.Handler {
 }
 
 func blobsZipShim(h http.HandlerFunc) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return adoRefsShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/blobs") {
 			h(w, r)
 			return
@@ -940,7 +958,7 @@ func blobsZipShim(h http.HandlerFunc) http.Handler {
 		}
 		_ = zw.Close()
 		_, _ = w.Write(buf.Bytes())
-	})
+	}))
 }
 
 

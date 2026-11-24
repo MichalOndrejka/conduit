@@ -14,11 +14,11 @@ cmd/conduit/            entrypoint + `conduit search` verification CLI
 internal/config/        config.json + env overrides   (port of app/config.py)
 internal/models/        domain models & constants     (port of app/models.py)
 internal/secrets/       Fernet credential store       (port of app/store/secrets_store.py)
-internal/rag/           qdrant REST client, embeddings, chunker, indexer, search, PCA
+internal/rag/           qdrant REST client, embeddings, chunker, indexer (incremental: fingerprints on points, diff, apply), search, PCA
 internal/memory/        experience store              (port of app/memory/service.py)
 internal/mcptools/      MCP tools via mark3labs/mcp-go (port of app/mcp_tools/tools.py)
 internal/sources/       source abstraction (generic API source for Azure DevOps + GitHub source)
-internal/syncsvc/       sync orchestration (fetch → index, pause/cancel)
+internal/syncsvc/       sync orchestration (index state → fetch → diff → preprocess → apply, pause/cancel)
 internal/syncctl/       pause/cancel control + progress stores
 internal/health/        background probes with exponential backoff
 internal/sourcemgmt/    source types, config validation, save/delete with vector cleanup

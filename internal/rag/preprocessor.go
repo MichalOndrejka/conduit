@@ -49,6 +49,11 @@ type DocumentPreprocessor struct {
 type PreprocessOptions struct {
 	ProgressCb func(current, total int)
 	Checkpoint func() error // return non-nil (e.g. ErrSyncCancelled) to abort
+	// Degraded, when set, is called (from any goroutine, at most once per
+	// document) for each document a chunk of which kept its original text
+	// because the model call failed — it isn't the summary later syncs
+	// would otherwise take it for.
+	Degraded func(docIdx int)
 }
 
 // NewDocumentPreprocessor builds a preprocessor from the current config. It is
@@ -89,6 +94,14 @@ func (p *DocumentPreprocessor) EnabledForType(sourceType string) bool {
 	return true
 }
 
+// Fingerprint identifies everything that decides what preprocessing turns a
+// document into, so a settings change re-embeds the documents it affects.
+// The endpoint URL is left out: another host serving the same model gives
+// the same summaries.
+func (p *DocumentPreprocessor) Fingerprint() string {
+	return fmt.Sprintf("preprocess|%s|%s|%d|%d|%d", p.model, p.systemPrompt, p.chunker.maxSize, p.chunker.overlap, minPreprocessLength)
+}
+
 // Preprocess chunks each document (same chunker and overlap used for
 // indexing) and summarizes the chunks that meet the minimum length,
 // concurrently. The returned slice is parallel to docs — chunksPerDoc[i]
@@ -119,10 +132,11 @@ func (p *DocumentPreprocessor) Preprocess(
 	}
 
 	var (
-		wg   sync.WaitGroup
-		sem  = make(chan struct{}, p.concurrency)
-		mu   sync.Mutex
-		done int
+		wg       sync.WaitGroup
+		sem      = make(chan struct{}, p.concurrency)
+		mu       sync.Mutex
+		done     int
+		degraded = make([]bool, len(docs))
 	)
 
 	// Documents with no chunks (empty text) are "done" immediately.
@@ -150,11 +164,18 @@ func (p *DocumentPreprocessor) Preprocess(
 
 			docID := docs[job.docIdx].ID
 			chunk := &chunksPerDoc[job.docIdx][job.chunkIdx]
+			ok := true
 			if len(chunk.Text) >= minPreprocessLength {
-				chunk.Text = p.summarize(ctx, docID, chunk.Text)
+				chunk.Text, ok = p.summarize(ctx, docID, chunk.Text)
 			}
 
 			mu.Lock()
+			if !ok && !degraded[job.docIdx] {
+				degraded[job.docIdx] = true
+				if opts.Degraded != nil {
+					opts.Degraded(job.docIdx)
+				}
+			}
 			remaining[job.docIdx]--
 			if remaining[job.docIdx] == 0 {
 				done++
@@ -177,7 +198,9 @@ type chatResponse struct {
 	} `json:"choices"`
 }
 
-func (p *DocumentPreprocessor) summarize(ctx context.Context, docID, text string) string {
+// summarize returns text's summary, or text itself and false when the model
+// call failed.
+func (p *DocumentPreprocessor) summarize(ctx context.Context, docID, text string) (string, bool) {
 	body, err := json.Marshal(map[string]any{
 		"model": p.model,
 		"messages": []map[string]string{
@@ -187,11 +210,11 @@ func (p *DocumentPreprocessor) summarize(ctx context.Context, docID, text string
 		"stream": false,
 	})
 	if err != nil {
-		return text
+		return text, false
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.url, bytes.NewReader(body))
 	if err != nil {
-		return text
+		return text, false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer ollama") // matches embedding's local-key convention
@@ -199,25 +222,25 @@ func (p *DocumentPreprocessor) summarize(ctx context.Context, docID, text string
 	resp, err := p.httpClient.Do(req)
 	if err != nil {
 		log.Printf("warning: preprocessing call failed for doc %s — keeping original chunk: %v", docID, err)
-		return text
+		return text, false
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("warning: preprocessing HTTP %d for doc %s — keeping original chunk", resp.StatusCode, docID)
-		return text
+		return text, false
 	}
 	var parsed chatResponse
 	if err := json.Unmarshal(data, &parsed); err != nil || len(parsed.Choices) == 0 {
 		log.Printf("warning: unparseable preprocessing response for doc %s — keeping original chunk", docID)
-		return text
+		return text, false
 	}
 	summary := strings.TrimSpace(parsed.Choices[0].Message.Content)
 	if summary == "" {
 		log.Printf("warning: empty summary for doc %s — keeping original chunk", docID)
-		return text
+		return text, false
 	}
-	return summary
+	return summary, true
 }
 
 // Verify probes the configured chat endpoint with a minimal request, for the

@@ -62,7 +62,7 @@ Fetches from github.com or a GitHub Enterprise Server through the GitHub REST AP
 
 What each source type fetches:
 
-- **Source Code / Test Code / Documentation** (and Requirements in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. Each branch or tag is downloaded as a single tarball (`/repos/{owner}/{repo}/tarball/{ref}`) and read as it streams in, so a sync costs one API request per version, plus one to look up the default branch when none is ticked, whatever the repository size. A download cut off part-way is restarted.
+- **Source Code / Test Code / Documentation** (and Requirements in `files` mode): one document per file matching `PathFilter`, with its full content. Files over 200 KB or binary are noted as skipped. Each branch or tag is resolved to its commit and downloaded as a single tarball of it (`/repos/{owner}/{repo}/tarball/{sha}`) and read as it streams in, so a sync costs one API request per version, plus one to look up the default branch when none is ticked, whatever the repository size. A download cut off part-way is restarted.
 - **Commit History**: one document per commit of each branch or tag (`Top` per version) with its full message and the patch of every changed file. GitHub returns no patch for binary or very large files and lists at most 3000 files per commit; the document notes either case.
 - **Backlog** (and Requirements in `workitems` mode): open and closed issues with their bodies and every comment. Pull requests are left out; `search_pull_request` reads them live. Filters: `state`, `assigned_to`, `tags` (labels), `work_item_type` = the issue's type (Bug, Feature, …), or `Issue` when it has none.
 - **Pipeline Runs**: not synced. The source names one or more workflows (`Workflow`) and `search_pipeline_run` reads their runs live — see [Pipeline Runs](#pipeline-runs). A run's details list each failed job of every attempt (so a run re-run to green still shows attempt 1's failures) with its failed steps, the failed jobs' annotations, the commits since the previous run of the workflow on the branch (compare API) and the artifacts it uploaded (metadata only). `steps` lists every job of every attempt and its steps, green ones too, and any job's log is read on request; logs GitHub has already deleted are noted. GitHub has no test results API, so there are no tests.
@@ -86,6 +86,38 @@ The source **type** only decides which Qdrant collection a source's documents la
 | Test Code | `conduit_testcode` |
 | Documentation | `conduit_documentation` |
 
+## Incremental sync
+
+Every sync is incremental, for every source type, and needs nothing configured. A sync first reads back what the index holds for the source. Every chunk carries fingerprints of its document: a hash of the chunks that were embedded, a hash of the rest of its payload, the settings it was embedded under, and the source's fetch key. Then, after the fetch:
+
+- **new and changed** documents are preprocessed (if enabled) and embedded;
+- documents whose **metadata alone** changed (a ref ticked, the source renamed) keep their vectors and get the new payload;
+- documents the source **no longer has** are removed: deleted items, items moved out of the source's scope by its filters, a renamed file's old path, a commit gone after a force-push;
+- **unchanged** documents are left as they are.
+
+Deletions need no feed of their own: the fetch always enumerates the source's full current scope, so anything absent from it is gone.
+
+What counts as changed:
+
+- **Settings.** A change to chunking, the embedding model, its input limit, or the preprocessing model or prompt re-embeds every document it affects. The model is identified by its digest where Ollama reports one, so re-pulled weights of the same tag count as a change. Otherwise the endpoint URL is part of the identity.
+- **Chunks.** The content hash covers the chunks themselves, so a change in how Conduit chunks documents is caught too.
+- **Preprocessing fallbacks.** A document whose preprocessing fell back to its original text is tried again on every sync until it is summarized.
+- **Incomplete or foreign points.** Points written by an older Conduit, documents a failed or cancelled sync left part-written, and anything dropped from Qdrant outside a sync read as not indexed and are embedded again.
+
+Every embed happens before the first write. A cancelled or failed embed leaves the index as it was. A write failure leaves each document either old, new, or incomplete (and re-embedded next time), and marks the sync failed. After writing, the sync checks the source's point count; if the points changed under it, it runs once more.
+
+**Source edits and deletes.** A sync also removes the source's points from every other collection, for example points left by a type change whose cleanup failed. Editing a source while it syncs keeps the edit, and the source ends as `needs-reindex` rather than `completed`, because what was indexed came from the old settings. The same happens if the index was dropped (an embedding model change) during the sync. Deleting a source while it syncs removes whatever the sync indexed afterwards, and the source stays deleted. Deleting a source fails, keeping the source, if its indexed data can't be removed, so it can be retried.
+
+Some fetches are skipped too, but only where the input is **content-addressed**, never on a timestamp or revision number:
+
+- **Commit history**: a commit already indexed, listed from the same refs under the same settings and the same Conduit build, isn't diffed again: its message and diff can't change under its SHA. Ticking another branch or tag refetches only the commits whose refs it changes.
+- **Repository files**: each branch or tag is resolved to its commit first (`…/refs?filter=heads/{name}&peelTags=true` on Azure DevOps, `/commits/heads/{name}` on GitHub), and that exact commit's tree is downloaded. No archive is downloaded at all only when the last sync completed from the same commits, settings and build, and every document it left is still fully indexed.
+- **Work items, issues and their comments** are always fetched in full, since it isn't guaranteed that every kind of edit (a comment edited or deleted, for one) moves an item's revision or update time. Unchanged ones still aren't embedded again.
+
+A new Conduit build refetches skipped inputs once, since it may render them differently. Documents that come out the same aren't embedded again.
+
+The Dashboard's Syncs tab charts what each source's latest sync embedded, rewrote, removed and left unchanged.
+
 ## Platform presets (UI convenience, not backend code)
 
 The **Sources → Create** flow offers a friendly **Azure DevOps** tab. It's a frontend-only preset: filling in org/project/PAT/resource fields compiles them into the generic API keys above on submit (`Url`, `AuthType=basic`, `Password=<credential>`, `ItemsPath=value`, …), and the source is stored as an ordinary generic API source. Commit History, Source Code, Test Code and Documentation sources additionally get backend-side ADO enrichment (real diffs / real file content, see above); Backlog sources are fetched entirely server-side (see below). A few UI-only metadata keys (`Platform`, `AdoOrg`, `AdoProject`, `AdoApiVersion`, `AdoResource`, `AdoRepo`, `AdoQuery`) are persisted alongside the generic keys purely so the editor can re-open a source in the right tab, pre-filled.
@@ -96,7 +128,7 @@ Each commit's diff is built from its change list (`commits/{id}/changes`, one re
 
 Source Code, Test Code and Documentation sources (and Requirements in Files mode) take **Versions** too, each applied as `versionDescriptor` (`versionType` `branch` or `tag`) so files and their web links come from that version; none = the repository's default branch, looked up so it can name the documents' version.
 
-These sources download each version's whole tree as **one zip** (`…/items?path=/&$format=zip&download=true`) to a temporary file, then apply **File filter** (`PathFilter`) and **Max items** (`Top`, per version) locally. A sync costs one request per version for the files, whatever the repository size; a download cut off part-way is restarted. Each matching file becomes one document, ID `{source}_capi_{path}`, holding its path and full content; files over 200 KB or binary are noted as skipped. The form's preview downloads the whole zip too.
+These sources download each version's whole tree as **one zip** (`…/items?path=/&$format=zip&download=true`) to a temporary file, then apply **File filter** (`PathFilter`) and **Max items** (`Top`, per version) locally. A sync costs one request per version for the files (plus one to resolve each version to its commit, see [Incremental sync](#incremental-sync)), whatever the repository size; a download cut off part-way is restarted. Each matching file becomes one document, ID `{source}_capi_{path}`, holding its path and full content; files over 200 KB or binary are noted as skipped. The form's preview downloads the whole zip too.
 
 Within one sync batch (**Sync selected**, or `source_sync trigger` with several IDs), sources that read the same archive — the same repository, branch and credential, e.g. a Source Code and a Test Code source of one repository — share a single download: the first downloads, the others wait for it and read the same file. This holds for GitHub tarballs too. The files are deleted when the batch ends; nothing is kept between syncs, and a source synced on its own downloads for itself. A download that ends early (even when the response itself ended cleanly) is detected by reading the archive back and restarted.
 

@@ -127,11 +127,11 @@ func TestFetchDocumentsDownloadsRepositoryAsOneZip(t *testing.T) {
 		"src/Other.cs": "class Other {}",
 	})
 	var requests []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(adoRefsShim(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.String())
 		q := r.URL.Query()
 		if !strings.HasSuffix(r.URL.Path, "/items") || q.Get("$format") != "zip" || q.Get("path") != "/" ||
-			q.Get("versionDescriptor.version") != "dev" || q.Get("api-version") != "7.1" ||
+			q.Get("versionDescriptor.version") != "sha-dev" || q.Get("versionDescriptor.versionType") != "commit" || q.Get("api-version") != "7.1" ||
 			// Azure DevOps Server: HTTP 400 for a recursionLevel other than
 			// None with a single item path.
 			q.Has("recursionLevel") || q.Has("scopePath") {
@@ -140,7 +140,7 @@ func TestFetchDocumentsDownloadsRepositoryAsOneZip(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/zip")
 		_, _ = w.Write(zipBody)
-	}))
+	})))
 	defer srv.Close()
 
 	s := &APISource{src: codeSrc(map[string]string{

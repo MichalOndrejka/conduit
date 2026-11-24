@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/config"
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/rag"
+	"github.com/MichalOndrejka/conduit/internal/rag/ragtest"
 	"github.com/MichalOndrejka/conduit/internal/store"
 	"github.com/MichalOndrejka/conduit/internal/syncctl"
 )
@@ -26,128 +28,14 @@ type fakeSecrets struct{}
 
 func (fakeSecrets) GetValue(string) string { return "" }
 
-// fakeQdrant implements the few REST endpoints the pipeline touches.
-type fakeQdrant struct {
-	mu          sync.Mutex
-	collections map[string]map[string]map[string]any // collection → id → payload
-	sizes       map[string]int                       // collection → configured vector size
-}
+// fakeQdrant is the shared in-memory Qdrant fake.
+type fakeQdrant struct{ *ragtest.Qdrant }
 
-func newFakeQdrant() *fakeQdrant {
-	return &fakeQdrant{
-		collections: map[string]map[string]map[string]any{},
-		sizes:       map[string]int{},
-	}
-}
+func newFakeQdrant() *fakeQdrant { return &fakeQdrant{ragtest.New()} }
 
-func (f *fakeQdrant) handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /collections", func(w http.ResponseWriter, _ *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		var cols []map[string]string
-		for name := range f.collections {
-			cols = append(cols, map[string]string{"name": name})
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": map[string]any{"collections": cols},
-		})
-	})
-	mux.HandleFunc("PUT /collections/{name}", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Vectors struct {
-				Size int `json:"size"`
-			} `json:"vectors"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		name := r.PathValue("name")
-		f.collections[name] = map[string]map[string]any{}
-		f.sizes[name] = body.Vectors.Size
-		_, _ = w.Write([]byte(`{"result": true}`))
-	})
-	mux.HandleFunc("GET /collections/{name}", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		name := r.PathValue("name")
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"result": map[string]any{
-				"points_count": len(f.collections[name]),
-				"config": map[string]any{
-					"params": map[string]any{
-						"vectors": map[string]any{"size": f.sizes[name]},
-					},
-				},
-			},
-		})
-	})
-	mux.HandleFunc("DELETE /collections/{name}", func(w http.ResponseWriter, r *http.Request) {
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		name := r.PathValue("name")
-		delete(f.collections, name)
-		delete(f.sizes, name)
-		_, _ = w.Write([]byte(`{"result": true}`))
-	})
-	mux.HandleFunc("PUT /collections/{name}/points", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Points []struct {
-				ID      string         `json:"id"`
-				Payload map[string]any `json:"payload"`
-			} `json:"points"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		col := f.collections[r.PathValue("name")]
-		for _, p := range body.Points {
-			col[p.ID] = p.Payload
-		}
-		_, _ = w.Write([]byte(`{"result": true}`))
-	})
-	mux.HandleFunc("POST /collections/{name}/points/delete", func(w http.ResponseWriter, r *http.Request) {
-		var body struct {
-			Filter *struct {
-				Must []struct {
-					Key   string `json:"key"`
-					Match struct {
-						Value any `json:"value"`
-					} `json:"match"`
-				} `json:"must"`
-			} `json:"filter"`
-			Points []string `json:"points"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		f.mu.Lock()
-		defer f.mu.Unlock()
-		col := f.collections[r.PathValue("name")]
-		for _, id := range body.Points {
-			delete(col, id)
-		}
-		if body.Filter != nil {
-			for id, payload := range col {
-				match := true
-				for _, cond := range body.Filter.Must {
-					if payload[cond.Key] != cond.Match.Value {
-						match = false
-					}
-				}
-				if match {
-					delete(col, id)
-				}
-			}
-		}
-		_, _ = w.Write([]byte(`{"result": true}`))
-	})
-	return mux
-}
+func (f *fakeQdrant) handler() http.Handler { return f.Handler() }
 
-func (f *fakeQdrant) count(collection string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return len(f.collections[collection])
-}
+func (f *fakeQdrant) count(collection string) int { return f.Count(collection, "", nil) }
 
 func setupPipeline(t *testing.T, sourceURL string) (*Service, *store.SourceConfigStore, *fakeQdrant, *models.SourceDefinition) {
 	t.Helper()
@@ -707,5 +595,142 @@ func TestSyncReplacesQueuedWithFetchingBeforeStatus(t *testing.T) {
 	defer mu.Unlock()
 	if phaseAtSyncing != "fetching" {
 		t.Errorf("phase when the status became syncing = %q, want fetching (not the stale queued)", phaseAtSyncing)
+	}
+}
+
+// A resync embeds only what changed: nothing when nothing did, the edited
+// item when one is edited, and drops an item the source no longer has.
+func TestSyncIsIncremental(t *testing.T) {
+	var mu sync.Mutex
+	items := []map[string]any{{"id": 1, "title": "one"}, {"id": 2, "title": "two"}, {"id": 3, "title": "three"}}
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": items})
+	}))
+	defer apiSrv.Close()
+	var embeds atomic.Int32
+	svc, st, qd, src := setupPipelineWithEmbed(t, apiSrv.URL, func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Input string `json:"input"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if body.Input != "" && body.Input != "dimension probe" {
+			embeds.Add(1)
+		}
+		defaultEmbedHandler(w, r)
+	})
+	resync := func() {
+		t.Helper()
+		svc.Sync(context.Background(), src.ID)
+		if saved, _ := st.Get(src.ID); saved.SyncStatus != "completed" {
+			t.Fatalf("status = %q (error: %v)", saved.SyncStatus, *saved.SyncError)
+		}
+	}
+	texts := func() []string {
+		var out []string
+		for _, p := range qd.Payloads(models.CollectionBacklog) {
+			out = append(out, p[models.PayloadText].(string))
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	resync()
+	if embeds.Load() != 3 || qd.count(models.CollectionBacklog) != 3 {
+		t.Fatalf("first sync: %d embeds, %d points", embeds.Load(), qd.count(models.CollectionBacklog))
+	}
+	resync()
+	if embeds.Load() != 3 {
+		t.Errorf("unchanged resync embedded %d chunks, want 0", embeds.Load()-3)
+	}
+
+	mu.Lock()
+	items = []map[string]any{{"id": 1, "title": "one"}, {"id": 2, "title": "two edited"}}
+	mu.Unlock()
+	resync()
+	if embeds.Load() != 4 {
+		t.Errorf("edit resync embedded %d chunks, want 1", embeds.Load()-3)
+	}
+	got := strings.Join(texts(), "|")
+	if !strings.Contains(got, "two edited") || strings.Contains(got, "three") || qd.count(models.CollectionBacklog) != 2 {
+		t.Errorf("indexed = %q", got)
+	}
+}
+
+// A source deleted while it synced stays deleted, and nothing the sync
+// indexed is left behind.
+func TestSyncOfDeletedSourceLeavesNothing(t *testing.T) {
+	reached, release := make(chan struct{}), make(chan struct{})
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(reached)
+		<-release
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{{"id": 1, "title": "x"}}})
+	}))
+	defer apiSrv.Close()
+	svc, st, qd, src := setupPipeline(t, apiSrv.URL)
+	done := make(chan struct{})
+	go func() { svc.Sync(context.Background(), src.ID); close(done) }()
+	<-reached // the sync is fetching
+	if err := st.Delete(src.ID); err != nil { // as the delete handler does, mid-fetch
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	if got, _ := st.Get(src.ID); got != nil {
+		t.Errorf("deleted source came back: %+v", got)
+	}
+	if n := qd.count(models.CollectionBacklog); n != 0 {
+		t.Errorf("%d points left for the deleted source", n)
+	}
+}
+
+// Points of the source in another collection (left by a type change whose
+// cleanup failed) are removed by its next sync.
+func TestSyncRemovesPointsFromOtherCollections(t *testing.T) {
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{{"id": 1, "title": "x"}}})
+	}))
+	defer apiSrv.Close()
+	svc, st, qd, src := setupPipeline(t, apiSrv.URL)
+	qd.Mutate(func(cols map[string]map[string]*ragtest.Point) {
+		cols[models.CollectionDocumentation] = map[string]*ragtest.Point{
+			"p1": {Vector: []float32{1, 2, 3}, Payload: map[string]any{models.TagKey("source_id"): src.ID}},
+			"p2": {Vector: []float32{1, 2, 3}, Payload: map[string]any{models.TagKey("source_id"): "someone-else"}},
+		}
+	})
+	svc.Sync(context.Background(), src.ID)
+	if saved, _ := st.Get(src.ID); saved.SyncStatus != "completed" {
+		t.Fatalf("status = %q", saved.SyncStatus)
+	}
+	if n := qd.Count(models.CollectionDocumentation, "", nil); n != 1 {
+		t.Errorf("documentation points = %d, want only the other source's", n)
+	}
+}
+
+// An edit made while the source synced is kept, and the sync, built from
+// the settings before it, doesn't count as a completed sync of the source.
+func TestSyncKeepsEditMadeMeanwhile(t *testing.T) {
+	reached, release := make(chan struct{}), make(chan struct{})
+	apiSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(reached)
+		<-release
+		_ = json.NewEncoder(w).Encode(map[string]any{"value": []map[string]any{{"id": 1, "title": "x"}}})
+	}))
+	defer apiSrv.Close()
+	svc, st, _, src := setupPipeline(t, apiSrv.URL)
+	done := make(chan struct{})
+	go func() { svc.Sync(context.Background(), src.ID); close(done) }()
+	<-reached
+	edited, _ := st.Get(src.ID)
+	edited.Name = "Renamed"
+	if err := st.Save(*edited); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	<-done
+	got, _ := st.Get(src.ID)
+	if got.Name != "Renamed" || got.SyncStatus != "needs-reindex" {
+		t.Errorf("after the sync: name %q, status %q; want the edit kept and needs-reindex", got.Name, got.SyncStatus)
 	}
 }

@@ -74,7 +74,24 @@ func (g *GitHubSource) fetchCommits(ctx context.Context, progress ProgressCallba
 			listed.add(c.SHA, c, ref)
 		}
 	}
-	commits := listed.items
+	// A commit the index already holds, current and listed the same way,
+	// is kept: its message and patches can't have changed under its SHA.
+	st := indexStateFrom(ctx)
+	out := make([]models.SourceDocument, len(listed.items))
+	keys := make([]string, len(listed.items))
+	var commits []githubCommit
+	var commitRefs [][]gitRef
+	var at []int
+	for i, c := range listed.items {
+		keys[i] = fetchKey(g.src, c, listed.refs[i])
+		if id := g.commitDocID(c.SHA); st.current(id, keys[i]) {
+			out[i] = models.SourceDocument{ID: id, Keep: true}
+			continue
+		}
+		commits = append(commits, c)
+		commitRefs = append(commitRefs, listed.refs[i])
+		at = append(at, i)
+	}
 
 	n := len(commits)
 	diffs := make([]githubCommitDiff, n)
@@ -127,11 +144,17 @@ func (g *GitHubSource) fetchCommits(ctx context.Context, progress ProgressCallba
 		return nil, err
 	}
 
-	docs := make([]models.SourceDocument, n)
-	for i, c := range commits {
-		docs[i] = g.commitDocument(c, diffs[i], listed.refs[i])
+	for j, c := range commits {
+		d := g.commitDocument(c, diffs[j], commitRefs[j])
+		d.FetchKey = keys[at[j]]
+		out[at[j]] = d
 	}
-	return docs, nil
+	return out, nil
+}
+
+// commitDocID is the document ID of commit sha.
+func (g *GitHubSource) commitDocID(sha string) string {
+	return fmt.Sprintf("%s_commit_%s", g.src.ID, sha)
 }
 
 // listCommits pages through a branch's or tag's history until it (or Top)
@@ -268,7 +291,7 @@ func (g *GitHubSource) commitDocument(c githubCommit, d githubCommitDiff, refs [
 	}
 	filters.Date = parseTime(a.Date)
 	return models.SourceDocument{
-		ID:          fmt.Sprintf("%s_commit_%s", g.src.ID, c.SHA),
+		ID:          g.commitDocID(c.SHA),
 		Text:        strings.TrimSpace(sb.String()),
 		Tags:        g.tags(),
 		Properties:  props,
