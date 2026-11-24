@@ -98,7 +98,7 @@ func TestUseTree(t *testing.T) {
 	if !useTree(models.CollectionTestCode, flatDocs) {
 		t.Error("test-code collection should always use tree")
 	}
-	if useTree(models.CollectionWorkItems, pathDocs) {
+	if useTree(models.CollectionBacklog, pathDocs) {
 		t.Error("work-item collection should never use tree")
 	}
 	if !useTree(models.CollectionDocumentation, pathDocs) {

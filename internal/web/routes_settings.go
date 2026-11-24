@@ -31,7 +31,7 @@ import (
 // preprocSourceTypes drives the per-source-type toggles in the preprocessing
 // form, matching source_type_labels in app/templates/settings.html.
 var preprocSourceTypes = []struct{ Key, Label string }{
-	{"work-item", "Work Items"},
+	{"backlog", "Backlog"},
 	{"requirements", "Requirements"},
 	{"commit-history", "Commit History"},
 	{"pipeline-run", "Pipeline Runs"},

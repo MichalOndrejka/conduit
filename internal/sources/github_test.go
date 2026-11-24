@@ -340,7 +340,7 @@ func TestGitHubFetchIssues(t *testing.T) {
 		}})
 	})
 
-	docs, err := f.source(t, models.SourceWorkItemQuery, map[string]string{"Labels": "bug, ui"}).FetchDocuments(context.Background(), nil)
+	docs, err := f.source(t, models.SourceBacklog, map[string]string{"Labels": "bug, ui"}).FetchDocuments(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,7 +443,7 @@ func TestGitHubFetchIssuesByType(t *testing.T) {
 		_ = json.NewEncoder(w).Encode([]any{issue(4, "Task"), issue(3, "bug"), issue(2, ""), issue(1, "Feature")})
 	})
 
-	docs, err := f.source(t, models.SourceWorkItemQuery, map[string]string{"WorkItemTypes": "Bug, Feature"}).FetchDocuments(context.Background(), nil)
+	docs, err := f.source(t, models.SourceBacklog, map[string]string{"WorkItemTypes": "Bug, Feature"}).FetchDocuments(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestGitHubIssueTypes(t *testing.T) {
 			map[string]any{"name": "Retired", "is_enabled": false},
 		})
 	})
-	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceWorkItemQuery, nil).src, fakeSecrets{"gh": "tok"})
+	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceBacklog, nil).src, fakeSecrets{"gh": "tok"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestGitHubIssueTypes(t *testing.T) {
 // types, not an error.
 func TestGitHubIssueTypesUnavailable(t *testing.T) {
 	f := newFakeGitHub(t)
-	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceWorkItemQuery, nil).src, nil)
+	types, available, err := GitHubIssueTypes(context.Background(), f.source(t, models.SourceBacklog, nil).src, nil)
 	if err != nil || available || len(types) != 0 {
 		t.Errorf("types = %v, available = %v, err = %v; want none, unavailable, no error", types, available, err)
 	}

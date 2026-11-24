@@ -21,7 +21,7 @@ type fakeManager struct {
 
 func newFakeManager(creds ...string) *fakeManager {
 	m := &fakeManager{byID: map[string]models.SourceDefinition{}, creds: creds}
-	m.put(models.SourceDefinition{ID: "wi", Name: "Work items", Type: models.SourceWorkItemQuery, SyncStatus: "completed",
+	m.put(models.SourceDefinition{ID: "wi", Name: "Work items", Type: models.SourceBacklog, SyncStatus: "completed",
 		Config: map[string]string{"Provider": "api", "Url": "https://ado.example/_apis/wit/wiql", "AuthType": "basic", "Password": "ado-pat"}})
 	m.put(models.SourceDefinition{ID: "docs", Name: "Docs", Type: models.SourceDocumentation,
 		Config: map[string]string{"Provider": "github", "GitHubOwner": "acme", "GitHubRepo": "handbook", "PathFilter": "*.md"}})
@@ -77,7 +77,7 @@ func manage(t *testing.T, m *fakeManager, runner *fakeRunner, req map[string]any
 
 func validCreate() map[string]any {
 	return map[string]any{
-		"mode": "create", "name": " Bugs ", "type": models.SourceWorkItemQuery,
+		"mode": "create", "name": " Bugs ", "type": models.SourceBacklog,
 		"config": map[string]any{"Url": "https://ado.example/_apis/wit/wiql", "AuthType": "basic", "Password": "ado-pat", "Top": float64(200)},
 	}
 }
@@ -237,7 +237,7 @@ func TestManageUpdateMergesConfigAndPassesOldCollection(t *testing.T) {
 	if _, ok := got.Config["AuthType"]; ok {
 		t.Error(`"" should remove the key`)
 	}
-	if want := sources.CollectionFor(&models.SourceDefinition{Type: models.SourceWorkItemQuery}); m.savedFrom != want {
+	if want := sources.CollectionFor(&models.SourceDefinition{Type: models.SourceBacklog}); m.savedFrom != want {
 		t.Errorf("oldCollection = %q, want %q", m.savedFrom, want)
 	}
 }

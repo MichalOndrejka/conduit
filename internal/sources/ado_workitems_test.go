@@ -12,7 +12,7 @@ import (
 )
 
 // workitemAdoSrc builds a Work Items source on the Azure DevOps preset —
-// distinct from src() in api_test.go, which builds a "work-item"-typed source
+// distinct from src() in api_test.go, which builds a "backlog"-typed source
 // without Platform=ado and so keeps using the generic single-URL fetch.
 func workitemAdoSrc(orgURL string, cfg map[string]string) *models.SourceDefinition {
 	merged := map[string]string{
@@ -25,7 +25,7 @@ func workitemAdoSrc(orgURL string, cfg map[string]string) *models.SourceDefiniti
 	for k, v := range cfg {
 		merged[k] = v
 	}
-	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: models.SourceWorkItemQuery, Config: merged}
+	return &models.SourceDefinition{ID: "src-1", Name: "Test Source", Type: models.SourceBacklog, Config: merged}
 }
 
 func TestFetchAdoWorkItemsQueriesAndBatches(t *testing.T) {
@@ -130,8 +130,8 @@ func TestFetchAdoWorkItemsEmbedsAllFieldsAndStripsHTML(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"value": []map[string]any{{"id": 42, "fields": map[string]any{
 					"System.Title":        "Custom field item",
-					"Custom.BusinessArea":  "Payments",
-					"System.Description":   "<div>Alpha&nbsp;Beta</div><br>Gamma",
+					"Custom.BusinessArea": "Payments",
+					"System.Description":  "<div>Alpha&nbsp;Beta</div><br>Gamma",
 				}}},
 			})
 		default:
@@ -256,7 +256,7 @@ func TestNonAdoWorkItemSourceUsesGenericFetch(t *testing.T) {
 	defer srv.Close()
 
 	s := &APISource{src: &models.SourceDefinition{
-		ID: "src-1", Name: "Test Source", Type: models.SourceWorkItemQuery,
+		ID: "src-1", Name: "Test Source", Type: models.SourceBacklog,
 		Config: map[string]string{"Url": srv.URL, "ItemsPath": "value", "IdField": "id"},
 	}}
 	docs, err := s.FetchDocuments(context.Background(), nil)

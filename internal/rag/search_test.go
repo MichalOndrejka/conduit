@@ -51,7 +51,7 @@ func TestSearchExcludesDisabledSources(t *testing.T) {
 	}
 	svc := NewSearchService(vectors, embedding, sources)
 
-	if _, _, err := svc.Search(context.Background(), "conduit_workitems", "query", 1, nil); err != nil {
+	if _, _, err := svc.Search(context.Background(), "conduit_backlog", "query", 1, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -104,7 +104,7 @@ func TestGetChunkFetchesByComputedID(t *testing.T) {
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
 
-	result, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 2)
+	result, found, err := svc.GetChunk(context.Background(), "conduit_backlog", "doc1", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestGetChunkFallsBackToSingleChunkPointID(t *testing.T) {
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
 
-	result, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 0)
+	result, found, err := svc.GetChunk(context.Background(), "conduit_backlog", "doc1", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestGetChunkNotFoundReturnsFalse(t *testing.T) {
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
 
-	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 9)
+	_, found, err := svc.GetChunk(context.Background(), "conduit_backlog", "doc1", 9)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestGetChunkPropagatesRetrieveError(t *testing.T) {
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
 
-	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 2)
+	_, found, err := svc.GetChunk(context.Background(), "conduit_backlog", "doc1", 2)
 	if err == nil {
 		t.Fatal("expected the Retrieve error to propagate")
 	}
@@ -213,7 +213,7 @@ func TestGetChunkPropagatesFallbackRetrieveError(t *testing.T) {
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
 
-	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", 0)
+	_, found, err := svc.GetChunk(context.Background(), "conduit_backlog", "doc1", 0)
 	if err == nil {
 		t.Fatal("expected the fallback Retrieve error to propagate")
 	}
@@ -237,7 +237,7 @@ func TestGetChunkNegativeIndexSkipsRequest(t *testing.T) {
 	cfg.Qdrant.URL = srv.URL
 	svc := NewSearchService(NewVectorStore(cfg), nil, nil)
 
-	_, found, err := svc.GetChunk(context.Background(), "conduit_workitems", "doc1", -1)
+	_, found, err := svc.GetChunk(context.Background(), "conduit_backlog", "doc1", -1)
 	if err != nil {
 		t.Fatal(err)
 	}

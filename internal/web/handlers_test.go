@@ -132,8 +132,8 @@ func TestSourceCreateGetShowsTypePicker(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	if body := bodyString(t, resp); !strings.Contains(body, "Work Items") {
-		t.Error("type picker page does not list Work Items")
+	if body := bodyString(t, resp); !strings.Contains(body, ">Backlog ") {
+		t.Error("type picker page does not list Backlog")
 	}
 }
 
@@ -148,7 +148,7 @@ func TestSourceCreateGetShowsFormForType(t *testing.T) {
 func TestSourceCreatePostRequiresName(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/create", url.Values{
-		"type": {"work-item"}, "provider": {"github"}, "GitHubOwner": {"acme"}, "GitHubRepo": {"app"},
+		"type": {"backlog"}, "provider": {"github"}, "GitHubOwner": {"acme"}, "GitHubRepo": {"app"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (re-rendered form with error)", resp.StatusCode)
@@ -224,7 +224,7 @@ func TestSourceFormOpensGitHubTab(t *testing.T) {
 func TestSourceCreatePostSavesValidAPISource(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/create", url.Values{
-		"name": {"My API Source"}, "type": {"work-item"}, "provider": {"api"},
+		"name": {"My API Source"}, "type": {"backlog"}, "provider": {"api"},
 		"Url": {"https://api.example.com/items"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
@@ -242,7 +242,7 @@ func TestSourceCreatePostSavesValidAPISource(t *testing.T) {
 func TestSourceCreatePostRejectsInvalidURL(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/create", url.Values{
-		"name": {"Bad"}, "type": {"work-item"}, "provider": {"api"}, "Url": {"not-a-url"},
+		"name": {"Bad"}, "type": {"backlog"}, "provider": {"api"}, "Url": {"not-a-url"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (validation error)", resp.StatusCode)
@@ -263,7 +263,7 @@ func TestSourcePreviewFetchesSampleDocuments(t *testing.T) {
 	defer api.Close()
 
 	resp := h.postForm("/sources/preview", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL},
+		"type": {"backlog"}, "provider": {"api"}, "Url": {api.URL},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -302,7 +302,7 @@ func TestSourcePreviewPaginatesAcrossOffset(t *testing.T) {
 		TotalExact bool                           `json:"totalExact"`
 	} {
 		resp := h.postForm("/sources/preview", url.Values{
-			"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL}, "offset": {offset},
+			"type": {"backlog"}, "provider": {"api"}, "Url": {api.URL}, "offset": {offset},
 		})
 		var out struct {
 			Ok         bool                           `json:"ok"`
@@ -359,7 +359,7 @@ func TestSourcePreviewSurfacesFetchError(t *testing.T) {
 	defer api.Close()
 
 	resp := h.postForm("/sources/preview", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "Url": {api.URL},
+		"type": {"backlog"}, "provider": {"api"}, "Url": {api.URL},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -379,7 +379,7 @@ func TestSourcePreviewSurfacesFetchError(t *testing.T) {
 func TestSourcePreviewReturnsValidationError(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/sources/preview", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "Url": {"not-a-url"},
+		"type": {"backlog"}, "provider": {"api"}, "Url": {"not-a-url"},
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
@@ -408,7 +408,7 @@ func TestSourceEditGetRedirectsWhenMissing(t *testing.T) {
 
 func TestSourceEditGetShowsForm(t *testing.T) {
 	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Editable", Type: "work-item"})
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Editable", Type: "backlog"})
 
 	resp := h.get("/sources/s1/edit")
 	if resp.StatusCode != http.StatusOK {
@@ -421,12 +421,12 @@ func TestSourceEditGetShowsForm(t *testing.T) {
 
 func TestSourceEditPostUpdatesSource(t *testing.T) {
 	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Old Name", Type: "work-item", Config: map[string]string{
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Old Name", Type: "backlog", Config: map[string]string{
 		"Provider": "api", "Url": "https://api.example.com/items",
 	}})
 
 	resp := h.postForm("/sources/s1/edit", url.Values{
-		"name": {"New Name"}, "type": {"work-item"}, "provider": {"api"},
+		"name": {"New Name"}, "type": {"backlog"}, "provider": {"api"},
 		"Url": {"https://api.example.com/items"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
@@ -449,7 +449,7 @@ func TestSourceEditPostCollectionChangeCleansUpOldVectors(t *testing.T) {
 	h := newHarness(t)
 	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	mustSave(t, h, models.SourceDefinition{
-		ID: "s1", Name: "Moving", Type: "work-item", SyncStatus: "completed", LastSyncedAt: &now,
+		ID: "s1", Name: "Moving", Type: "backlog", SyncStatus: "completed", LastSyncedAt: &now,
 		Config: map[string]string{"Provider": "api", "Url": "https://api.example.com/items"},
 	})
 
@@ -466,12 +466,12 @@ func TestSourceEditPostCollectionChangeCleansUpOldVectors(t *testing.T) {
 	h.qd.mu.Unlock()
 	found := false
 	for _, c := range deleted {
-		if c == models.CollectionWorkItems {
+		if c == models.CollectionBacklog {
 			found = true
 		}
 	}
 	if !found {
-		t.Errorf("DeleteByFilter calls = %v, want a cleanup of the old collection %q", deleted, models.CollectionWorkItems)
+		t.Errorf("DeleteByFilter calls = %v, want a cleanup of the old collection %q", deleted, models.CollectionBacklog)
 	}
 
 	got, err := h.sources.Get("s1")
@@ -490,7 +490,7 @@ func TestSourceEditPostCollectionChangeCleansUpOldVectors(t *testing.T) {
 
 func TestSourceDeleteRemovesSourceAndVectors(t *testing.T) {
 	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Doomed", Type: "work-item"})
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Doomed", Type: "backlog"})
 
 	resp := h.postForm("/sources/s1/delete", nil)
 	if resp.StatusCode != http.StatusSeeOther {
@@ -759,8 +759,8 @@ func TestHandleSettingsPageRenders(t *testing.T) {
 func TestHandleSettingsPreprocessingSavesConfig(t *testing.T) {
 	h := newHarness(t)
 	resp := h.postForm("/settings/preprocessing", url.Values{
-		"system_prompt":         {"custom prompt"},
-		"source_type_work_item": {"on"},
+		"system_prompt":       {"custom prompt"},
+		"source_type_backlog": {"on"},
 	})
 	if resp.StatusCode != http.StatusSeeOther {
 		t.Fatalf("status = %d, want 303; body: %s", resp.StatusCode, bodyString(t, resp))
@@ -768,8 +768,8 @@ func TestHandleSettingsPreprocessingSavesConfig(t *testing.T) {
 	if h.cfg.Preprocessing.SystemPrompt != "custom prompt" {
 		t.Errorf("SystemPrompt = %q, want %q", h.cfg.Preprocessing.SystemPrompt, "custom prompt")
 	}
-	if !h.cfg.Preprocessing.SourceTypes["work-item"] {
-		t.Error("SourceTypes[work-item] = false, want true (checkbox was on)")
+	if !h.cfg.Preprocessing.SourceTypes["backlog"] {
+		t.Error("SourceTypes[backlog] = false, want true (checkbox was on)")
 	}
 	if h.cfg.Preprocessing.SourceTypes["code"] {
 		t.Error("SourceTypes[code] = true, want false (checkbox was absent)")
@@ -822,7 +822,7 @@ func TestHandleCleanSourceEmbeddingsResetsSyncStatus(t *testing.T) {
 	h := newHarness(t)
 	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "A", SyncStatus: "completed"})
 	h.qd.mu.Lock()
-	h.qd.collections[models.CollectionWorkItems] = true
+	h.qd.collections[models.CollectionBacklog] = true
 	h.qd.mu.Unlock()
 
 	resp := h.postForm("/settings/clean-source-embeddings", nil)
@@ -847,10 +847,10 @@ func TestHandleMapPageRenders(t *testing.T) {
 
 func TestHandleMapDataReturnsPointsForCompletedSources(t *testing.T) {
 	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Synced", Type: "work-item", SyncStatus: "completed"})
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Synced", Type: "backlog", SyncStatus: "completed"})
 
 	h.qd.mu.Lock()
-	h.qd.scroll[models.CollectionWorkItems] = []map[string]any{
+	h.qd.scroll[models.CollectionBacklog] = []map[string]any{
 		{"id": "p1", "vector": []float32{0.1, 0.2, 0.3}, "payload": map[string]any{"text": "hello world"}},
 		{"id": "p2", "vector": []float32{0.4, 0.1, 0.9}, "payload": map[string]any{"text": "second point"}},
 	}
@@ -912,7 +912,7 @@ func TestAdoWorkItemTypesEndpoint(t *testing.T) {
 	defer ado.Close()
 
 	resp := h.postForm("/sources/ado/workitemtypes", url.Values{
-		"type": {"work-item"}, "provider": {"api"}, "AdoOrg": {ado.URL}, "AdoProject": {"Proj"},
+		"type": {"backlog"}, "provider": {"api"}, "AdoOrg": {ado.URL}, "AdoProject": {"Proj"},
 	})
 	var out struct {
 		Ok    bool     `json:"ok"`
@@ -940,7 +940,7 @@ func TestGitHubIssueTypesEndpoint(t *testing.T) {
 
 	post := func(owner string) (ok, available bool, types []string) {
 		resp := h.postForm("/sources/github/issuetypes", url.Values{
-			"type": {"work-item"}, "provider": {"github"}, "GitHubUrl": {gh.URL}, "GitHubOwner": {owner}, "GitHubRepo": {"app"},
+			"type": {"backlog"}, "provider": {"github"}, "GitHubUrl": {gh.URL}, "GitHubOwner": {owner}, "GitHubRepo": {"app"},
 		})
 		var out struct {
 			Ok        bool     `json:"ok"`

@@ -309,8 +309,9 @@ func RegisterTools(s *server.MCPServer, search *rag.SearchService, mem *memory.S
 		})
 	}
 
-	makeSearchTool(models.CollectionWorkItems, "search_workitem",
-		"Semantic search over work items (bugs, tasks, defects). Each holds every field, a Links section (parent, "+
+	makeSearchTool(models.CollectionBacklog, "search_backlog",
+		"Semantic search over the backlog: bugs, tasks, defects and other tracked work (Azure DevOps work items, GitHub "+
+			"issues) — requirements, user stories and test cases are in search_requirement. Each holds every field, a Links section (parent, "+
 			"children, related items as #id; pull requests as !id; commits by SHA; builds by id) and the whole discussion. "+
 			"Filter by id, project, type, state, iteration path, assignee or tags.")
 	makeSearchTool(models.CollectionRequirements, "search_requirement",

@@ -1,5 +1,5 @@
 // Issues for GitHubSource: open and closed issues (pull requests excluded),
-// each with its body and every comment, for Work Items sources and the
+// each with its body and every comment, for Backlog sources and the
 // "workitems" mode of Requirements and Test Cases.
 package sources
 

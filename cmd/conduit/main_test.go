@@ -52,7 +52,7 @@ func runSearchCLISearchErrorSubprocess() {
 	vectors := rag.NewVectorStore(vCfg)
 
 	searchSvc := rag.NewSearchService(vectors, embedding, nil)
-	runSearchCLI(searchSvc, []string{"conduit_workitems", "some", "query"})
+	runSearchCLI(searchSvc, []string{"conduit_backlog", "some", "query"})
 }
 
 func runSelfAsSubprocess(t *testing.T, scenario string, extraEnv ...string) (exitErr error, stdout, stderr string) {
@@ -132,7 +132,7 @@ func TestRunSearchCLIPrintsResultsOnSuccess(t *testing.T) {
 	searchSvc := rag.NewSearchService(vectors, embedding, nil)
 
 	stdout := captureStdout(t, func() {
-		runSearchCLI(searchSvc, []string{"conduit_workitems", "some", "query"})
+		runSearchCLI(searchSvc, []string{"conduit_backlog", "some", "query"})
 	})
 	if !strings.Contains(stdout, "matched text") {
 		t.Errorf("stdout = %q, want it to contain the matched result text", stdout)

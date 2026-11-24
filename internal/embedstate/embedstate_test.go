@@ -69,14 +69,14 @@ func (f *fakeQdrant) handler() http.Handler {
 
 func setup(t *testing.T) (dataDir string, qd *fakeQdrant, vectors *rag.VectorStore, st *store.SourceConfigStore) {
 	t.Helper()
-	qd = &fakeQdrant{sizes: map[string]int{models.CollectionWorkItems: 768, models.CollectionExperience: 768}}
+	qd = &fakeQdrant{sizes: map[string]int{models.CollectionBacklog: 768, models.CollectionExperience: 768}}
 	srv := httptest.NewServer(qd.handler())
 	t.Cleanup(srv.Close)
 	cfg := &config.AppConfig{}
 	cfg.Qdrant.URL = srv.URL
 	dataDir = t.TempDir()
 	st = store.NewSourceConfigStore(filepath.Join(dataDir, "sources.json"))
-	if err := st.Save(models.SourceDefinition{ID: "s1", Name: "S", Type: models.SourceWorkItemQuery, SyncStatus: "completed"}); err != nil {
+	if err := st.Save(models.SourceDefinition{ID: "s1", Name: "S", Type: models.SourceBacklog, SyncStatus: "completed"}); err != nil {
 		t.Fatal(err)
 	}
 	return dataDir, qd, rag.NewVectorStore(cfg), st
@@ -101,7 +101,7 @@ func TestReconcileFirstRunRecordsWithoutDropping(t *testing.T) {
 	if err != nil || changed {
 		t.Fatalf("changed=%v err=%v, want no change", changed, err)
 	}
-	if _, ok := qd.size(models.CollectionWorkItems); !ok {
+	if _, ok := qd.size(models.CollectionBacklog); !ok {
 		t.Error("first run must not drop collections")
 	}
 	if got, ok, _ := Load(dataDir); !ok || got != (State{Model: "a", Dimensions: 768}) {
@@ -120,7 +120,7 @@ func TestReconcileUnchangedAndURLOnlyChangeKeepData(t *testing.T) {
 	if err != nil || changed {
 		t.Fatalf("changed=%v err=%v, want no change", changed, err)
 	}
-	if _, ok := qd.size(models.CollectionWorkItems); !ok || status(t, st) != "completed" {
+	if _, ok := qd.size(models.CollectionBacklog); !ok || status(t, st) != "completed" {
 		t.Error("a base-URL-only change must keep vectors and sync status")
 	}
 }

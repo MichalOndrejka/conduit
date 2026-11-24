@@ -17,7 +17,7 @@ import (
 
 func TestRecorderKeepsEventsInMemory(t *testing.T) {
 	r := New()
-	r.RecordTool(&ToolCall{Name: "search_workitem", Mode: "semantic_search", Query: "q", Counted: true})
+	r.RecordTool(&ToolCall{Name: "search_backlog", Mode: "semantic_search", Query: "q", Counted: true})
 	r.RecordSync(&SyncRun{SourceID: "s1", Status: "completed", Documents: 3})
 	events := r.Events()
 	if len(events) != 2 || events[0].Tool.Query != "q" || events[1].Sync.Documents != 3 {
@@ -55,8 +55,8 @@ func TestToolMiddlewareRecordsCallsAndHandlerDetails(t *testing.T) {
 		}
 	}
 	search := map[string]any{"request": map[string]any{"mode": "semantic_search", "query": "x", "page": 1}}
-	call("search_workitem", search)
-	call("search_workitem", search)
+	call("search_backlog", search)
+	call("search_backlog", search)
 	call("search_broken", map[string]any{"request": map[string]any{"mode": "pattern_search"}})
 	call("source_sync", map[string]any{"request": map[string]any{"mode": "status"}})
 
@@ -145,10 +145,10 @@ func search(tool, query string, page, results int, ms int64, filters map[string]
 
 func TestSummarize(t *testing.T) {
 	events := []Event{
-		ev(1, &ToolCall{Name: "search_workitem", Mode: "semantic_search", Query: "cold", Page: 1, Results: 2, Counted: true, LatencyMs: 9000, Cold: true}, nil),
-		ev(2, search("search_workitem", "reqs", 1, 0, 200, map[string][]string{"work_item_type": {"Requirement"}}), nil),
-		ev(3, search("search_workitem", "reqs", 2, 1, 300, nil), nil),
-		ev(4, &ToolCall{Name: "search_workitem", Mode: "retrieve_chunk", Counted: true, Results: 1}, nil),
+		ev(1, &ToolCall{Name: "search_backlog", Mode: "semantic_search", Query: "cold", Page: 1, Results: 2, Counted: true, LatencyMs: 9000, Cold: true}, nil),
+		ev(2, search("search_backlog", "reqs", 1, 0, 200, map[string][]string{"work_item_type": {"Requirement"}}), nil),
+		ev(3, search("search_backlog", "reqs", 2, 1, 300, nil), nil),
+		ev(4, &ToolCall{Name: "search_backlog", Mode: "retrieve_chunk", Counted: true, Results: 1}, nil),
 		ev(5, &ToolCall{Name: "experience_retrieve", Query: "x", Counted: true, Results: 1, Hits: []string{"Deploy rules"}}, nil),
 		ev(6, &ToolCall{Name: "experience_retrieve", Query: "y", Counted: true, Results: 0}, nil),
 		ev(7, nil, &SyncRun{SourceID: "gh", SourceName: "App", Provider: "github", Status: "failed", DurationMs: 1000, Requests: 10}),
@@ -166,7 +166,7 @@ func TestSummarize(t *testing.T) {
 	if s.P95Ms == 9000 || s.P50Ms == 0 {
 		t.Errorf("latency %d/%d must leave out the cold call", s.P50Ms, s.P95Ms)
 	}
-	if d.ToolCalls != 6 || len(d.Tools) != 2 || d.Tools[0].Name != "search_workitem" {
+	if d.ToolCalls != 6 || len(d.Tools) != 2 || d.Tools[0].Name != "search_backlog" {
 		t.Errorf("tools = %d, %+v", d.ToolCalls, d.Tools)
 	}
 	// The latest sync of the source counts, not the failed attempt before it.
@@ -238,7 +238,7 @@ func TestSummarizeAPIRequestsByToolAndSource(t *testing.T) {
 		ev(2, &ToolCall{Name: "search_pull_request", SourceID: "code", SourceName: "Code", Provider: "github", Requests: 4}, nil),
 		ev(3, &ToolCall{Name: "search_pull_request", SourceID: "prs", SourceName: "PRs", Provider: "azure-devops", Requests: 50, RateLimited: 1}, nil),
 		ev(4, &ToolCall{Name: "search_pipeline_run", SourceID: "ci", SourceName: "CI", Provider: "azure-devops", Requests: 6}, nil),
-		ev(5, &ToolCall{Name: "search_workitem", Mode: "semantic_search", Counted: true}, nil),
+		ev(5, &ToolCall{Name: "search_backlog", Mode: "semantic_search", Counted: true}, nil),
 		ev(6, nil, &SyncRun{SourceID: "idle", SourceName: "Idle", Provider: "github", Status: "completed"}),
 	}
 	d := Summarize(events)
@@ -246,7 +246,7 @@ func TestSummarizeAPIRequestsByToolAndSource(t *testing.T) {
 	for _, t := range d.Tools {
 		reqs[t.Name] = t.Requests
 	}
-	if reqs["search_pull_request"] != 54 || reqs["search_pipeline_run"] != 6 || reqs["search_workitem"] != 0 {
+	if reqs["search_pull_request"] != 54 || reqs["search_pipeline_run"] != 6 || reqs["search_backlog"] != 0 {
 		t.Errorf("requests by tool = %v", reqs)
 	}
 	want := []SourceRequestRow{
@@ -269,7 +269,7 @@ func TestOpenPersistsEventsAcrossRestarts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r.RecordTool(&ToolCall{Name: "search_workitem", Query: "q", Requests: 2, SourceID: "s"})
+	r.RecordTool(&ToolCall{Name: "search_backlog", Query: "q", Requests: 2, SourceID: "s"})
 	r.RecordSync(&SyncRun{SourceID: "s1", Status: "completed", Documents: 3})
 	r.Close()
 

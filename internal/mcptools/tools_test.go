@@ -238,7 +238,7 @@ func TestRegisterToolsListsAllTools(t *testing.T) {
 		got[tool.Name] = true
 	}
 	want := []string{
-		"search_workitem", "search_requirement", "search_source_code",
+		"search_backlog", "search_requirement", "search_source_code",
 		"search_test_code", "search_documentation",
 		"search_commit", "experience_retrieve", "experience_remember",
 	}
@@ -258,7 +258,7 @@ func TestSearchToolReturnsResults(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "semantic_search", "query": "some bug", "page": float64(1),
 	}})
 	if result.IsError {
@@ -293,7 +293,7 @@ func TestSearchToolClampsNonPositivePageToOne(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "semantic_search", "query": "some bug", "page": float64(0),
 	}})
 	if result.IsError {
@@ -340,7 +340,7 @@ func TestSearchToolNoResultsReturnsNote(t *testing.T) {
 func TestSearchToolMissingRequestArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{})
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{})
 	if !result.IsError {
 		t.Fatal("expected IsError=true for missing request argument")
 	}
@@ -352,7 +352,7 @@ func TestSearchToolMissingRequestArgErrors(t *testing.T) {
 func TestSearchToolMissingQueryArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{
 		"request": map[string]any{"mode": "semantic_search", "page": float64(1)},
 	})
 	if !result.IsError {
@@ -366,7 +366,7 @@ func TestSearchToolMissingQueryArgErrors(t *testing.T) {
 func TestSearchToolMissingPageArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{
 		"request": map[string]any{"mode": "semantic_search", "query": "some bug"},
 	})
 	if !result.IsError {
@@ -380,7 +380,7 @@ func TestSearchToolMissingPageArgErrors(t *testing.T) {
 func TestSearchToolUnknownModeErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{
 		"request": map[string]any{"mode": "bogus"},
 	})
 	if !result.IsError {
@@ -501,7 +501,7 @@ func TestWorkItemSearchRejectsAreaPathAndDateFilters(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
 	for _, f := range []string{"area_path", "since", "until"} {
-		result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(1),
 			"filters": map[string]any{f: "2024-01-01"},
 		}})
@@ -515,7 +515,7 @@ func TestPatternSearchFiltersArePlumbedToQdrant(t *testing.T) {
 	qd := &fakeQdrant{}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "pattern_search", "pattern": "NullReference", "page": float64(1),
 		"filters": map[string]any{"iteration_path": "Payments/Sprint 3", "state": "Active"},
 	}})
@@ -589,21 +589,21 @@ func TestSearchToolSchemasExposeOnlyRelevantFilters(t *testing.T) {
 			t.Errorf("%s lacks the version filter", tool)
 		}
 	}
-	if _, ok := filterProps("search_workitem")["version"]; ok {
-		t.Error("search_workitem must not offer the version filter")
+	if _, ok := filterProps("search_backlog")["version"]; ok {
+		t.Error("search_backlog must not offer the version filter")
 	}
 	// Every item another result can name by id is reachable by that id.
 	for tool, field := range map[string]string{
-		"search_workitem": "id", "search_requirement": "id",
+		"search_backlog": "id", "search_requirement": "id",
 		"search_commit": "commit",
 	} {
 		if filterProps(tool)[field] == nil {
 			t.Errorf("%s lacks the %q lookup filter", tool, field)
 		}
 	}
-	workItem := filterProps("search_workitem")
+	workItem := filterProps("search_backlog")
 	if _, ok := workItem["repository"]; ok {
-		t.Error("search_workitem must not offer the repo filter \"repository\"")
+		t.Error("search_backlog must not offer the repo filter \"repository\"")
 	}
 	for _, tl := range list.Result.Tools {
 		if strings.Contains(fmt.Sprint(tl.InputSchema), "source_name") {
@@ -639,7 +639,7 @@ func TestSearchToolPagination(t *testing.T) {
 		}
 		qd := &fakeQdrant{searchPoints: points}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		p := decode(t, callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(1),
 		}}))
 		if len(p.Results) != 5 || p.Page != 1 || !p.HasMore {
@@ -654,7 +654,7 @@ func TestSearchToolPagination(t *testing.T) {
 			{"id": "p2", "score": 0.5, "payload": map[string]any{"text": "match 2"}},
 		}}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		p := decode(t, callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(2),
 		}}))
 		if len(p.Results) != 2 || p.Page != 2 || p.HasMore {
@@ -665,7 +665,7 @@ func TestSearchToolPagination(t *testing.T) {
 	t.Run("paging past the last match returns the exhausted-page note", func(t *testing.T) {
 		qd := &fakeQdrant{}
 		s, ctx := setup(t, qd, nil)
-		p := decode(t, callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+		p := decode(t, callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 			"mode": "semantic_search", "query": "x", "page": float64(3),
 		}}))
 		if len(p.Results) != 0 || p.HasMore {
@@ -686,7 +686,7 @@ func TestSearchToolRetrieveChunkReturnsResult(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(2),
 	}})
 	if result.IsError {
@@ -714,7 +714,7 @@ func TestSearchToolRetrieveChunkReturnsResult(t *testing.T) {
 func TestSearchToolRetrieveChunkNotFoundReturnsNote(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(9),
 	}})
 	if result.IsError {
@@ -742,7 +742,7 @@ func TestSearchToolRetrieveChunkDoesNotCallEmbedding(t *testing.T) {
 	}}
 	s, ctx := setup(t, qd, fixedEmbedHandler(http.StatusInternalServerError, "embed down"))
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(0),
 	}})
 	if result.IsError {
@@ -774,7 +774,7 @@ func TestSearchToolRetrieveChunkBackendErrorPropagatesAsToolError(t *testing.T) 
 	mcpServer := server.NewMCPServer("test", "0.0.0")
 	RegisterTools(mcpServer, search, mem)
 
-	result := callTool(t, mcpServer, context.Background(), "search_workitem", map[string]any{"request": map[string]any{
+	result := callTool(t, mcpServer, context.Background(), "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "retrieve_chunk", "source_doc_id": "doc1", "chunk_index": float64(0),
 	}})
 	if !result.IsError {
@@ -788,7 +788,7 @@ func TestSearchToolRetrieveChunkBackendErrorPropagatesAsToolError(t *testing.T) 
 func TestSearchToolMissingSourceDocIDArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{
 		"request": map[string]any{"mode": "retrieve_chunk", "chunk_index": float64(0)},
 	})
 	if !result.IsError {
@@ -802,7 +802,7 @@ func TestSearchToolMissingSourceDocIDArgErrors(t *testing.T) {
 func TestSearchToolMissingChunkIndexArgErrors(t *testing.T) {
 	s, ctx := setup(t, &fakeQdrant{}, nil)
 
-	result := callTool(t, s, ctx, "search_workitem", map[string]any{
+	result := callTool(t, s, ctx, "search_backlog", map[string]any{
 		"request": map[string]any{"mode": "retrieve_chunk", "source_doc_id": "doc1"},
 	})
 	if !result.IsError {

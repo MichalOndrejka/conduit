@@ -45,8 +45,8 @@ func New(src *models.SourceDefinition, store secrets.Reader) (Source, error) {
 // Live types (models.IsLiveType) have no collection: "".
 func CollectionFor(src *models.SourceDefinition) string {
 	switch src.Type {
-	case models.SourceWorkItemQuery:
-		return models.CollectionWorkItems
+	case models.SourceBacklog:
+		return models.CollectionBacklog
 	case models.SourceRequirements:
 		return models.CollectionRequirements
 	case models.SourceGitCommits:

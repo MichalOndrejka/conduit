@@ -183,7 +183,7 @@ func setupPipelineWithEmbed(t *testing.T, sourceURL string, embedHandler http.Ha
 
 	st := store.NewSourceConfigStore(filepath.Join(t.TempDir(), "sources.json"))
 	src := models.SourceDefinition{
-		ID: "test-src", Name: "Fake API", Type: models.SourceWorkItemQuery,
+		ID: "test-src", Name: "Fake API", Type: models.SourceBacklog,
 		SyncStatus: "idle",
 		Config: map[string]string{
 			"Provider": "api", "Url": sourceURL, "ItemsPath": "value", "IdField": "id",
@@ -224,13 +224,13 @@ func TestSyncEndToEnd(t *testing.T) {
 	if saved.LastSyncedAt == nil {
 		t.Error("last_synced_at not set")
 	}
-	if got := qd.count(models.CollectionWorkItems); got != 2 {
+	if got := qd.count(models.CollectionBacklog); got != 2 {
 		t.Errorf("qdrant points = %d, want 2", got)
 	}
 
 	// Re-sync must replace, not duplicate.
 	svc.Sync(context.Background(), src.ID)
-	if got := qd.count(models.CollectionWorkItems); got != 2 {
+	if got := qd.count(models.CollectionBacklog); got != 2 {
 		t.Errorf("after resync points = %d, want 2 (replace semantics)", got)
 	}
 }
@@ -254,7 +254,7 @@ func TestSyncFetchFailureRecorded(t *testing.T) {
 	if saved.SyncError == nil || !strings.Contains(*saved.SyncError, "500") {
 		t.Errorf("sync error = %v", saved.SyncError)
 	}
-	if qd.count(models.CollectionWorkItems) != 0 {
+	if qd.count(models.CollectionBacklog) != 0 {
 		t.Error("failed fetch should write nothing")
 	}
 }
@@ -288,7 +288,7 @@ func TestConcurrentSyncDeduplicated(t *testing.T) {
 	if saved.SyncStatus != "completed" {
 		t.Errorf("status = %q (error: %v)", saved.SyncStatus, saved.SyncError)
 	}
-	if got := qd.count(models.CollectionWorkItems); got != 1 {
+	if got := qd.count(models.CollectionBacklog); got != 1 {
 		t.Errorf("qdrant points = %d, want 1", got)
 	}
 }
@@ -390,7 +390,7 @@ func TestSyncEmbedFailureRecordedAsEmbedPhase(t *testing.T) {
 	if saved.SyncErrorPhase == nil || *saved.SyncErrorPhase != "embed" {
 		t.Errorf("error phase = %v, want embed", saved.SyncErrorPhase)
 	}
-	if qd.count(models.CollectionWorkItems) != 0 {
+	if qd.count(models.CollectionBacklog) != 0 {
 		t.Error("failed embed should write nothing")
 	}
 }
@@ -423,7 +423,7 @@ func TestSyncCancelledBetweenFetchAndIndexLeavesIdle(t *testing.T) {
 	if saved.SyncError != nil {
 		t.Errorf("sync error = %v, want nil after cancellation", saved.SyncError)
 	}
-	if got := qd.count(models.CollectionWorkItems); got != 0 {
+	if got := qd.count(models.CollectionBacklog); got != 0 {
 		t.Errorf("cancelled sync should not write points, got %d", got)
 	}
 }
@@ -461,7 +461,7 @@ func TestSyncPreprocessingRunsBeforeIndexing(t *testing.T) {
 	if atomic.LoadInt32(&preprocessCalls) == 0 {
 		t.Error("expected preprocessing to call the chat endpoint for the long document")
 	}
-	if got := qd.count(models.CollectionWorkItems); got != 1 {
+	if got := qd.count(models.CollectionBacklog); got != 1 {
 		t.Errorf("qdrant points = %d, want 1", got)
 	}
 }
@@ -491,7 +491,7 @@ func TestSyncSelectedRunsAllSourcesAndSkipsUnknownIDs(t *testing.T) {
 			t.Errorf("source %s status = %q, want completed", id, saved.SyncStatus)
 		}
 	}
-	if got := qd.count(models.CollectionWorkItems); got != 2 {
+	if got := qd.count(models.CollectionBacklog); got != 2 {
 		t.Errorf("qdrant points = %d, want 2", got)
 	}
 }

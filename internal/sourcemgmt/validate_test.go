@@ -48,7 +48,7 @@ func TestValidateNonCommitsTypeSkipsCommitsRequirements(t *testing.T) {
 		"Provider": "api",
 		"Url":      "https://api.example.com/items",
 	}
-	if msg := Validate(models.SourceWorkItemQuery, cfg); msg != "" {
+	if msg := Validate(models.SourceBacklog, cfg); msg != "" {
 		t.Errorf("expected a non-commits, non-code source to skip URL-shape requirements, got %q", msg)
 	}
 }
@@ -80,12 +80,12 @@ func TestValidateAuthType(t *testing.T) {
 	cfg := map[string]string{"Provider": "api", "Url": "https://api.example.com/items"}
 	for _, ok := range []string{"", "none", "bearer", "Basic", "apikey"} {
 		cfg["AuthType"] = ok
-		if msg := Validate(models.SourceWorkItemQuery, cfg); msg != "" {
+		if msg := Validate(models.SourceBacklog, cfg); msg != "" {
 			t.Errorf("AuthType=%q rejected: %q", ok, msg)
 		}
 	}
 	cfg["AuthType"] = "oauth"
-	if msg := Validate(models.SourceWorkItemQuery, cfg); msg == "" {
+	if msg := Validate(models.SourceBacklog, cfg); msg == "" {
 		t.Error("expected an unknown AuthType to be rejected")
 	}
 }

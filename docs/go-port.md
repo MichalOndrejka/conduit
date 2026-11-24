@@ -81,7 +81,7 @@ The Go binary is feature-complete.
 go build ./cmd/conduit          # local binary
 go test ./...                   # unit tests (incl. Fernet cross-compat)
 ./conduit                       # serve on :8000
-./conduit search conduit_workitems "login bug"   # verification CLI
+./conduit search conduit_backlog "login bug"   # verification CLI
 ```
 
 Conduit runs as a local container with no built-in authentication — expose it

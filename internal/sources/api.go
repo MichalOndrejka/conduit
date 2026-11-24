@@ -55,7 +55,7 @@
 //	get the same treatment on a best-effort basis, falling back to plain
 //	metadata if Url isn't an ADO repo-items endpoint (e.g. a wiki).
 //
-//	For sources of type work-item built on the Azure DevOps preset (Platform
+//	For sources of type backlog built on the Azure DevOps preset (Platform
 //	config field set to "ado"), documents come from a WIQL query + batch
 //	fetch against Azure DevOps' Work Item Tracking API instead of the
 //	single-URL fetch above — not user-configurable via Url. WorkItemTypes
@@ -108,13 +108,13 @@ type APISource struct {
 }
 
 // isWorkItemQuery reports whether cfg should be fetched via the WIQL
-// query-then-batch path rather than a single URL GET: work-item sources
+// query-then-batch path rather than a single URL GET: backlog sources
 // always are; requirements sources are when explicitly set to
 // "workitems" mode (they default to "files", the Documentation-style
 // file-content path).
 func isWorkItemQuery(cfg *models.SourceDefinition) bool {
 	switch cfg.Type {
-	case models.SourceWorkItemQuery:
+	case models.SourceBacklog:
 		return true
 	case models.SourceRequirements:
 		return cfg.GetConfig("FetchMode") == "workitems"
@@ -165,7 +165,7 @@ func (a *APISource) FetchDocuments(ctx context.Context, progress ProgressCallbac
 		}
 	}
 
-	// Work Items sources on the Azure DevOps preset query-then-batch instead
+	// Backlog sources on the Azure DevOps preset query-then-batch instead
 	// of a single GET, so picking work item types works without the caller
 	// hand-crafting a URL with a fixed list of IDs — not applicable to Work
 	// Items sources built on the Custom API tab, which keep the generic path.

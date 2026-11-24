@@ -82,7 +82,7 @@ func TestLoadDefaultsWhenNoConfigFile(t *testing.T) {
 	if want := filepath.Join(filepath.Dir(path), "conduit-sources.json"); cfg.SourcesFilePath != want {
 		t.Errorf("SourcesFilePath = %q, want %q", cfg.SourcesFilePath, want)
 	}
-	if !cfg.Preprocessing.SourceTypes["work-item"] || cfg.Preprocessing.SourceTypes["code"] {
+	if !cfg.Preprocessing.SourceTypes["backlog"] || cfg.Preprocessing.SourceTypes["code"] {
 		t.Errorf("Preprocessing.SourceTypes = %+v, want default preset", cfg.Preprocessing.SourceTypes)
 	}
 }

@@ -2,7 +2,7 @@
 // presets (commits, repo items), work items can't be listed with a single
 // GET — Azure DevOps' Work Item Tracking API is query-then-batch: a WIQL
 // query returns matching IDs only, and a separate call fetches each item's
-// actual fields. This lets the Work Items source be configured by picking
+// actual fields. This lets the Backlog source be configured by picking
 // which work item types to embed (Bug, Feature, User Story, Task, …)
 // instead of hand-crafting a URL with a fixed list of IDs.
 package sources
@@ -87,7 +87,7 @@ type workItemBatchResponse struct {
 // fetchAdoWorkItems queries Azure DevOps for work items — optionally
 // filtered to the configured WorkItemTypes ("" means every type) — via WIQL,
 // then fetches each one's fields in batches. Used instead of the generic
-// single-URL fetch for Work Items sources on the Azure DevOps preset tab.
+// single-URL fetch for Backlog sources on the Azure DevOps preset tab.
 func (a *APISource) fetchAdoWorkItems(ctx context.Context, client *http.Client, top int, progress ProgressCallback) ([]models.SourceDocument, error) {
 	cfg := a.src
 	org := strings.TrimRight(cfg.GetConfig("AdoOrg"), "/")
@@ -296,8 +296,8 @@ func (a *APISource) workItemsToDocuments(items []workItemBatchItem) []models.Sou
 
 		docs = append(docs, models.SourceDocument{
 			Filters: filters,
-			ID:   fmt.Sprintf("%s_capi_%d", a.src.ID, item.ID),
-			Text: strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
+			ID:      fmt.Sprintf("%s_capi_%d", a.src.ID, item.ID),
+			Text:    strings.TrimSpace(title + "\n" + strings.Join(parts, "\n")),
 			Tags: map[string]string{
 				"source_id":   a.src.ID,
 				"source_name": a.src.Name,

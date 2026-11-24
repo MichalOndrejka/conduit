@@ -62,7 +62,7 @@ var (
 // supports. Requirements (test cases included) can come from repo files or
 // work items, so they accept both sets.
 var collectionFilters = map[string][]filterField{
-	models.CollectionWorkItems:     workItemFilters,
+	models.CollectionBacklog:       workItemFilters,
 	models.CollectionRequirements:  append(append([]filterField{}, repoFileFilters...), workItemFilters[1:]...),
 	models.CollectionSourceCode:    repoFileFilters,
 	models.CollectionTestCode:      repoFileFilters,

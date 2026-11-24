@@ -37,10 +37,10 @@ func TestHandleSourceItemsRedirectsWhenMissing(t *testing.T) {
 
 func TestHandleSourceItemsRendersPage(t *testing.T) {
 	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Items Source", Type: "work-item"})
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Items Source", Type: "backlog"})
 
 	h.qd.mu.Lock()
-	h.qd.scroll[models.CollectionWorkItems] = []map[string]any{
+	h.qd.scroll[models.CollectionBacklog] = []map[string]any{
 		{"id": "p1", "payload": map[string]any{
 			"text":          "chunk text",
 			"source_doc_id": "doc-1",
@@ -48,7 +48,7 @@ func TestHandleSourceItemsRendersPage(t *testing.T) {
 			"total_chunks":  "1",
 		}},
 	}
-	h.qd.count[models.CollectionWorkItems] = 1
+	h.qd.count[models.CollectionBacklog] = 1
 	h.qd.mu.Unlock()
 
 	resp := h.get("/sources/s1/items")

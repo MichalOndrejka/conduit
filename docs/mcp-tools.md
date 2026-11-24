@@ -116,7 +116,7 @@ When a result names another item by its ID (a work item `#1234`, a commit SHA), 
 
 | Tool | Searches | Best for |
 |---|---|---|
-| `search_workitem` | Work items — bugs, tasks, user stories, features, epics, with their links and whole discussion (filter `id` opens one by its ID: `1234`, `#1234` or `AB#1234`) | Finding related issues, checking if a bug's been filed, sprint scope, following a parent or linked item |
+| `search_backlog` | The backlog — bugs, tasks, defects and other tracked work (Azure DevOps work items, GitHub issues), with their links and whole discussion (filter `id` opens one by its ID: `1234`, `#1234` or `AB#1234`) | Finding related issues, checking if a bug's been filed, sprint scope, following a parent or linked item |
 | `search_requirement` | Requirements — features, user stories, epics, specifications — and test cases with their steps (narrow with `work_item_type`, e.g. `Test Case`, or `path` for files) | Finding relevant requirements, acceptance criteria, expected behaviour, automation status |
 | `search_source_code` | Production source code (classes, methods, functions) — no tests | Finding implementations, locating where a concept is defined |
 | `search_test_code` | Test code — unit, integration, specs | Finding test coverage, patterns, and examples |
@@ -204,7 +204,7 @@ Credentials are referenced by name only. `Token`, `Password` and `ApiKeyValue` m
 Sources that are currently syncing can't be changed by the tool.
 
 ```
-source_manage(request={"mode":"create","name":"Bugs","type":"work-item",
+source_manage(request={"mode":"create","name":"Bugs","type":"backlog",
   "config":{"Platform":"ado","Url":"https://dev.azure.com/acme/Shop","AdoOrg":"https://dev.azure.com/acme",
             "AdoProject":"Shop","WorkItemTypes":"Bug","AuthType":"basic","Password":"ado-pat"}})
 → { "source": { "id": "c0ffee…", "name": "Bugs", "sync_status": "idle", "config": {...} }, "next": "Call source_sync trigger with this id to index it." }
@@ -311,6 +311,6 @@ search_source_code(request={"mode": "semantic_search", "query": "authentication 
 ```
 Use `search_test_code` the same way to find where a method is tested.
 
-**Combining tools for a code change:** `experience_retrieve` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_workitem` (related requirements or bugs).
+**Combining tools for a code change:** `experience_retrieve` → `search_source_code` (find the implementation) → `search_test_code` (find its tests) → `search_requirement` (the requirement it implements) → `search_backlog` (related bugs and tasks).
 
 **Reviewing a pull request:** `experience_retrieve` (review conventions) → `search_pull_request` `list` (by author, reviewer or target branch) if you don't have its URL → `get` → `files` → `diff` per file → `threads` → `search_source_code` / `search_test_code` for callers and tests of what changed → `search_commit` for why the changed code was written that way.

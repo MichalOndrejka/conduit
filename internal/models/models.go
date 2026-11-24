@@ -9,7 +9,7 @@ const DocumentPlaceholder = "__DOCUMENT_REQUIRED__"
 // ── Collection names ────────────────────────────────────────────────────────
 
 const (
-	CollectionWorkItems     = "conduit_workitems"
+	CollectionBacklog       = "conduit_backlog"
 	CollectionRequirements  = "conduit_requirements"
 	CollectionSourceCode    = "conduit_code"
 	CollectionTestCode      = "conduit_testcode"
@@ -20,20 +20,21 @@ const (
 
 // AllCollections mirrors CollectionNames.ALL in app/models.py.
 var AllCollections = []string{
-	CollectionWorkItems, CollectionRequirements, CollectionSourceCode,
+	CollectionBacklog, CollectionRequirements, CollectionSourceCode,
 	CollectionTestCode,
 	CollectionDocumentation, CollectionCommits, CollectionExperience,
 }
 
 // RetiredCollections held data that is now read live (pipeline runs, pull
-// requests) or whose source type was merged into another (test cases, now
-// Requirements sources); startup drops them if they still exist.
-var RetiredCollections = []string{"conduit_pipeline_runs", "conduit_pull_requests", "conduit_testcases"}
+// requests), whose source type was merged into another (test cases, now
+// Requirements sources) or renamed (work items, now Backlog); startup drops
+// them if they still exist.
+var RetiredCollections = []string{"conduit_pipeline_runs", "conduit_pull_requests", "conduit_testcases", "conduit_workitems"}
 
 // ── Source types ─────────────────────────────────────────────────────────────
 
 const (
-	SourceWorkItemQuery = "work-item"
+	SourceBacklog       = "backlog"
 	SourceRequirements  = "requirements"
 	SourceCodeRepo      = "code"
 	SourceTestCodeRepo  = "test-code"
@@ -42,6 +43,11 @@ const (
 	SourcePipelineRun   = "pipeline-run"
 	SourcePullRequest   = "pull-request"
 )
+
+// RetiredSourceWorkItem was the Backlog type's key before it was renamed;
+// the source store converts stored sources of it to Backlog as it loads
+// them.
+const RetiredSourceWorkItem = "work-item"
 
 // RetiredSourceTestCase was the Test Cases source type; test cases are now
 // Requirements sources. A stored source of this type isn't synced.

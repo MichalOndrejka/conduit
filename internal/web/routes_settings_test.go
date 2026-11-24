@@ -44,7 +44,7 @@ func TestHandleSettingsEmbeddingInvalidInputRedirectsWithNotice(t *testing.T) {
 func TestHandleSettingsEmbeddingSavesUnchangedConfigKeepsCollections(t *testing.T) {
 	h := newHarness(t)
 	h.qd.mu.Lock()
-	h.qd.collections[models.CollectionWorkItems] = true
+	h.qd.collections[models.CollectionBacklog] = true
 	h.qd.mu.Unlock()
 
 	resp := h.postForm("/settings/embedding", url.Values{
@@ -68,7 +68,7 @@ func TestHandleSettingsEmbeddingModelChangeDropsCollectionsAndFlagsReindex(t *te
 	h := newHarness(t)
 	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "A", SyncStatus: "completed"})
 	h.qd.mu.Lock()
-	h.qd.collections[models.CollectionWorkItems] = true
+	h.qd.collections[models.CollectionBacklog] = true
 	h.qd.mu.Unlock()
 
 	resp := h.postForm("/settings/embedding", url.Values{
@@ -100,7 +100,7 @@ func TestHandleSettingsEmbeddingModelChangeDropsCollectionsAndFlagsReindex(t *te
 	defer h.qd.mu.Unlock()
 	found := false
 	for _, c := range h.qd.deleteCollCalls {
-		if c == models.CollectionWorkItems {
+		if c == models.CollectionBacklog {
 			found = true
 		}
 	}

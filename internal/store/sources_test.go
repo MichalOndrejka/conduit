@@ -51,7 +51,7 @@ func TestGetReturnsNilForMissingID(t *testing.T) {
 
 func TestSaveInsertsNewSource(t *testing.T) {
 	s, _ := newStore(t)
-	mustSave(t, s, models.SourceDefinition{ID: "s1", Name: "First", Type: models.SourceWorkItemQuery})
+	mustSave(t, s, models.SourceDefinition{ID: "s1", Name: "First", Type: models.SourceBacklog})
 
 	got, err := s.Get("s1")
 	if err != nil {
@@ -187,7 +187,7 @@ func TestRenameCredentialReferencesNoopWhenNoMatch(t *testing.T) {
 
 func TestImportFlatArray(t *testing.T) {
 	s, _ := newStore(t)
-	data := []byte(`[{"id":"s1","name":"Imported","type":"work-item"}]`)
+	data := []byte(`[{"id":"s1","name":"Imported","type":"backlog"}]`)
 
 	n, err := s.Import(data)
 	if err != nil {
@@ -499,5 +499,19 @@ func TestOnChangeReportsTheChangedSource(t *testing.T) {
 	}
 	if len(got) != 3 || got[0] != "a" || got[1] != "a" || got[2] != "" {
 		t.Errorf("changes = %q, want [a a \"\"] (\"\" = any source)", got)
+	}
+}
+
+func TestLoadConvertsRenamedWorkItemType(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sources.json")
+	os.WriteFile(path, []byte(`[{"id":"a","type":"work-item","name":"Bugs","sync_status":"completed","last_synced_at":"2026-11-01T00:00:00Z"}]`), 0o644)
+	s := NewSourceConfigStore(path)
+	src, err := s.Get("a")
+	if err != nil || src == nil {
+		t.Fatalf("get: %v %v", src, err)
+	}
+	// The old collection is retired: the source must sync into the new one.
+	if src.Type != models.SourceBacklog || src.LastSyncedAt != nil || src.SyncStatus != "idle" {
+		t.Errorf("source = %+v, want an unsynced backlog source", src)
 	}
 }

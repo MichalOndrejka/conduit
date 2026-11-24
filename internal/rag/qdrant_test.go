@@ -45,7 +45,7 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 
 	v := storeFor(t, srv)
 	since := float64(1700000000)
-	points, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 5, 0, []FieldCondition{
+	points, err := v.Search(context.Background(), "conduit_backlog", []float32{1, 2, 3}, 5, 0, []FieldCondition{
 		{Key: "f_project", Match: Match{Value: "payments"}},
 		{Key: "f_state", Match: Match{Any: []string{"active", "new"}}},
 		{Key: "f_date", Range: &Range{Gte: &since}},
@@ -53,7 +53,7 @@ func TestSearchSendsFilterAndAPIKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/collections/conduit_workitems/points/query" {
+	if gotPath != "/collections/conduit_backlog/points/query" {
 		t.Errorf("path = %q", gotPath)
 	}
 	if gotAPIKey != "qd-key" {
@@ -101,14 +101,14 @@ func TestSearchOmitsOffsetWhenZeroButIncludesItWhenPositive(t *testing.T) {
 	defer srv.Close()
 	v := storeFor(t, srv)
 
-	if _, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 2, 0, nil, nil); err != nil {
+	if _, err := v.Search(context.Background(), "conduit_backlog", []float32{1, 2, 3}, 2, 0, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := gotBody["offset"]; ok {
 		t.Errorf("offset present with value 0: %v, want omitted", gotBody["offset"])
 	}
 
-	if _, err := v.Search(context.Background(), "conduit_workitems", []float32{1, 2, 3}, 2, 4, nil, nil); err != nil {
+	if _, err := v.Search(context.Background(), "conduit_backlog", []float32{1, 2, 3}, 2, 4, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got := gotBody["offset"]; got != float64(4) {
@@ -313,10 +313,10 @@ func TestDeleteCollectionSendsDelete(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	if err := v.DeleteCollection(context.Background(), "conduit_workitems"); err != nil {
+	if err := v.DeleteCollection(context.Background(), "conduit_backlog"); err != nil {
 		t.Fatal(err)
 	}
-	if gotMethod != http.MethodDelete || gotPath != "/collections/conduit_workitems" {
+	if gotMethod != http.MethodDelete || gotPath != "/collections/conduit_backlog" {
 		t.Errorf("method/path = %s %s", gotMethod, gotPath)
 	}
 }
@@ -458,11 +458,11 @@ func TestRetrieveSendsIDsAndParsesPayload(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	points, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"chunk-1", "chunk-2"})
+	points, err := v.Retrieve(context.Background(), "conduit_backlog", []string{"chunk-1", "chunk-2"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/collections/conduit_workitems/points" {
+	if gotPath != "/collections/conduit_backlog/points" {
 		t.Errorf("path = %q", gotPath)
 	}
 	ids, _ := gotBody["ids"].([]any)
@@ -481,7 +481,7 @@ func TestRetrieveMissingIDsReturnEmptyNotError(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	points, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"missing-id"})
+	points, err := v.Retrieve(context.Background(), "conduit_backlog", []string{"missing-id"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +498,7 @@ func TestRetrieveCollectionNotFoundReturnsEmptyNotError(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	points, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"chunk-1"})
+	points, err := v.Retrieve(context.Background(), "conduit_backlog", []string{"chunk-1"})
 	if err != nil {
 		t.Fatalf("expected no error on 404, got %v", err)
 	}
@@ -515,7 +515,7 @@ func TestRetrieveGenericErrorPropagates(t *testing.T) {
 	defer srv.Close()
 
 	v := storeFor(t, srv)
-	if _, err := v.Retrieve(context.Background(), "conduit_workitems", []string{"chunk-1"}); err == nil {
+	if _, err := v.Retrieve(context.Background(), "conduit_backlog", []string{"chunk-1"}); err == nil {
 		t.Fatal("expected a non-404 error to propagate")
 	}
 }

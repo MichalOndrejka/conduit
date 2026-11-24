@@ -36,12 +36,12 @@ func TestSearchToolCallsAreRecordedInStats(t *testing.T) {
 	RegisterTools(s, rag.NewSearchService(vectors, embedding, nil), memory.NewService(vectors, embedding))
 	ctx := context.Background()
 
-	callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "semantic_search", "query": "login bug", "page": float64(1),
 		"filters": map[string]any{"state": []any{"Active", "New"}, "project": "Payments"},
 	}})
 	qd.searchPoints = nil
-	callTool(t, s, ctx, "search_workitem", map[string]any{"request": map[string]any{
+	callTool(t, s, ctx, "search_backlog", map[string]any{"request": map[string]any{
 		"mode": "semantic_search", "query": "nothing here", "page": float64(2),
 	}})
 
@@ -56,7 +56,7 @@ func TestSearchToolCallsAreRecordedInStats(t *testing.T) {
 		t.Fatalf("tool calls = %d", len(calls))
 	}
 	first := calls[0]
-	if first.Name != "search_workitem" || first.Mode != "semantic_search" || first.Query != "login bug" || first.Page != 1 ||
+	if first.Name != "search_backlog" || first.Mode != "semantic_search" || first.Query != "login bug" || first.Page != 1 ||
 		first.Results != 1 || !first.Counted || first.Collection == "" || !first.Cold {
 		t.Errorf("first call = %+v", first)
 	}

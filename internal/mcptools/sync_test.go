@@ -42,7 +42,7 @@ func setupSync(t *testing.T, runner *fakeRunner) (*server.MCPServer, context.Con
 	synced := time.Date(2026, 10, 14, 8, 0, 0, 0, time.UTC)
 	errMsg, phase := "HTTP 401", "fetch"
 	sources := fakeSources{
-		{ID: "wi", Name: "Work items", Type: models.SourceWorkItemQuery, SyncStatus: "completed", LastSyncedAt: &synced,
+		{ID: "wi", Name: "Work items", Type: models.SourceBacklog, SyncStatus: "completed", LastSyncedAt: &synced,
 			Config: map[string]string{"Password": "ado-pat"}},
 		{ID: "code", Name: "Code", Type: models.SourceCodeRepo, SyncStatus: "syncing"},
 		{ID: "docs", Name: "Docs", Type: models.SourceDocumentation, SyncStatus: "failed", SyncError: &errMsg, SyncErrorPhase: &phase},

@@ -18,8 +18,8 @@ func TestTooltipContentIsEscaped(t *testing.T) {
 }
 
 func TestRankedBarsNameTheMeasure(t *testing.T) {
-	svg := string(rankedBars([]rankedBar{{Label: "search_workitem", Value: 0.4, Text: "40%"}}, "found nothing", 400))
-	for _, want := range []string{">40%<", "found nothing", "search_workitem"} {
+	svg := string(rankedBars([]rankedBar{{Label: "search_backlog", Value: 0.4, Text: "40%"}}, "found nothing", 400))
+	for _, want := range []string{">40%<", "found nothing", "search_backlog"} {
 		if !strings.Contains(svg, want) {
 			t.Errorf("ranked bars lack %q", want)
 		}

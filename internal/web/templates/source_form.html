@@ -21,7 +21,7 @@
 </div>
 {{end}}
 
-<!-- Azure DevOps work item fields: the Work Items type and the
+<!-- Azure DevOps work item fields: the Backlog type and the
      Requirements Work Items fetch mode. -->
 {{define "worktype-picker"}}
 {{$s := .Source}}
@@ -116,7 +116,7 @@
   <!-- Name -->
   <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-5">
     <label class="block text-sm font-medium text-slate-300 mb-1">Name <span class="text-red-400">*</span></label>
-    <input name="name" required value="{{$s.Name}}" placeholder="e.g. Platform work items"
+    <input name="name" required value="{{$s.Name}}" placeholder="e.g. Platform backlog"
            class="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-violet-500 focus:outline-none">
   </div>
 
@@ -136,7 +136,7 @@
 
     <!-- ── Azure DevOps ─────────────────────────────────────────────── -->
     <div id="ado-block" class="tab-panel p-5 space-y-4">
-      {{$isWorkItemType := eq $s.Type "work-item"}}
+      {{$isWorkItemType := eq $s.Type "backlog"}}
       {{$isDualMode := eq $s.Type "requirements"}}
       {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
 
@@ -283,7 +283,7 @@
 
     <!-- ── GitHub ───────────────────────────────────────────────────── -->
     <div id="github-block" class="hidden tab-panel p-5 space-y-4">
-      {{$isWorkItemType := eq $s.Type "work-item"}}
+      {{$isWorkItemType := eq $s.Type "backlog"}}
       {{$isDualMode := eq $s.Type "requirements"}}
       {{$fetchMode := or ($s.GetConfig `FetchMode`) `files`}}
 
@@ -475,7 +475,7 @@ function prepareSubmit() {
   if (currentTab === 'ado') {
     var org = adoVal('AdoOrg').replace(/\/+$/, '');
     var proj = encodeURIComponent(adoVal('AdoProject'));
-    var isWorkItemMode = SOURCE_TYPE === 'work-item' ||
+    var isWorkItemMode = SOURCE_TYPE === 'backlog' ||
       (SOURCE_TYPE === 'requirements' && currentFetchMode() === 'workitems');
     if (SOURCE_TYPE === 'pipeline-run') {
       // Pipeline runs are read from AdoOrg/AdoProject and DefinitionId or

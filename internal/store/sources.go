@@ -166,6 +166,7 @@ func (s *SourceConfigStore) Import(data []byte) (int, error) {
 		if src.Config == nil {
 			src.Config = map[string]string{}
 		}
+		migrateType(&src)
 		if src.ID == "" || existing[src.ID] {
 			src.ID = uuid.NewString()
 		}
@@ -294,6 +295,7 @@ func (s *SourceConfigStore) readFile() ([]models.SourceDefinition, error) {
 		if src.Config == nil {
 			src.Config = map[string]string{}
 		}
+		migrateType(&src)
 		sources = append(sources, src)
 	}
 	return sources, nil
@@ -363,4 +365,16 @@ func normaliseKeys(raw json.RawMessage) json.RawMessage {
 		return raw
 	}
 	return out
+}
+
+// migrateType converts a source of a renamed type to its current one. The
+// renamed type's collection is retired, so the source shows as never synced
+// until it syncs into the new one.
+func migrateType(src *models.SourceDefinition) {
+	if src.Type == models.RetiredSourceWorkItem {
+		src.Type = models.SourceBacklog
+		src.SyncStatus = "idle"
+		src.LastSyncedAt = nil
+		src.SyncError, src.SyncErrorPhase = nil, nil
+	}
 }
