@@ -122,6 +122,7 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /events", s.handleEvents)
 
 	mux.HandleFunc("GET /{$}", s.handleStats)
+	mux.HandleFunc("POST /stats/reset", s.handleStatsReset)
 	mux.HandleFunc("GET /sources", s.handleIndex)
 	mux.HandleFunc("GET /sources/{id}/items", s.handleSourceItems)
 	mux.HandleFunc("GET /experience", s.handleExperience)

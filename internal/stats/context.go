@@ -39,8 +39,10 @@ func (r *Recorder) ToolMiddleware(next server.ToolHandlerFunc) server.ToolHandle
 			tc.Cold = r.firstEmbedding()
 		}
 		start := time.Now()
-		res, err := next(context.WithValue(ctx, toolCallKey, tc), req)
+		ctx, requests := WithRequestCounter(context.WithValue(ctx, toolCallKey, tc))
+		res, err := next(ctx, req)
 		tc.LatencyMs = time.Since(start).Milliseconds()
+		tc.Requests, tc.RateLimited = requests.Requests(), requests.RateLimited()
 		switch {
 		case err != nil:
 			tc.Error = err.Error()

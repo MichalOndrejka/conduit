@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"sort"
@@ -67,6 +68,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d := stats.Summarize(s.stats.Events())
+	data["Since"] = s.stats.Started().Local().Format("Jan 2 15:04")
 
 	// Headline numbers.
 	pick := func(ok bool, v string) string {
@@ -187,9 +189,13 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	data["Sources"] = sources
 	data["ChartSourceTime"] = rankedBars(timeBars, "sync time", 1100)
 
-	// API load per provider: every sync since the start, retries included.
+	// API load per provider: every sync and live tool call since the start,
+	// retries included.
 	var providerBars []rankedBar
 	for _, p := range d.Providers {
+		if p.Requests == 0 && p.Syncs == 0 {
+			continue
+		}
 		text := fmtCount(float64(p.Requests))
 		if p.RateLimited > 0 {
 			text += fmt.Sprintf(" · %d rate-limited", p.RateLimited)
@@ -197,6 +203,31 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		providerBars = append(providerBars, rankedBar{Label: providerLabel(p.Provider), Value: float64(p.Requests), Text: text})
 	}
 	data["ChartProviders"] = rankedBars(providerBars, "API requests", 1100)
+	data["APIRequests"] = requests > 0
+
+	// API requests by tool: the live tools that read source APIs.
+	withLimits := func(n, limited int) string {
+		text := fmtCount(float64(n))
+		if limited > 0 {
+			text += fmt.Sprintf(" · %d rate-limited", limited)
+		}
+		return text
+	}
+	var toolRequestBars []rankedBar
+	for _, t := range d.Tools {
+		if t.Requests > 0 {
+			toolRequestBars = append(toolRequestBars, rankedBar{Label: t.Name, Value: float64(t.Requests), Text: withLimits(t.Requests, t.RateLimited)})
+		}
+	}
+	byValue(toolRequestBars)
+	data["ChartToolRequests"] = rankedBars(toolRequestBars, "API requests", 520)
+
+	// Top 5 configured sources by API requests, syncs and live calls together.
+	var sourceRequestBars []rankedBar
+	for _, r := range d.SourceRequests[:min(5, len(d.SourceRequests))] {
+		sourceRequestBars = append(sourceRequestBars, rankedBar{Label: r.SourceName, Value: float64(r.Requests()), Text: withLimits(r.Requests(), r.RateLimited)})
+	}
+	data["ChartSourceRequests"] = rankedBars(sourceRequestBars, "API requests", 520)
 
 	// Experience tab.
 	data["Experience"] = d.Experience
@@ -208,6 +239,15 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	data["NeverRetrieved"] = s.neverRetrieved(r.Context(), d.RetrievedSituations)
 
 	s.render(w, s.statsTmpl, "base", data)
+}
+
+// handleStatsReset drops every recorded event, from memory and the stats
+// file.
+func (s *Server) handleStatsReset(w http.ResponseWriter, r *http.Request) {
+	if err := s.stats.Reset(); err != nil {
+		log.Printf("stats reset failed: %v", err)
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
 // providerLabel is a provider's display name.

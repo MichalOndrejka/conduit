@@ -174,7 +174,7 @@ func (s *Service) Sync(ctx context.Context, sourceID string) {
 	// under this ctx (see stats.CountingTransport).
 	ctx, requests := stats.WithRequestCounter(ctx)
 	started := time.Now()
-	run := &stats.SyncRun{SourceID: src.ID, SourceName: src.Name, SourceType: src.Type, Provider: providerName(src)}
+	run := &stats.SyncRun{SourceID: src.ID, SourceName: src.Name, SourceType: src.Type, Provider: src.StatsProvider()}
 	record := func(status string) {
 		run.Status = status
 		run.DurationMs = time.Since(started).Milliseconds()
@@ -374,14 +374,6 @@ func (s *Service) syncState(ctx context.Context, src *models.SourceDefinition, c
 		return nil, 0
 	}
 	return state, n
-}
-
-// providerName is the source's provider for stats: github or azure-devops.
-func providerName(src *models.SourceDefinition) string {
-	if src.GetConfig("Provider") == "github" {
-		return "github"
-	}
-	return "azure-devops"
 }
 
 // isCancelled reports whether err resulted from a sync cancellation — either

@@ -1,6 +1,6 @@
 # Configuration Reference
 
-Conduit stores its runtime configuration in `config.json` inside its data directory, with the rest of its state (sources, credentials, embedding and sync state). The data directory is:
+Conduit stores its runtime configuration in `config.json` inside its data directory, with the rest of its state (sources, credentials, embedding and sync state, and the Dashboard stats in `stats.jsonl`, kept for 7 days). The data directory is:
 
 | Running | Data directory |
 |---------|----------------|
@@ -162,7 +162,7 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 | Variable | Effect |
 |----------|--------|
 | `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in the data directory. |
-| `CONDUIT_DATA_DIR` | The data directory, holding `config.json`, `conduit-sources.json`, `credentials.enc.json` and the embedding and sync state. Default: the per-user folder above, or `/data` in a container (the Docker image sets it to `/data`). |
+| `CONDUIT_DATA_DIR` | The data directory, holding `config.json`, `conduit-sources.json`, `credentials.enc.json`, `stats.jsonl` and the embedding and sync state. Default: the per-user folder above, or `/data` in a container (the Docker image sets it to `/data`). |
 | `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
 | `QDRANT_URL` | Overrides `qdrant.url` in config. |
 | `QDRANT_API_KEY` | Overrides `qdrant.api_key`. |

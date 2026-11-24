@@ -2,8 +2,13 @@ package stats
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,5 +202,132 @@ func TestIsRateLimitedRetryAfter(t *testing.T) {
 	}
 	if IsRateLimited(&http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}}) {
 		t.Error("404 is not a rate limit")
+	}
+}
+
+func TestToolMiddlewareCountsAPIRequests(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }))
+	defer srv.Close()
+	client := &http.Client{Transport: CountingTransport(nil)}
+	r := New()
+	handler := r.ToolMiddleware(func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		ToolCallFrom(ctx).SourceID = "prs"
+		for range 3 {
+			hreq, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL, nil)
+			resp, err := client.Do(hreq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+		}
+		return mcp.NewToolResultText("ok"), nil
+	})
+	req := mcp.CallToolRequest{}
+	req.Params.Name = "search_pull_request"
+	if _, err := handler(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if tc := r.Events()[0].Tool; tc.Requests != 3 || tc.SourceID != "prs" {
+		t.Errorf("tool call = %+v, want 3 requests to prs", tc)
+	}
+}
+
+func TestSummarizeAPIRequestsByToolAndSource(t *testing.T) {
+	events := []Event{
+		ev(1, nil, &SyncRun{SourceID: "code", SourceName: "Code", Provider: "github", Status: "completed", Requests: 30, RateLimited: 2}),
+		ev(2, &ToolCall{Name: "search_pull_request", SourceID: "code", SourceName: "Code", Provider: "github", Requests: 4}, nil),
+		ev(3, &ToolCall{Name: "search_pull_request", SourceID: "prs", SourceName: "PRs", Provider: "azure-devops", Requests: 50, RateLimited: 1}, nil),
+		ev(4, &ToolCall{Name: "search_pipeline_run", SourceID: "ci", SourceName: "CI", Provider: "azure-devops", Requests: 6}, nil),
+		ev(5, &ToolCall{Name: "search_workitem", Mode: "semantic_search", Counted: true}, nil),
+		ev(6, nil, &SyncRun{SourceID: "idle", SourceName: "Idle", Provider: "github", Status: "completed"}),
+	}
+	d := Summarize(events)
+	reqs := map[string]int{}
+	for _, t := range d.Tools {
+		reqs[t.Name] = t.Requests
+	}
+	if reqs["search_pull_request"] != 54 || reqs["search_pipeline_run"] != 6 || reqs["search_workitem"] != 0 {
+		t.Errorf("requests by tool = %v", reqs)
+	}
+	want := []SourceRequestRow{
+		{SourceID: "prs", SourceName: "PRs", Provider: "azure-devops", ToolRequests: 50, RateLimited: 1},
+		{SourceID: "code", SourceName: "Code", Provider: "github", SyncRequests: 30, ToolRequests: 4, RateLimited: 2},
+		{SourceID: "ci", SourceName: "CI", Provider: "azure-devops", ToolRequests: 6},
+	}
+	if !slices.Equal(d.SourceRequests, want) {
+		t.Errorf("source requests = %+v", d.SourceRequests)
+	}
+	// Provider load includes the live calls.
+	if d.Providers[0].Provider != "azure-devops" || d.Providers[0].Requests != 56 || d.Providers[1].Requests != 34 {
+		t.Errorf("providers = %+v", d.Providers)
+	}
+}
+
+func TestOpenPersistsEventsAcrossRestarts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	r, err := Open(path, 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.RecordTool(&ToolCall{Name: "search_workitem", Query: "q", Requests: 2, SourceID: "s"})
+	r.RecordSync(&SyncRun{SourceID: "s1", Status: "completed", Documents: 3})
+	r.Close()
+
+	r2, err := Open(path, 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r2.Close()
+	events := r2.Events()
+	if len(events) != 2 || events[0].Tool.Query != "q" || events[0].Tool.Requests != 2 || events[1].Sync.Documents != 3 {
+		t.Fatalf("reloaded events = %+v", events)
+	}
+	if !r2.Started().Equal(events[0].Time) {
+		t.Errorf("started = %v, want the oldest event %v", r2.Started(), events[0].Time)
+	}
+	// New events append after the reloaded ones.
+	r2.RecordTool(&ToolCall{Name: "t"})
+	r2.Close()
+	r3, _ := Open(path, 7*24*time.Hour)
+	defer r3.Close()
+	if n := len(r3.Events()); n != 3 {
+		t.Errorf("events after a second restart = %d, want 3", n)
+	}
+}
+
+func TestOpenDropsExpiredAndUnreadableLines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	old, _ := json.Marshal(Event{Time: time.Now().Add(-8 * 24 * time.Hour), Type: "tool", Tool: &ToolCall{Name: "old"}})
+	fresh, _ := json.Marshal(Event{Time: time.Now().Add(-time.Hour), Type: "tool", Tool: &ToolCall{Name: "fresh"}})
+	os.WriteFile(path, []byte(string(old)+"\nnot json\n"+string(fresh)+"\n"), 0o644)
+
+	r, err := Open(path, 7*24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	if ev := r.Events(); len(ev) != 1 || ev[0].Tool.Name != "fresh" {
+		t.Fatalf("events = %+v, want only the fresh one", ev)
+	}
+	// The file itself is rewritten without them.
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), `"old"`) || strings.Contains(string(data), "not json") {
+		t.Errorf("stats file still holds dropped lines:\n%s", data)
+	}
+}
+
+func TestResetClearsMemoryAndFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	r, _ := Open(path, 7*24*time.Hour)
+	r.RecordTool(&ToolCall{Name: "t"})
+	if err := r.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	r.RecordTool(&ToolCall{Name: "after"})
+	r.Close()
+	r2, _ := Open(path, 7*24*time.Hour)
+	defer r2.Close()
+	if ev := r2.Events(); len(ev) != 1 || ev[0].Tool.Name != "after" {
+		t.Errorf("events after reset = %+v", ev)
 	}
 }

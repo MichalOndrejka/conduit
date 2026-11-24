@@ -105,6 +105,9 @@ type ToolRow struct {
 	Calls  int         `json:"calls"`
 	Errors int         `json:"errors"`
 	Search SearchStats `json:"search"`
+	// Requests are the HTTP requests the tool's calls made to source APIs.
+	Requests    int `json:"requests"`
+	RateLimited int `json:"rate_limited"`
 }
 
 // SourceRow is a source's latest sync.
@@ -113,14 +116,28 @@ type SourceRow struct {
 	Latest *SyncRun `json:"latest"`
 }
 
-// ProviderRow is the load every sync since the start put on one provider's
-// API (all runs, not only each source's latest).
+// ProviderRow is the load every sync and live tool call since the start put
+// on one provider's API (all runs, not only each source's latest).
 type ProviderRow struct {
 	Provider    string `json:"provider"`
 	Syncs       int    `json:"syncs"`
 	Requests    int    `json:"requests"`
 	RateLimited int    `json:"rate_limited"`
 }
+
+// SourceRequestRow is the API load on one configured source since the
+// start: its syncs' requests and the live tool calls that read it.
+type SourceRequestRow struct {
+	SourceID     string `json:"source_id"`
+	SourceName   string `json:"source_name"`
+	Provider     string `json:"provider"`
+	SyncRequests int    `json:"sync_requests"`
+	ToolRequests int    `json:"tool_requests"`
+	RateLimited  int    `json:"rate_limited"`
+}
+
+// Requests is the source's total.
+func (r SourceRequestRow) Requests() int { return r.SyncRequests + r.ToolRequests }
 
 // EmptySearch is a first-page search that found nothing.
 type EmptySearch struct {
@@ -156,16 +173,19 @@ type HitCount struct {
 
 // Dashboard is everything the Stats page shows.
 type Dashboard struct {
-	ToolCalls     int             `json:"tool_calls"`
-	ToolErrors    int             `json:"tool_errors"`
-	Search        SearchStats     `json:"search"`
-	Sync          SyncTotals      `json:"sync"`
-	Tools         []*ToolRow      `json:"tools"`
-	Sources       []SourceRow     `json:"sources"`
-	Providers     []ProviderRow   `json:"providers"`
-	EmptySearches []EmptySearch   `json:"empty_searches"`
-	Filters       []FilterRow     `json:"filters"`
-	Experience    ExperienceStats `json:"experience"`
+	ToolCalls  int           `json:"tool_calls"`
+	ToolErrors int           `json:"tool_errors"`
+	Search     SearchStats   `json:"search"`
+	Sync       SyncTotals    `json:"sync"`
+	Tools      []*ToolRow    `json:"tools"`
+	Sources    []SourceRow   `json:"sources"`
+	Providers  []ProviderRow `json:"providers"`
+	// SourceRequests rank the configured sources by API requests, most
+	// first; sources never requested are left out.
+	SourceRequests []SourceRequestRow `json:"source_requests"`
+	EmptySearches  []EmptySearch      `json:"empty_searches"`
+	Filters        []FilterRow        `json:"filters"`
+	Experience     ExperienceStats    `json:"experience"`
 	// RetrievedSituations are the experience situations returned so far,
 	// for spotting entries that are never used.
 	RetrievedSituations map[string]bool `json:"-"`
@@ -181,6 +201,24 @@ func Summarize(events []Event) *Dashboard {
 	latest := map[string]*SyncRun{} // source ID → latest run
 	runs := map[string]int{}
 	providers := map[string]*ProviderRow{}
+	provider := func(name string) *ProviderRow {
+		p := providers[name]
+		if p == nil {
+			p = &ProviderRow{Provider: name}
+			providers[name] = p
+		}
+		return p
+	}
+	bySource := map[string]*SourceRequestRow{}
+	source := func(id, name, prov string) *SourceRequestRow {
+		r := bySource[id]
+		if r == nil {
+			r = &SourceRequestRow{SourceID: id}
+			bySource[id] = r
+		}
+		r.SourceName, r.Provider = name, prov // latest name wins
+		return r
+	}
 	for _, e := range events {
 		switch {
 		case e.Tool != nil:
@@ -203,16 +241,29 @@ func Summarize(events []Event) *Dashboard {
 			for _, h := range tc.Hits {
 				d.RetrievedSituations[h] = true
 			}
+			row.Requests += tc.Requests
+			row.RateLimited += tc.RateLimited
+			if tc.Requests > 0 {
+				p := provider(tc.Provider)
+				p.Requests += tc.Requests
+				p.RateLimited += tc.RateLimited
+				if tc.SourceID != "" {
+					r := source(tc.SourceID, tc.SourceName, tc.Provider)
+					r.ToolRequests += tc.Requests
+					r.RateLimited += tc.RateLimited
+				}
+			}
 		case e.Sync != nil:
 			runs[e.Sync.SourceID]++
-			p := providers[e.Sync.Provider]
-			if p == nil {
-				p = &ProviderRow{Provider: e.Sync.Provider}
-				providers[e.Sync.Provider] = p
-			}
+			p := provider(e.Sync.Provider)
 			p.Syncs++
 			p.Requests += e.Sync.Requests
 			p.RateLimited += e.Sync.RateLimited
+			if e.Sync.Requests > 0 {
+				r := source(e.Sync.SourceID, e.Sync.SourceName, e.Sync.Provider)
+				r.SyncRequests += e.Sync.Requests
+				r.RateLimited += e.Sync.RateLimited
+			}
 			latest[e.Sync.SourceID] = e.Sync
 		}
 	}
@@ -253,6 +304,16 @@ func Summarize(events []Event) *Dashboard {
 			return d.Providers[i].Requests > d.Providers[j].Requests
 		}
 		return d.Providers[i].Provider < d.Providers[j].Provider
+	})
+	for _, r := range bySource {
+		d.SourceRequests = append(d.SourceRequests, *r)
+	}
+	sort.Slice(d.SourceRequests, func(i, j int) bool {
+		a, b := d.SourceRequests[i], d.SourceRequests[j]
+		if a.Requests() != b.Requests() {
+			return a.Requests() > b.Requests()
+		}
+		return strings.ToLower(a.SourceName) < strings.ToLower(b.SourceName)
 	})
 	d.fill(events)
 	return d

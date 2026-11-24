@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -43,10 +44,13 @@ func TestStatsPageShowsThisProcess(t *testing.T) {
 		Status: "completed", DurationMs: 120000, FetchMs: 90000, IndexMs: 30000, Requests: 3002, RateLimited: 57, Documents: 900, Chunks: 4100})
 	rec.RecordTool(&stats.ToolCall{Name: "search_source_code", Mode: "semantic_search", Query: "missing thing <b>", Page: 1, Results: 0, Counted: true,
 		LatencyMs: 250, Filters: map[string][]string{"path": {"src/nowhere"}}})
+	rec.RecordTool(&stats.ToolCall{Name: "search_pull_request", SourceID: "prs", SourceName: "Team PRs", Provider: "azure-devops", Requests: 12})
 	h.server.SetStats(rec)
 
 	body := bodyString(t, h.get("/"))
 	for _, want := range []string{
+		"API requests by tool", "search_pull_request", ">12<", // live tool load
+		"Top 5 sources by API requests", "Team PRs", // per-source load
 		"Field app code", "3002", "2 min 00 s", "57 rate-limited", // the sync
 		"100% of searches",                                             // the miss
 		"API requests by provider", "GitHub", "3002 · 57 rate-limited", // provider load
@@ -78,5 +82,22 @@ func TestDashboardIsHome(t *testing.T) {
 	}
 	if strings.Contains(body, `href="/stats"`) {
 		t.Error("sidebar still links to /stats")
+	}
+}
+
+func TestStatsResetClearsTheDashboard(t *testing.T) {
+	h := newHarness(t)
+	rec := stats.New()
+	rec.RecordTool(&stats.ToolCall{Name: "search_source_code"})
+	h.server.SetStats(rec)
+	if body := bodyString(t, h.get("/")); !strings.Contains(body, "Reset stats") || !strings.Contains(body, "Since ") {
+		t.Error("dashboard lacks the reset button and since line")
+	}
+	resp := h.postForm("/stats/reset", url.Values{})
+	if resp.StatusCode != http.StatusSeeOther {
+		t.Errorf("POST /stats/reset = %d, want 303", resp.StatusCode)
+	}
+	if n := len(rec.Events()); n != 0 {
+		t.Errorf("events after reset = %d", n)
 	}
 }

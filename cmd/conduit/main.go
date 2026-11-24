@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -157,8 +158,14 @@ func main() {
 	}
 
 	// ── Stats (see internal/stats) ──────────────────────────────────────────
-	// Kept in memory for this process only; a restart starts empty.
-	statsRec := stats.New()
+	// Appended to stats.jsonl in the data folder, so stats survive restarts;
+	// events older than a week are dropped.
+	statsRec, err := stats.Open(filepath.Join(dataDir, stats.FileName), statsRetention)
+	if err != nil {
+		log.Printf("warning: stats file: %v — stats are kept in memory for this run only", err)
+		statsRec = stats.New()
+	}
+	defer statsRec.Close()
 	syncSvc.SetRecorder(statsRec)
 
 	// ── MCP server (streamable HTTP at /mcp) ───────────────────────────────
@@ -207,6 +214,9 @@ func main() {
 }
 
 const version = "0.1.0"
+
+// statsRetention is how long the Stats page keeps events.
+const statsRetention = 7 * 24 * time.Hour
 
 // shutdownTimeout keeps the whole graceful stop inside Docker's default
 // 10 s grace period before it escalates to SIGKILL.

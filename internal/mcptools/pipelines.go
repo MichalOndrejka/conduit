@@ -13,6 +13,7 @@ import (
 	"github.com/MichalOndrejka/conduit/internal/models"
 	"github.com/MichalOndrejka/conduit/internal/secrets"
 	"github.com/MichalOndrejka/conduit/internal/sources"
+	"github.com/MichalOndrejka/conduit/internal/stats"
 )
 
 // logPageLines is how many log lines one log page returns.
@@ -152,6 +153,7 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 		if err != nil {
 			return nil, err
 		}
+		recordSource(ctx, src)
 		p, err := sources.PipelineProviderFor(src, store)
 		if err != nil {
 			return nil, err
@@ -167,6 +169,7 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 		if err != nil {
 			return nil, err
 		}
+		recordSource(ctx, src)
 		p, err := sources.PipelineProviderFor(src, store)
 		if err != nil {
 			return nil, err
@@ -211,6 +214,7 @@ func handlePipelineRequest(ctx context.Context, args map[string]any, srcs Source
 			return nil, err
 		}
 	}
+	recordSource(ctx, src)
 
 	if mode == "get" {
 		run, cached, err := p.Get(ctx, runID)
@@ -351,6 +355,14 @@ func pipelineSource(all []models.SourceDefinition, id string) (*models.SourceDef
 		return nil, fmt.Errorf("no pipeline-run source is configured — add one for the pipeline, or pass the run's url")
 	default:
 		return nil, fmt.Errorf("several pipeline-run sources are configured; pass source_id, one of: %s", strings.Join(names, ", "))
+	}
+}
+
+// recordSource names, in the stats record, the configured source whose API a
+// live tool call reads.
+func recordSource(ctx context.Context, src *models.SourceDefinition) {
+	if tc := stats.ToolCallFrom(ctx); tc != nil && src != nil {
+		tc.SourceID, tc.SourceName, tc.Provider = src.ID, src.Name, src.StatsProvider()
 	}
 }
 

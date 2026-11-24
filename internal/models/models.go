@@ -84,6 +84,15 @@ func (s *SourceDefinition) GetConfig(key string) string {
 	return s.Config[key]
 }
 
+// StatsProvider is the source's provider as the Stats page groups API load:
+// github or azure-devops.
+func (s *SourceDefinition) StatsProvider() string {
+	if s.GetConfig("Provider") == "github" {
+		return "github"
+	}
+	return "azure-devops"
+}
+
 type SearchResult struct {
 	ID         string            `json:"id"`
 	Score      float64           `json:"score"`

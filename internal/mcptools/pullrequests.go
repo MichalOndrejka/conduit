@@ -122,6 +122,7 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 			if all[i].ID != id {
 				continue
 			}
+			recordSource(ctx, &all[i])
 			p, err := sources.PullRequestProviderFor(&all[i], store)
 			if err != nil {
 				return nil, err
@@ -154,6 +155,7 @@ func handlePullRequestRequest(ctx context.Context, args map[string]any, srcs Sou
 	if err != nil {
 		return nil, err
 	}
+	recordSource(ctx, pr.Source)
 	p := pr.Provider
 	out := map[string]any{
 		"pull_request":     map[string]any{"id": pr.ID, "web_url": p.WebURL(pr.ID)},
