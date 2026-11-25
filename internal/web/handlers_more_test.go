@@ -117,6 +117,37 @@ func TestHandleCredentialsPageListsCreatedAndMissing(t *testing.T) {
 	}
 }
 
+func TestHandleCredentialsPageGroupsMissingByName(t *testing.T) {
+	h := newHarness(t)
+	for _, id := range []string{"s1", "s2", "s3"} {
+		mustSave(t, h, models.SourceDefinition{ID: id, Name: "Source " + id, Config: map[string]string{
+			"Provider": "api", "Password": "shared-pat",
+		}})
+	}
+	mustSave(t, h, models.SourceDefinition{ID: "s4", Name: "Other", Config: map[string]string{
+		"Provider": "api", "Password": "other-pat",
+	}})
+
+	body := bodyString(t, h.get("/credentials"))
+	if n := strings.Count(body, `href="/credentials/create?name=shared-pat"`); n != 1 {
+		t.Errorf("Create links for shared-pat = %d, want 1 (one warning per credential)", n)
+	}
+	if !strings.Contains(body, `href="/credentials/create?name=other-pat"`) {
+		t.Error("no Create link for other-pat")
+	}
+	if !strings.Contains(body, "3 sources can't sync") {
+		t.Error("shared-pat warning does not count its 3 sources")
+	}
+}
+
+func TestHandleCredentialCreateGetPrefillsName(t *testing.T) {
+	h := newHarness(t)
+	body := bodyString(t, h.get("/credentials/create?name=shared-pat"))
+	if !strings.Contains(body, `value="shared-pat"`) {
+		t.Error("create form does not prefill the name from ?name=")
+	}
+}
+
 func TestHandleCredentialCreateGetShowsForm(t *testing.T) {
 	h := newHarness(t)
 	resp := h.get("/credentials/create")
@@ -125,7 +156,7 @@ func TestHandleCredentialCreateGetShowsForm(t *testing.T) {
 	}
 }
 
-// ── Sync selected (no-op with empty selection) ──────────────────────────────
+// ── Sync (no-op with no source IDs) ─────────────────────────────────────────
 
 func TestHandleSyncSelectedRedirects(t *testing.T) {
 	h := newHarness(t)

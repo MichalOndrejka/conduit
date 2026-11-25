@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -385,45 +386,10 @@ func (s *Server) handleSourceToggle(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/sources", http.StatusSeeOther)
 }
 
-// handleDisableSelected marks each checked source as disabled, for the
-// Sources page's bulk "Disable selected" action.
-func (s *Server) handleDisableSelected(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-	for _, id := range r.Form["ids"] {
-		src, err := s.sources.Get(id)
-		if err != nil {
-			httpError(w, err)
-			return
-		}
-		if src == nil || src.Disabled {
-			continue
-		}
-		src.Disabled = true
-		if err := s.sources.Save(*src); err != nil {
-			httpError(w, err)
-			return
-		}
-	}
-	http.Redirect(w, r, "/sources", http.StatusSeeOther)
-}
-
-// handleDeleteSelected removes each checked source (and its vectors), for the
-// Sources page's bulk "Delete selected" action.
-func (s *Server) handleDeleteSelected(w http.ResponseWriter, r *http.Request) {
-	_ = r.ParseForm()
-	for _, id := range r.Form["ids"] {
-		if err := s.mgr.Delete(r.Context(), id); err != nil {
-			httpError(w, err)
-			return
-		}
-	}
-	http.Redirect(w, r, "/sources", http.StatusSeeOther)
-}
-
 // ── Sync control ────────────────────────────────────────────────────────────
 
-// handleSyncSelected syncs each checked source, for the Sources page's bulk
-// "Sync selected" action.
+// handleSyncSelected syncs the given sources, for the Sources page's Sync
+// and Sync All buttons.
 func (s *Server) handleSyncSelected(w http.ResponseWriter, r *http.Request) {
 	_ = r.ParseForm()
 	ids := r.Form["ids"]
@@ -503,7 +469,7 @@ func (s *Server) renderCredentials(w http.ResponseWriter, errMsg string) {
 	s.render(w, s.credsTmpl, "base", map[string]any{
 		"Active":      "credentials",
 		"Credentials": views,
-		"Missing":     s.secrets.MissingReferences(srcs),
+		"Missing":     groupMissing(s.secrets.MissingReferences(srcs)),
 		"Error":       errMsg,
 	})
 }
@@ -514,9 +480,42 @@ func (s *Server) handleCredentials(w http.ResponseWriter, _ *http.Request) {
 
 // handleCredentialCreateGet shows the "Add credential" form, the Credentials
 // page's equivalent of /sources/create.
+// missingCredential is one credential name that sources reference but the
+// store doesn't hold, with the sources that need it.
+type missingCredential struct {
+	Name    string
+	Sources []string
+}
+
+// SourceList is the tooltip text: the sources that need the credential.
+func (m missingCredential) SourceList() string { return "Needed by: " + strings.Join(m.Sources, ", ") }
+
+// groupMissing folds the per-source missing references into one entry per
+// credential name (in first-seen order), so importing many sources that
+// share a credential shows it once.
+func groupMissing(refs []secrets.MissingReference) []missingCredential {
+	var out []missingCredential
+	index := map[string]int{}
+	for _, r := range refs {
+		i, ok := index[r.CredentialName]
+		if !ok {
+			i = len(out)
+			index[r.CredentialName] = i
+			out = append(out, missingCredential{Name: r.CredentialName})
+		}
+		if !slices.Contains(out[i].Sources, r.SourceName) {
+			out[i].Sources = append(out[i].Sources, r.SourceName)
+		}
+	}
+	return out
+}
+
+// handleCredentialCreateGet shows the add form; ?name= prefills the name, for
+// the Credentials page's Create button next to a missing credential.
 func (s *Server) handleCredentialCreateGet(w http.ResponseWriter, r *http.Request) {
 	s.render(w, s.credsNewTmpl, "base", map[string]any{
 		"Active": "credentials",
+		"Name":   r.URL.Query().Get("name"),
 	})
 }
 
@@ -525,6 +524,7 @@ func (s *Server) handleCredentialCreate(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		s.render(w, s.credsNewTmpl, "base", map[string]any{
 			"Active": "credentials",
+			"Name":   r.FormValue("name"),
 			"Error":  err.Error(),
 		})
 		return

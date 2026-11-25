@@ -5,7 +5,6 @@ Runs Conduit and Qdrant against the Ollama on your machine. No clone needed.
 ## Prerequisites
 
 - [Docker Desktop](https://docs.docker.com/get-docker/)
-- [Git](https://git-scm.com/downloads)
 - [Ollama](https://ollama.com/download), running on this machine. Conduit
   reaches it at `localhost:11434` (from containers, `host.docker.internal`).
   Linux: start it with `OLLAMA_HOST=0.0.0.0` so containers can reach it.
@@ -23,7 +22,7 @@ ollama pull nomic-embed-text-v2-moe
 Then start Conduit:
 
 ```
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up -d
+docker compose -f oci://docker.io/michalondrejka/conduit-compose:latest up -d
 ```
 
 Open http://localhost:8000. Ollama's URL and models are on the Settings page.
@@ -44,8 +43,8 @@ docker compose -p conduit down
 ## Update
 
 ```
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml pull
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up -d
+docker compose -f oci://docker.io/michalondrejka/conduit-compose:latest pull
+docker compose -f oci://docker.io/michalondrejka/conduit-compose:latest up -d
 ```
 
 Proxy, models, data: [Customization](../customization.md).

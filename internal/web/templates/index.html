@@ -27,27 +27,18 @@
 </div>
 {{else}}
 <div class="flex items-center gap-3 mb-3 text-sm text-slate-400">
-  <label class="flex items-center gap-2 cursor-pointer select-none">
-    <input type="checkbox" id="select-all" class="h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600 cursor-pointer">
-    Select all
-  </label>
-  <button type="button" onclick="syncSelected()" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync</button>
-  <button type="button" onclick="bulkAction('/sources/disable-selected')" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Disable</button>
-  <button type="button" onclick="bulkAction('/sources/delete-selected', 'Delete selected sources and their vectors?')" class="rounded-lg border border-red-900 text-red-400 px-3 py-1.5 text-xs hover:bg-red-950">Delete</button>
+  <button type="button" onclick="syncAll()" class="rounded-lg border border-slate-700 px-3 py-1.5 text-xs hover:bg-slate-800">Sync All</button>
   <div id="sync-eta" class="ml-auto text-xs text-violet-300 bg-violet-950/30 border border-violet-900 rounded-lg px-3 py-2" style="visibility:hidden">&nbsp;</div>
 </div>
 <div class="space-y-3">
   {{range .Sources}}
-  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-opacity {{if .Disabled}}opacity-50 grayscale{{end}}" data-source-id="{{.ID}}">
+  <div class="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 transition-opacity {{if .Disabled}}opacity-50 grayscale{{end}}" data-source-id="{{.ID}}" data-disabled="{{.Disabled}}">
     <div class="flex items-center gap-4 flex-wrap">
-      <input type="checkbox" class="row-check h-4 w-4 rounded border-slate-700 bg-slate-950 accent-violet-600 shrink-0 cursor-pointer" value="{{.ID}}">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2">
           <a href="/sources/{{.ID}}/{{if .Live}}edit{{else}}items{{end}}" class="font-medium text-white hover:text-violet-400 truncate">{{.Name}}</a>
           <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-700 rounded px-1.5 py-0.5">{{.Type}}</span>
-          {{if .Disabled}}
-          <span class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-600 rounded px-1.5 py-0.5">Disabled</span>
-          {{end}}
+          <span data-disabled-badge class="text-[10px] uppercase tracking-wider text-slate-400 border border-slate-600 rounded px-1.5 py-0.5{{if not .Disabled}} hidden{{end}}">Disabled</span>
           {{if .Live}}
           <span class="text-[10px] uppercase tracking-wider text-emerald-300 border border-emerald-800 bg-emerald-950/50 rounded px-1.5 py-0.5">Live</span>
           {{template "tip" "Read live from the provider by its MCP tool on every call; never synced or embedded."}}
@@ -61,15 +52,15 @@
         </div>
         {{end}}
         {{$notEmbedded := and (not .Live) (eq .VectorCount 0) (ne .SyncStatus "syncing")}}
-        <div data-progress-wrap class="pt-1.5" style="opacity:{{if $notEmbedded}}1{{else}}0{{end}};transition:opacity .25s ease">
-          <div data-progress class="text-xs {{if $notEmbedded}}text-amber-300{{else}}text-violet-400{{end}} mb-1 h-4">{{if $notEmbedded}}Not embedded yet — click Sync to index this source{{end}}</div>
+        <div data-progress-wrap class="pt-1.5" style="opacity:0;transition:opacity .25s ease">
+          <div data-progress class="text-xs text-violet-400 mb-1 h-4"></div>
           <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
             <div data-progress-bar class="h-full bg-violet-500 rounded-full transition-all duration-300" style="width: 0%"></div>
           </div>
         </div>
-        <div data-error class="text-xs text-red-300 bg-red-950/40 border border-red-900 rounded-lg px-2.5 py-1.5 mt-2 {{if not .SyncError}}hidden{{end}}">
-          {{if .SyncError}}Sync failed{{if .SyncErrorPhase}} during {{.SyncErrorPhase}}{{end}}: {{.SyncError}}{{end}}
-        </div>
+        {{/* One line, cut off with "…": a long message (URLs, paths) must not
+             widen or heighten the card. The full text is the tooltip. */}}
+        <div data-error title="{{template "sync-error" .}}" class="truncate text-xs text-red-300 bg-red-950/40 border border-red-900 rounded-lg px-2.5 py-1.5 mt-2 {{if not .SyncError}}hidden{{end}}">{{template "sync-error" .}}</div>
       </div>
       <div class="flex gap-1.5">
         <button onclick="syncCtl('{{.ID}}','pause')" data-pause class="hidden text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Pause</button>
@@ -79,12 +70,8 @@
         <button onclick="syncOne('{{.ID}}')" data-sync-btn class="text-xs rounded-lg px-3 py-1.5 {{if $notEmbedded}}bg-violet-600 text-white border border-violet-600 hover:bg-violet-500{{else}}border border-slate-700 hover:bg-slate-800{{end}}">Sync</button>
         {{end}}
         <a href="/sources/{{.ID}}/edit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">Edit</a>
-        <form method="post" action="/sources/{{.ID}}/toggle" class="contents">
-          <button type="submit" class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
-        </form>
-        <form method="post" action="/sources/{{.ID}}/delete" class="contents" onsubmit="return confirm('Delete this source and its vectors?')">
-          <button type="submit" class="text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
-        </form>
+        <button type="button" onclick="toggleOne('{{.ID}}')" data-toggle-btn class="text-xs rounded-lg border border-slate-700 px-3 py-1.5 hover:bg-slate-800">{{if .Disabled}}Enable{{else}}Disable{{end}}</button>
+        <button type="button" onclick="deleteOne('{{.ID}}')" class="text-xs rounded-lg border border-red-900 text-red-400 px-3 py-1.5 hover:bg-red-950">Delete</button>
       </div>
     </div>
   </div>
@@ -106,31 +93,51 @@ function startSync(ids) {
     .catch(() => showToast('Could not start the sync', 'error'));
 }
 function syncOne(id) { startSync([id]); }
-function selectedIDs() {
-  return [...document.querySelectorAll('.row-check:checked')].map(cb => cb.value);
+// syncAll syncs every enabled source that syncs at all (live sources have
+// no Sync button).
+function syncAll() {
+  startSync([...document.querySelectorAll('[data-source-id][data-disabled="false"]')]
+    .filter(card => card.querySelector('[data-sync-btn]'))
+    .map(card => card.dataset.sourceId));
 }
-function syncSelected() { startSync(selectedIDs()); }
-document.getElementById('select-all').addEventListener('change', e => {
-  document.querySelectorAll('.row-check').forEach(cb => cb.checked = e.target.checked);
-});
-function submitIDs(url, ids, confirmMsg) {
-  if (ids.length === 0) return;
-  if (confirmMsg && !confirm(confirmMsg)) return;
-  const form = document.createElement('form');
-  form.method = 'post';
-  form.action = url;
-  for (const id of ids) {
-    const input = document.createElement('input');
-    input.type = 'hidden';
-    input.name = 'ids';
-    input.value = id;
-    form.appendChild(input);
-  }
-  document.body.appendChild(form);
-  form.submit();
+// The actions below post in the background and update the cards in place,
+// so the page keeps its scroll position. The handlers answer with a redirect
+// (for plain form posts); with redirect: 'manual' that is an opaque response,
+// which counts as success.
+function postIDs(url, ids) {
+  const body = new URLSearchParams();
+  ids.forEach(id => body.append('ids', id));
+  return fetch(url, {method: 'POST', body: body, redirect: 'manual'}).then(res => {
+    if (res.type !== 'opaqueredirect' && !res.ok) throw new Error(res.status);
+  });
 }
-function bulkAction(url, confirmMsg) {
-  submitIDs(url, selectedIDs(), confirmMsg);
+function cardOf(id) { return document.querySelector(`[data-source-id="${id}"]`); }
+function setDisabled(id, disabled) {
+  const card = cardOf(id);
+  if (!card) return;
+  card.dataset.disabled = String(disabled);
+  card.classList.toggle('opacity-50', disabled);
+  card.classList.toggle('grayscale', disabled);
+  card.querySelector('[data-disabled-badge]').classList.toggle('hidden', !disabled);
+  card.querySelector('[data-toggle-btn]').textContent = disabled ? 'Enable' : 'Disable';
+}
+function removeCards(ids) {
+  ids.forEach(id => { const card = cardOf(id); if (card) card.remove(); });
+  // Last one gone: the server renders the empty state.
+  if (!document.querySelector('[data-source-id]')) location.reload();
+}
+function toggleOne(id) {
+  const card = cardOf(id);
+  const next = card.dataset.disabled !== 'true';
+  postIDs('/sources/' + id + '/toggle', [])
+    .then(() => setDisabled(id, next))
+    .catch(() => showToast('Could not change the source', 'error'));
+}
+function deleteOne(id) {
+  if (!confirm('Delete this source and its vectors?')) return;
+  postIDs('/sources/' + id + '/delete', [])
+    .then(() => removeCards([id]))
+    .catch(() => showToast('Could not delete the source', 'error'));
 }
 
 function formatDuration(ms) {
@@ -183,14 +190,6 @@ function applyStatus(list) {
         bar.style.width = '100%';
         bar.classList.add('animate-pulse');
       }
-    } else if (empty) {
-      // Nothing embedded and not syncing: an actionable hint in the
-      // progress-bar spot, so it's obvious which sources still need a sync.
-      progWrap.style.opacity = '1';
-      prog.className = 'text-xs text-amber-300 mb-1 h-4';
-      prog.textContent = 'Not embedded yet — click Sync to index this source';
-      bar.style.width = '0%';
-      bar.classList.remove('animate-pulse');
     } else if (counted) {
       progWrap.style.opacity = '0';
       bar.classList.remove('animate-pulse');
@@ -198,6 +197,7 @@ function applyStatus(list) {
     const errBox = card.querySelector('[data-error]');
     if (s.sync_error) {
       errBox.textContent = 'Sync failed' + (s.sync_error_phase ? ' during ' + s.sync_error_phase : '') + ': ' + s.sync_error;
+      errBox.title = errBox.textContent;
       errBox.classList.remove('hidden');
     } else {
       errBox.classList.add('hidden');
@@ -250,3 +250,5 @@ window.addEventListener('pagehide', () => statusEvents.close());
 </script>
 {{end}}
 {{end}}
+
+{{define "sync-error"}}{{if .SyncError}}Sync failed{{if .SyncErrorPhase}} during {{.SyncErrorPhase}}{{end}}: {{.SyncError}}{{end}}{{end}}

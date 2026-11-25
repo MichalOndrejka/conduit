@@ -29,13 +29,12 @@ import (
 )
 
 // preprocSourceTypes drives the per-source-type toggles in the preprocessing
-// form, matching source_type_labels in app/templates/settings.html.
+// form. Live types (Pipeline Runs, Pull Requests) are left out: they are read
+// by their tools on every call, never embedded, so nothing is preprocessed.
 var preprocSourceTypes = []struct{ Key, Label string }{
 	{"backlog", "Backlog"},
 	{"requirements", "Requirements"},
 	{"commit-history", "Commit History"},
-	{"pipeline-run", "Pipeline Runs"},
-	{"pull-request", "Pull Requests"},
 	{"code", "Source Code"},
 	{"test-code", "Test Code"},
 	{"documentation", "Documentation"},

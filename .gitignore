@@ -20,10 +20,6 @@ node_modules/
 # Qdrant local storage
 qdrant_storage/
 
-# Corporate/internal root CA bundle from scripts/export-ca-certs.ps1 (device-specific, never commit)
-certs/*
-!certs/.gitkeep
-
 # OS
 .DS_Store
 Thumbs.db
@@ -35,6 +31,7 @@ Desktop.ini
 *.user
 *.suo
 .vscode/mcp.json
+.mcp.json
 
 # Claude Code local settings
 .claude/settings.local.json

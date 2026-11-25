@@ -142,8 +142,6 @@ func (s *Server) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /sources/github/refs", s.handleGitHubRefs)
 	mux.HandleFunc("POST /sources/{id}/delete", s.handleSourceDelete)
 	mux.HandleFunc("POST /sources/{id}/toggle", s.handleSourceToggle)
-	mux.HandleFunc("POST /sources/delete-selected", s.handleDeleteSelected)
-	mux.HandleFunc("POST /sources/disable-selected", s.handleDisableSelected)
 	mux.HandleFunc("POST /sources/sync-selected", s.handleSyncSelected)
 	mux.HandleFunc("POST /sources/{id}/sync/pause", s.handleSyncPause)
 	mux.HandleFunc("POST /sources/{id}/sync/resume", s.handleSyncResume)

@@ -102,6 +102,24 @@ func TestHandleIndexRendersSourcesList(t *testing.T) {
 	}
 }
 
+// The error box shows the message on one line (truncated by CSS) with the
+// same text as its tooltip; the pointer fields must render as text.
+func TestHandleIndexRendersSyncErrorAsTextAndTooltip(t *testing.T) {
+	h := newHarness(t)
+	msg, phase := "dial tcp: lookup dev.azure.com failed", "fetch"
+	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Broken", Type: "documentation",
+		SyncStatus: "failed", SyncError: &msg, SyncErrorPhase: &phase})
+
+	body := bodyString(t, h.get("/sources"))
+	want := "Sync failed during fetch: dial tcp: lookup dev.azure.com failed"
+	if !strings.Contains(body, `title="`+want+`"`) {
+		t.Error("error box tooltip does not carry the full message")
+	}
+	if !strings.Contains(body, ">"+want+"</div>") {
+		t.Error("error box does not show the message")
+	}
+}
+
 func TestHandleIndexSortsSourcesByName(t *testing.T) {
 	h := newHarness(t)
 	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "Zebra"})
@@ -555,37 +573,6 @@ func TestSourceToggleFlipsDisabled(t *testing.T) {
 	}
 }
 
-func TestDisableSelectedMarksMultiple(t *testing.T) {
-	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "A"})
-	mustSave(t, h, models.SourceDefinition{ID: "s2", Name: "B"})
-
-	resp := h.postForm("/sources/disable-selected", url.Values{"ids": {"s1", "s2"}})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	s1, _ := h.sources.Get("s1")
-	s2, _ := h.sources.Get("s2")
-	if !s1.Disabled || !s2.Disabled {
-		t.Errorf("s1.Disabled=%v s2.Disabled=%v, want both true", s1.Disabled, s2.Disabled)
-	}
-}
-
-func TestDeleteSelectedRemovesMultiple(t *testing.T) {
-	h := newHarness(t)
-	mustSave(t, h, models.SourceDefinition{ID: "s1", Name: "A"})
-	mustSave(t, h, models.SourceDefinition{ID: "s2", Name: "B"})
-
-	resp := h.postForm("/sources/delete-selected", url.Values{"ids": {"s1", "s2"}})
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("status = %d", resp.StatusCode)
-	}
-	all, _ := h.sources.ListAll()
-	if len(all) != 0 {
-		t.Errorf("ListAll() = %+v, want empty after bulk delete", all)
-	}
-}
-
 // ── Sync control ─────────────────────────────────────────────────────────────
 
 func TestHandleSyncPauseResumeCancel(t *testing.T) {
@@ -779,6 +766,19 @@ func TestHandleSettingsPageRenders(t *testing.T) {
 	resp := h.get("/settings")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
+	}
+}
+
+// The MCP example uses the common mcpServers format, not VS Code's
+// deprecated top-level servers key or any one client's extra fields.
+func TestHandleSettingsMCPExampleIsGeneric(t *testing.T) {
+	h := newHarness(t)
+	body := bodyString(t, h.get("/settings"))
+	if !strings.Contains(body, "mcpServers: { conduit:") {
+		t.Error("MCP example does not use the mcpServers format")
+	}
+	if strings.Contains(body, "{ servers:") || strings.Contains(body, "tools:") {
+		t.Error("MCP example uses the deprecated servers key or a client-specific field")
 	}
 }
 

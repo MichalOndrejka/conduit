@@ -6,18 +6,15 @@ environment variables or a `.env` file next to where you run `compose` (see
 
 ## Corporate proxy
 
-PowerShell (exports the Windows root CAs to `.\certs`):
+PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/MichalOndrejka/conduit/main/scripts/export-ca-certs.ps1 | iex
-$env:CONDUIT_CERTS_DIR = "$PWD\certs"
 $env:HTTPS_PROXY = "http://proxy.example.com:8080"
 ```
 
-bash (copy your CA `.pem` files into `~/conduit-certs` first):
+bash:
 
 ```bash
-export CONDUIT_CERTS_DIR=~/conduit-certs
 export HTTPS_PROXY=http://proxy.example.com:8080
 ```
 
@@ -29,7 +26,8 @@ the host's Ollama, so give it the proxy too: set `HTTPS_PROXY` as a user
 environment variable (Windows: System Properties → Environment Variables;
 Linux: the Ollama service's environment) and restart Ollama. If the proxy
 intercepts TLS, the host must trust its CA, which a company-managed machine
-usually already does.
+usually already does. Conduit's container trusts the public CAs only, so
+the proxy must not re-sign its traffic with a private CA.
 
 ## Models
 
@@ -54,8 +52,6 @@ Replace `#main` in the compose URL with a tag, e.g. `#v1.2.0`.
 
 Volumes `conduit_conduit_data` and `conduit_qdrant_data` hold sources,
 credentials and the index; models live in the host's Ollama. `down -v` deletes them.
-Set `CONDUIT_SECRET_KEY` ([Configuration](configuration.md#credential-key)) to
-keep credentials readable if the data volume is lost.
 
 ## Troubleshooting
 

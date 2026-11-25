@@ -14,7 +14,7 @@ With [Docker Desktop](https://docs.docker.com/get-docker/) and
 
 ```
 ollama pull nomic-embed-text-v2-moe
-docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up -d
+docker compose -f oci://docker.io/michalondrejka/conduit-compose:latest up -d
 ```
 
 Other ways: [standalone container](docs/install/standalone.md),

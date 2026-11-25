@@ -9,17 +9,16 @@
 # localhost:11434. On Linux, start Ollama with OLLAMA_HOST=0.0.0.0, since
 # there host.docker.internal is the Docker bridge, not loopback.
 #
-# Install straight from GitHub (no clone needed):
-#   docker compose -f https://github.com/MichalOndrejka/conduit.git#main:docker-compose.yml up -d
+# Install without a clone (this file, published to Docker Hub):
+#   docker compose -f oci://docker.io/michalondrejka/conduit-compose:latest up -d
+# Republish after changing it: `docker compose publish michalondrejka/conduit-compose:latest`.
 # Later: `docker compose -p conduit logs conduit`, `... -p conduit down`.
 #
 # From a clone:  docker compose up --build
 #
-# Behind a corporate TLS-interception proxy, export the CA bundle first
-# (scripts/export-ca-certs.ps1 writes ./certs), point CONDUIT_CERTS_DIR at it,
-# and set HTTPS_PROXY (see docs/customization.md). The certs folder is
-# added to — not substituted for — the image's own CA list. Model downloads
-# are made by the host's Ollama, so it needs its own proxy settings.
+# Behind a corporate proxy, set HTTPS_PROXY (see docs/customization.md).
+# Model downloads are made by the host's Ollama, so it needs its own proxy
+# settings.
 
 # Fixed so the stack is the same project whichever folder it's started from,
 # and follow-up commands can use `docker compose -p conduit ...`.
@@ -48,29 +47,30 @@ services:
     restart: unless-stopped
     # Loopback only: Conduit has no authentication, so it must not be
     # reachable from other machines on the network.
+    # Long form: `docker compose publish` fails to decode the short
+    # "127.0.0.1:${CONDUIT_PORT:-8000}:8000" form.
     ports:
-      - "127.0.0.1:${CONDUIT_PORT:-8000}:8000"
+      - target: 8000
+        published: "${CONDUIT_PORT:-8000}"
+        host_ip: 127.0.0.1
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - conduit_data:/data
-      - ${CONDUIT_CERTS_DIR:-./certs}:/certs:ro
     environment:
-      # CA bundle and proxy for Azure DevOps and other source APIs. Service
+      # Proxy for Azure DevOps and other source APIs. Service
       # names and the host are always in NO_PROXY so calls to Qdrant and
       # Ollama skip the proxy.
-      SSL_CERT_DIR: /certs
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       NO_PROXY: localhost,127.0.0.1,qdrant,conduit,host.docker.internal,${NO_PROXY:-}
       QDRANT_URL: http://qdrant:6333
       # Ollama's URL and the models are deliberately not set here: env vars
       # override the Settings page on every start, and Settings owns them.
+
+      # Sync tuning: parallel embedding and preprocessing requests to Ollama.
       EMBEDDING_CONCURRENCY: ${EMBEDDING_CONCURRENCY:-4}
       PREPROCESSING_CONCURRENCY: ${PREPROCESSING_CONCURRENCY:-4}
-      # Optional stable Fernet key for stored credentials; auto-generated in
-      # /data when unset.
-      CONDUIT_SECRET_KEY: ${CONDUIT_SECRET_KEY:-}
     depends_on:
       qdrant:
         condition: service_healthy

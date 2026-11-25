@@ -4,7 +4,10 @@ Conduit exposes its search and memory capabilities as MCP tools that any MCP-com
 
 ## Connecting
 
-The MCP endpoint is `http://localhost:8000/mcp`. For clients that use a JSON config file:
+The MCP endpoint is `http://localhost:8000/mcp`. Add it to your MCP client's
+config file; where that file lives depends on the client, so see its
+documentation (many read `.mcp.json` in the project root). The Settings page
+shows the same entry with the address you opened Conduit on.
 
 ```json
 {
@@ -16,8 +19,6 @@ The MCP endpoint is `http://localhost:8000/mcp`. For clients that use a JSON con
   }
 }
 ```
-
-A `.vscode/mcp.json` is already included in the repo for VS Code users.
 
 ---
 
@@ -172,7 +173,7 @@ source_sync(request: { mode: "trigger", source_ids: [str] })
 ```
 
 - **`status`** lists every source (or just `source_ids`) with `id`, `name`, `type`, `disabled`, `sync_status` (`idle`, `syncing`, `completed`, `failed`), `last_synced_at`, `sync_error` / `sync_error_phase` when the last sync failed, and live `progress` (`phase`, `current`, `total`) while a sync runs. IDs that match no source are listed under `not_found`. Source config is never returned.
-- **`trigger`** starts the given sources syncing in the background (at most 4 at once, same as **Sync selected** in the UI) and returns immediately with one outcome per ID: `started`, `already_syncing`, `disabled`, `not_found` or `live_not_synced`. Poll `status` until `sync_status` is `completed` or `failed`.
+- **`trigger`** starts the given sources syncing in the background (at most 4 at once, same as **Sync All** on the Sources page) and returns immediately with one outcome per ID: `started`, `already_syncing`, `disabled`, `not_found` or `live_not_synced`. Poll `status` until `sync_status` is `completed` or `failed`.
 - Pipeline Runs and Pull Requests sources are never synced: `status` reports them as `live`, and `trigger` answers `live_not_synced`. Their tools read the provider on every call.
 
 ```

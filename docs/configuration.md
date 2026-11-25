@@ -165,7 +165,7 @@ Path to the JSON file where source definitions are persisted. Defaults to `condu
 |----------|--------|
 | `CONDUIT_CONFIG` | Path to `config.json`. Default: `config.json` in the data directory. |
 | `CONDUIT_DATA_DIR` | The data directory, holding `config.json`, `conduit-sources.json`, `credentials.enc.json`, `stats.jsonl` and the embedding and sync state. Default: the per-user folder above, or `/data` in a container (the Docker image sets it to `/data`). |
-| `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Set this explicitly in production so credentials survive container recreation. |
+| `CONDUIT_SECRET_KEY` | Base64url Fernet key for encrypting `credentials.enc.json`. Auto-generated and stored as `.secret_key` inside the data directory if not provided. Only needed when the key must live apart from the data directory, e.g. a secret store or several instances sharing one credentials file. Not passed by `docker-compose.yml`. |
 | `QDRANT_URL` | Overrides `qdrant.url` in config. |
 | `QDRANT_API_KEY` | Overrides `qdrant.api_key`. |
 | `EMBEDDING_MODEL` | Overrides `embedding.model`. |
@@ -216,8 +216,9 @@ the same way, with a `WARNING` in the log.
 ## Credential key
 
 Credentials are encrypted with a key auto-generated as `.secret_key` in the
-data directory. If that directory (or Docker volume) is lost, stored
-credentials can't be decrypted. To pin the key, set `CONDUIT_SECRET_KEY`:
+data directory, next to the credentials, so both survive restarts and
+updates together. To keep the key elsewhere (a secret store, or several
+instances sharing one credentials file), set `CONDUIT_SECRET_KEY`:
 
 ```bash
 openssl rand -base64 32 | tr '+/' '-_'
@@ -233,4 +234,4 @@ Secrets (PATs, tokens, API keys) are managed on the **`/credentials`** page in t
 
 Source config fields (`Pat`, `Token`, `Password`, `ApiKeyValue`) store the credential name. At sync time, Conduit looks up the name in the in-memory cache, decrypts the value, and passes it to the HTTP client — the plaintext secret never appears in `conduit-sources.json` or the config file.
 
-**Cross-system portability**: credential names are stable identifiers. When you export sources and import them on another machine, Conduit will list any referenced-but-missing credentials on the `/credentials` page so you can create them before syncing.
+**Cross-system portability**: credential names are stable identifiers. When you export sources and import them on another machine, the `/credentials` page shows one warning per referenced-but-missing credential, with a **Create** button that opens the add form with that name filled in, so you can create them before syncing.

@@ -351,3 +351,13 @@ func TestHandleSettingsSearchSavesAndValidates(t *testing.T) {
 		t.Errorf("an invalid value changed the limit to %d", h.cfg.Search.PatternScanLimit)
 	}
 }
+
+// Live source types are never embedded, so the preprocessing form must not
+// offer a toggle for them.
+func TestPreprocSourceTypesExcludeLiveTypes(t *testing.T) {
+	for _, st := range preprocSourceTypes {
+		if models.IsLiveType(st.Key) {
+			t.Errorf("preprocessing offers live type %q (%s)", st.Key, st.Label)
+		}
+	}
+}

@@ -85,11 +85,32 @@
         </span>
       </button>
     </aside>
-    <main class="flex-1 p-6 md:p-10 w-full max-w-6xl mx-auto">
+    <main class="flex-1 min-w-0 p-6 md:p-10 w-full max-w-6xl mx-auto">
       {{block "content" .}}{{end}}
     </main>
   </div>
   <script>
+    // Info tooltips open above their icon (.tip::after, input.css). Before
+    // one shows, flip it below when there's no room above, and anchor it
+    // to its right edge when it would run past the window's right side.
+    (function () {
+      function place(tip) {
+        var r = tip.getBoundingClientRect();
+        var pop = getComputedStyle(tip, '::after');
+        var h = parseFloat(pop.height), w = parseFloat(pop.width);
+        var gap = 6, margin = 8;
+        var fitsAbove = r.top - gap - h >= margin;
+        var roomBelow = window.innerHeight - r.bottom;
+        tip.classList.toggle('tip-below', !fitsAbove && roomBelow > r.top);
+        tip.classList.toggle('tip-end', r.left - margin + w > window.innerWidth - margin);
+      }
+      function onEnter(e) {
+        var tip = e.target.closest && e.target.closest('.tip');
+        if (tip) place(tip);
+      }
+      document.addEventListener('mouseover', onEnter);
+      document.addEventListener('focusin', onEnter);
+    })();
     (function () {
       var sun = document.getElementById('icon-sun');
       var moon = document.getElementById('icon-moon');

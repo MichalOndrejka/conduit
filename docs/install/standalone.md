@@ -27,7 +27,6 @@ docker run -d --name conduit --network conduit --restart unless-stopped `
   -p 127.0.0.1:8000:8000 -v conduit_data:/data `
   --add-host=host.docker.internal:host-gateway `
   -e QDRANT_URL=http://qdrant:6333 `
-  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 `
   michalondrejka/conduit:latest
 ```
 
@@ -38,11 +37,10 @@ docker run -d --name conduit --network conduit --restart unless-stopped \
   -p 127.0.0.1:8000:8000 -v conduit_data:/data \
   --add-host=host.docker.internal:host-gateway \
   -e QDRANT_URL=http://qdrant:6333 \
-  -e EMBEDDING_BASE_URL=http://host.docker.internal:11434/v1 \
   michalondrejka/conduit:latest
 ```
 
-Open http://localhost:8000.
+Open http://localhost:8000. Ollama's URL and models are on the Settings page.
 
 ## Stop
 

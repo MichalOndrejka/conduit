@@ -81,6 +81,7 @@ textarea.font-mono {
   letter-spacing: normal;
   cursor: help;
   outline: none;
+  flex-shrink: 0; /* keeps its circle next to truncating text in a flex row */
 }
 .tip::before { content: "i"; font-family: Georgia, serif; }
 .tip::after {
@@ -103,12 +104,16 @@ textarea.font-mono {
   line-height: 1.4;
   text-align: left;
   white-space: normal;
-  opacity: 0;
+  /* display, not opacity: a transparent popup still takes up layout and
+     widens the page when its icon sits near the right edge. */
+  display: none;
   pointer-events: none;
-  transition: opacity 0.12s;
 }
 .tip:hover, .tip:focus-visible { color: #c4b5fd; border-color: #7c3aed; }
-.tip:hover::after, .tip:focus-visible::after { opacity: 1; }
+.tip:hover::after, .tip:focus-visible::after { display: block; }
+/* Set by base.html when the default spot (above, left-aligned) doesn't fit. */
+.tip.tip-below::after { bottom: auto; top: calc(100% + 6px); }
+.tip.tip-end::after { left: auto; right: -0.5rem; }
 
 /*
  * Light theme. Dark is the hardcoded default palette across the templates
