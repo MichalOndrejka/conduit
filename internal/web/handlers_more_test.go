@@ -117,6 +117,28 @@ func TestHandleCredentialsPageListsCreatedAndMissing(t *testing.T) {
 	}
 }
 
+// A stored credential shows how many sources use it; the names are in its
+// tooltip, so a big import doesn't turn the card into a long list.
+func TestHandleCredentialsPageCountsSourcesUsingCredential(t *testing.T) {
+	h := newHarness(t)
+	if err := h.secrets.Create("shared-pat", "value"); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"s1", "s2", "s3"} {
+		mustSave(t, h, models.SourceDefinition{ID: id, Name: "Repo " + id, Config: map[string]string{
+			"Provider": "api", "Password": "shared-pat",
+		}})
+	}
+
+	body := bodyString(t, h.get("/credentials"))
+	if !strings.Contains(body, "Used by 3 sources") {
+		t.Error("credential card does not show the source count")
+	}
+	if !strings.Contains(body, `data-tip="Used by: Repo s1, Repo s2, Repo s3"`) {
+		t.Error("credential card tooltip does not list the sources")
+	}
+}
+
 func TestHandleCredentialsPageGroupsMissingByName(t *testing.T) {
 	h := newHarness(t)
 	for _, id := range []string{"s1", "s2", "s3"} {

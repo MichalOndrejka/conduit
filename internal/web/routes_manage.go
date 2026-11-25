@@ -457,13 +457,16 @@ func (s *Server) renderCredentials(w http.ResponseWriter, errMsg string) {
 	srcs, _ := s.sources.ListAll()
 	type credView struct {
 		models.CredentialInfo
-		UsedBy []string
+		UsedBy     []string
+		UsedByList string // tooltip text: the count is shown, the names are here
 	}
 	views := make([]credView, 0, len(creds))
 	for _, c := range creds {
+		usedBy := s.secrets.SourcesUsing(c.Name, srcs)
 		views = append(views, credView{
 			CredentialInfo: c,
-			UsedBy:         s.secrets.SourcesUsing(c.Name, srcs),
+			UsedBy:         usedBy,
+			UsedByList:     "Used by: " + strings.Join(usedBy, ", "),
 		})
 	}
 	s.render(w, s.credsTmpl, "base", map[string]any{

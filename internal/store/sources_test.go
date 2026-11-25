@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -358,7 +359,7 @@ func TestExportStrippedReplacesManualContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]models.SourceDefinition{}
+	byID := map[string]ExportedSource{}
 	for _, src := range out {
 		byID[src.ID] = src
 	}
@@ -389,6 +390,55 @@ func TestExportStrippedDoesNotMutateStore(t *testing.T) {
 	}
 	if got.Config["Content"] != "secret uploaded text" {
 		t.Errorf("stored Content = %q after ExportStripped, want original content untouched", got.Config["Content"])
+	}
+}
+
+// An export holds only what defines a source: no sync state from this
+// machine's index, and no token owner recorded at sync.
+func TestExportStrippedLeavesOutSyncState(t *testing.T) {
+	s, _ := newStore(t)
+	synced := time.Date(2026, 11, 24, 8, 0, 0, 0, time.UTC)
+	errMsg, phase := "boom", "fetch"
+	mustSave(t, s, models.SourceDefinition{ID: "s1", Type: "code", Name: "Repo", Disabled: true,
+		LastSyncedAt: &synced, SyncStatus: "failed", SyncError: &errMsg, SyncErrorPhase: &phase,
+		Identity: []string{"someone@example.com"}, Config: map[string]string{"Provider": "api"}})
+
+	out, err := s.ExportStripped()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"last_synced_at", "sync_status", "sync_error", "sync_error_phase", "identity"} {
+		if strings.Contains(string(data), `"`+key+`"`) {
+			t.Errorf("export contains %q: %s", key, data)
+		}
+	}
+	got := out[0]
+	if got.ID != "s1" || got.Type != "code" || got.Name != "Repo" || !got.Disabled || got.Config["Provider"] != "api" {
+		t.Errorf("export lost a defining field: %+v", got)
+	}
+}
+
+// A file from an older export still carries sync state; import drops it so
+// the source shows as never synced on this machine.
+func TestImportClearsSyncState(t *testing.T) {
+	s, _ := newStore(t)
+	_, err := s.Import([]byte(`[{"id":"s1","type":"code","name":"Repo",
+		"last_synced_at":"2026-11-24T08:00:00Z","sync_status":"completed",
+		"sync_error":"boom","sync_error_phase":"fetch","identity":["someone@example.com"]}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get("s1")
+	if err != nil || got == nil {
+		t.Fatalf("Get(s1) = %v, %v", got, err)
+	}
+	if got.LastSyncedAt != nil || got.SyncStatus != "idle" || got.SyncError != nil ||
+		got.SyncErrorPhase != nil || got.Identity != nil {
+		t.Errorf("imported source kept sync state: %+v", got)
 	}
 }
 

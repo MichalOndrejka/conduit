@@ -190,8 +190,13 @@ func (s *SourceConfigStore) Import(data []byte) (int, error) {
 			src.ID = uuid.NewString()
 		}
 		existing[src.ID] = true
+		// Sync state describes the exporting machine's index, not this one:
+		// an imported source has never synced here. Older exports carry it.
 		src.SyncStatus = "idle"
 		src.SyncError = nil
+		src.SyncErrorPhase = nil
+		src.LastSyncedAt = nil
+		src.Identity = nil
 		sources = append(sources, src)
 		imported++
 	}
@@ -244,14 +249,25 @@ func (s *SourceConfigStore) ResetAllSyncStatus(status string) error {
 	return s.write("", sources)
 }
 
+// ExportedSource is one source in an export file: only what defines it.
+// Sync state (last sync time, status, errors) and the token owner recorded
+// at sync describe this machine's index, so they are left out.
+type ExportedSource struct {
+	ID       string            `json:"id"`
+	Type     string            `json:"type"`
+	Name     string            `json:"name"`
+	Disabled bool              `json:"disabled"`
+	Config   map[string]string `json:"config"`
+}
+
 // ExportStripped returns sources for download, replacing manual document
 // content with the placeholder so uploads don't leak into exports.
-func (s *SourceConfigStore) ExportStripped() ([]models.SourceDefinition, error) {
+func (s *SourceConfigStore) ExportStripped() ([]ExportedSource, error) {
 	sources, err := s.ListAll()
 	if err != nil {
 		return nil, err
 	}
-	out := make([]models.SourceDefinition, len(sources))
+	out := make([]ExportedSource, len(sources))
 	for i, src := range sources {
 		cfg := make(map[string]string, len(src.Config))
 		for k, v := range src.Config {
@@ -260,8 +276,7 @@ func (s *SourceConfigStore) ExportStripped() ([]models.SourceDefinition, error) 
 		if cfg["Provider"] == "manual" || cfg["DocType"] == "upload" {
 			cfg["Content"] = models.DocumentPlaceholder
 		}
-		src.Config = cfg
-		out[i] = src
+		out[i] = ExportedSource{ID: src.ID, Type: src.Type, Name: src.Name, Disabled: src.Disabled, Config: cfg}
 	}
 	return out, nil
 }

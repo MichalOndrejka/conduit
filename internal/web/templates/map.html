@@ -2,7 +2,7 @@
 {{define "content"}}
 <div class="mb-6">
   <a href="{{.BackHref}}" class="text-sm text-slate-400 hover:text-violet-400">&larr; {{.BackLabel}}</a>
-  <h1 class="text-2xl font-semibold text-white mt-2">Vector map {{template "tip" "Scroll to pan, Ctrl+scroll to zoom."}}</h1>
+  <h1 class="text-2xl font-semibold text-white mt-2">Vector map {{template "tip" "Scroll to pan, Ctrl+scroll to zoom. Click a legend entry to hide or show its points; press and drag across entries to hide or show several at once."}}</h1>
 </div>
 
 <div id="qdrant-warning" class="hidden mb-4 rounded-lg border border-amber-800 bg-amber-950/50 px-3 py-2 text-sm text-amber-300">
@@ -201,13 +201,63 @@ fetch('/api/map-data?kind={{.Kind}}').then(r => {
   const sourceColors = {};
   sourceNames.forEach((name, i) => { sourceColors[name] = colorFor(i, sourceNames.length); });
 
-  const legend = document.getElementById('legend');
+  // One <g> per source, so a legend entry hides or shows its points at once.
+  const ns = 'http://www.w3.org/2000/svg';
+  const groups = {};
   for (const name of sourceNames) {
-    const el = document.createElement('span');
-    el.className = 'inline-flex items-center gap-1.5 text-slate-300';
-    el.innerHTML = `<span style="background:${sourceColors[name]}" class="inline-block h-2.5 w-2.5 rounded-full shrink-0"></span><span class="truncate">${escapeHtml(name)}</span>`;
+    groups[name] = document.createElementNS(ns, 'g');
+    svg.appendChild(groups[name]);
+  }
+
+  // Legend: click an entry to hide its source's points, again to show them.
+  // Press and drag across entries to apply the same to each one passed over:
+  // the first entry's new state (hidden or shown) is what the drag paints.
+  const legend = document.getElementById('legend');
+  legend.style.userSelect = 'none';
+  const hidden = new Set();
+  function setHidden(name, hide) {
+    if (hide) hidden.add(name); else hidden.delete(name);
+    groups[name].style.display = hide ? 'none' : '';
+    const item = legend.querySelector(`[data-source="${CSS.escape(name)}"]`);
+    item.style.opacity = hide ? '0.4' : '';
+    item.querySelector('[data-label]').style.textDecoration = hide ? 'line-through' : '';
+    item.setAttribute('aria-pressed', String(!hide));
+  }
+  for (const name of sourceNames) {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.dataset.source = name;
+    el.title = name;
+    el.setAttribute('aria-pressed', 'true');
+    el.className = 'inline-flex items-center gap-1.5 text-left text-slate-300 hover:text-white cursor-pointer min-w-0';
+    el.innerHTML = `<span style="background:${sourceColors[name]}" class="inline-block h-2.5 w-2.5 rounded-full shrink-0"></span><span data-label class="truncate">${escapeHtml(name)}</span>`;
     legend.appendChild(el);
   }
+  let paint = null; // while dragging: true hides, false shows
+  const itemAt = (x, y) => document.elementFromPoint(x, y)?.closest('#legend [data-source]');
+  legend.addEventListener('pointerdown', e => {
+    const item = e.target.closest('[data-source]');
+    if (!item || e.button !== 0) return;
+    e.preventDefault(); // no text selection or focus ring while dragging
+    paint = !hidden.has(item.dataset.source);
+    setHidden(item.dataset.source, paint);
+  });
+  // pointermove + elementFromPoint rather than pointerenter: touch input
+  // keeps sending events to the entry the drag started on.
+  document.addEventListener('pointermove', e => {
+    if (paint === null) return;
+    const item = itemAt(e.clientX, e.clientY);
+    if (item && hidden.has(item.dataset.source) !== paint) setHidden(item.dataset.source, paint);
+  });
+  const endPaint = () => { paint = null; };
+  document.addEventListener('pointerup', endPaint);
+  document.addEventListener('pointercancel', endPaint);
+  // Keyboard: Enter/Space on a focused entry toggles it (pointer clicks are
+  // handled on pointerdown above, so ignore their click events).
+  legend.addEventListener('click', e => {
+    const item = e.target.closest('[data-source]');
+    if (item && e.detail === 0) setHidden(item.dataset.source, !hidden.has(item.dataset.source));
+  });
 
   // Fit the plot to the available width at zoom 1; zooming scales up from there.
   baseW = plotWrap.clientWidth;
@@ -215,7 +265,6 @@ fetch('/api/map-data?kind={{.Kind}}').then(r => {
   svg.setAttribute('width', baseW * zoom);
   svg.setAttribute('height', baseH * zoom);
 
-  const ns = 'http://www.w3.org/2000/svg';
   for (const p of pts) {
     const c = document.createElementNS(ns, 'circle');
     c.setAttribute('cx', sx(p.x)); c.setAttribute('cy', sy(p.y)); c.setAttribute('r', 4);
@@ -240,7 +289,7 @@ fetch('/api/map-data?kind={{.Kind}}').then(r => {
       c.removeAttribute('stroke-width');
       tooltip.classList.add('hidden');
     });
-    svg.appendChild(c);
+    groups[p.source].appendChild(c);
   }
 });
 </script>
