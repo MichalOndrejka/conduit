@@ -186,43 +186,35 @@ func TestRenameCredentialReferencesNoopWhenNoMatch(t *testing.T) {
 
 // ── Import ───────────────────────────────────────────────────────────────────
 
-func TestImportFlatArray(t *testing.T) {
+func TestImportAddsSourcesAndClearsSyncState(t *testing.T) {
 	s, _ := newStore(t)
-	data := []byte(`[{"id":"s1","name":"Imported","type":"backlog"}]`)
-
-	n, err := s.Import(data)
+	synced := time.Date(2026, 11, 24, 8, 0, 0, 0, time.UTC)
+	errMsg, phase := "boom", "fetch"
+	n, err := s.Import([]models.SourceDefinition{
+		{ID: "s1", Type: "code", Name: "Repo", Config: map[string]string{"Provider": "api"},
+			LastSyncedAt: &synced, SyncStatus: "completed", SyncError: &errMsg, SyncErrorPhase: &phase,
+			Identity: []string{"someone@example.com"}},
+		{Type: "documentation", Name: "No ID"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 1 {
-		t.Errorf("Import() imported %d, want 1", n)
+	if n != 2 {
+		t.Errorf("Import() imported %d, want 2", n)
 	}
 	got, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || got == nil {
+		t.Fatalf("Get(s1) = %v, %v", got, err)
 	}
-	if got == nil || got.Name != "Imported" {
-		t.Fatalf("Get(s1) = %+v, want the imported source", got)
+	if got.LastSyncedAt != nil || got.SyncStatus != "idle" || got.SyncError != nil ||
+		got.SyncErrorPhase != nil || got.Identity != nil {
+		t.Errorf("imported source kept sync state: %+v", got)
 	}
-}
-
-func TestImportWrapperFormat(t *testing.T) {
-	s, _ := newStore(t)
-	data := []byte(`{"sources":[{"id":"s1","name":"Wrapped"}]}`)
-
-	n, err := s.Import(data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 1 {
-		t.Errorf("Import() imported %d, want 1", n)
-	}
-	got, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got == nil || got.Name != "Wrapped" {
-		t.Fatalf("Get(s1) = %+v, want the wrapped source", got)
+	all, _ := s.ListAll()
+	for _, src := range all {
+		if src.Name == "No ID" && src.ID == "" {
+			t.Error("a source imported without an ID did not get one")
+		}
 	}
 }
 
@@ -230,7 +222,7 @@ func TestImportReassignsCollidingIDs(t *testing.T) {
 	s, _ := newStore(t)
 	mustSave(t, s, models.SourceDefinition{ID: "s1", Name: "Existing"})
 
-	n, err := s.Import([]byte(`[{"id":"s1","name":"Incoming"}]`))
+	n, err := s.Import([]models.SourceDefinition{{ID: "s1", Name: "Incoming"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,38 +251,6 @@ func TestImportReassignsCollidingIDs(t *testing.T) {
 	}
 	if incoming == nil || incoming.ID == "s1" || incoming.ID == "" {
 		t.Errorf("incoming source should have a fresh non-empty ID, got %+v", incoming)
-	}
-}
-
-func TestImportResetsSyncState(t *testing.T) {
-	s, _ := newStore(t)
-	errMsg := "boom"
-	data, err := json.Marshal(models.SourceDefinition{
-		ID: "s1", Name: "Imported", SyncStatus: "failed", SyncError: &errMsg,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := s.Import([]byte("[" + string(data) + "]")); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.Get("s1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.SyncStatus != "idle" {
-		t.Errorf("SyncStatus = %q, want reset to idle", got.SyncStatus)
-	}
-	if got.SyncError != nil {
-		t.Errorf("SyncError = %v, want cleared", got.SyncError)
-	}
-}
-
-func TestImportInvalidJSONErrors(t *testing.T) {
-	s, _ := newStore(t)
-	if _, err := s.Import([]byte(`not json at all`)); err == nil {
-		t.Fatal("expected error for malformed import data")
 	}
 }
 
@@ -419,26 +379,6 @@ func TestExportStrippedLeavesOutSyncState(t *testing.T) {
 	got := out[0]
 	if got.ID != "s1" || got.Type != "code" || got.Name != "Repo" || !got.Disabled || got.Config["Provider"] != "api" {
 		t.Errorf("export lost a defining field: %+v", got)
-	}
-}
-
-// A file from an older export still carries sync state; import drops it so
-// the source shows as never synced on this machine.
-func TestImportClearsSyncState(t *testing.T) {
-	s, _ := newStore(t)
-	_, err := s.Import([]byte(`[{"id":"s1","type":"code","name":"Repo",
-		"last_synced_at":"2026-11-24T08:00:00Z","sync_status":"completed",
-		"sync_error":"boom","sync_error_phase":"fetch","identity":["someone@example.com"]}]`))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.Get("s1")
-	if err != nil || got == nil {
-		t.Fatalf("Get(s1) = %v, %v", got, err)
-	}
-	if got.LastSyncedAt != nil || got.SyncStatus != "idle" || got.SyncError != nil ||
-		got.SyncErrorPhase != nil || got.Identity != nil {
-		t.Errorf("imported source kept sync state: %+v", got)
 	}
 }
 

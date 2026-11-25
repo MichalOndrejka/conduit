@@ -615,16 +615,16 @@ func TestHandleExportReturnsStrippedSources(t *testing.T) {
 	}
 }
 
-func TestHandleImportMergesSources(t *testing.T) {
-	h := newHarness(t)
-
+// uploadImport posts data to /import as the uploaded export file.
+func uploadImport(t *testing.T, h *harness, data string) *http.Response {
+	t.Helper()
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, err := mw.CreateFormFile("file", "conduit-sources.json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	fw.Write([]byte(`[{"id":"imported-1","name":"Imported Source"}]`))
+	fw.Write([]byte(data))
 	mw.Close()
 
 	req, err := http.NewRequest(http.MethodPost, h.url("/import"), &buf)
@@ -636,6 +636,13 @@ func TestHandleImportMergesSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return resp
+}
+
+func TestHandleImportMergesSources(t *testing.T) {
+	h := newHarness(t)
+	resp := uploadImport(t, h, `[{"id":"imported-1","type":"documentation","name":"Imported Source",
+		"config":{"Provider":"api","Url":"https://dev.azure.com/org/proj/_apis/wiki/wikis/w/pages"}}]`)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (re-rendered index)", resp.StatusCode)
 	}
@@ -648,6 +655,46 @@ func TestHandleImportMergesSources(t *testing.T) {
 	}
 	if got == nil || got.Name != "Imported Source" {
 		t.Errorf("Get(imported-1) = %+v, want the imported source", got)
+	}
+}
+
+// What one Conduit exports, another imports: export and strict import agree.
+func TestHandleExportThenImportRoundTrips(t *testing.T) {
+	from := newHarness(t)
+	mustSave(t, from, models.SourceDefinition{ID: "s1", Type: "code", Name: "Repo", Disabled: true,
+		Config: map[string]string{"Provider": "api", "Platform": "ado", "AdoOrg": "org", "AdoProject": "proj",
+			"Url": "https://dev.azure.com/org/proj/_apis/git/repositories/repo/items", "Token": "ado-pat"}})
+	mustSave(t, from, models.SourceDefinition{ID: "s2", Type: "backlog", Name: "Issues",
+		Config: map[string]string{"Provider": "github", "GitHubUrl": "https://github.com",
+			"GitHubOwner": "o", "GitHubRepo": "r"}})
+	exported := bodyString(t, from.get("/export"))
+
+	to := newHarness(t)
+	if body := bodyString(t, uploadImport(t, to, exported)); !strings.Contains(body, "Imported 2 source") {
+		t.Fatalf("re-import of an export failed: %s", exported)
+	}
+	got, err := to.sources.Get("s1")
+	if err != nil || got == nil || !got.Disabled || got.Config["AdoOrg"] != "org" {
+		t.Errorf("Get(s1) = %+v, %v; want the exported source", got, err)
+	}
+}
+
+// A file with any invalid source imports nothing and says why.
+func TestHandleImportRejectsInvalidFileWithoutImporting(t *testing.T) {
+	h := newHarness(t)
+	resp := uploadImport(t, h, `[{"id":"ok","type":"documentation","name":"Fine",
+		"config":{"Provider":"api","Url":"https://dev.azure.com/org/proj/_apis/wiki/wikis/w/pages"}},
+		{"id":"old","type":"test-case","name":"Old cases","config":{"Provider":"api"}}]`)
+	body := bodyString(t, resp)
+	if !strings.Contains(body, "Import failed, nothing was imported") || !strings.Contains(body, "Old cases") {
+		t.Error("expected an import error naming the bad source")
+	}
+	all, err := h.sources.ListAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 0 {
+		t.Errorf("ListAll() = %+v, want nothing imported", all)
 	}
 }
 

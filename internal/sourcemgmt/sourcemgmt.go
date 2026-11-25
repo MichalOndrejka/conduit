@@ -172,7 +172,8 @@ func Validate(srcType string, cfg map[string]string) string {
 			}
 		}
 	case "", "custom":
-		// Legacy configs (imported, Python era) run as API sources unchecked.
+		// Legacy configs already stored (Python era, before Provider) run as
+		// API sources unchecked. Import no longer accepts them (ParseImport).
 	default:
 		return fmt.Sprintf("Provider must be one of %s.", strings.Join(Providers, ", "))
 	}

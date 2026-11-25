@@ -7,6 +7,7 @@ package store
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"sync"
 
@@ -148,23 +149,11 @@ func (s *SourceConfigStore) RenameCredentialReferences(oldName, newName string) 
 	return s.write("", sources)
 }
 
-// Import parses an exported sources document (flat [...] array or the
-// {"sources": [...]} wrapper, with camelCase keys normalized like readFile),
-// assigns a fresh ID to any source whose ID collides with an existing one,
-// resets sync state, and saves. Returns the number imported. Mirrors
-// import_sources in app/web/routes.py.
-func (s *SourceConfigStore) Import(data []byte) (int, error) {
-	var rawList []json.RawMessage
-	if err := json.Unmarshal(data, &rawList); err != nil {
-		var wrapper struct {
-			Sources []json.RawMessage `json:"sources"`
-		}
-		if err2 := json.Unmarshal(data, &wrapper); err2 != nil {
-			return 0, err // surface the original (array) parse error
-		}
-		rawList = wrapper.Sources
-	}
-
+// Import adds sources read from an export file (already checked by
+// sourcemgmt.ParseImport), assigning a fresh ID to any source whose ID is
+// empty or collides with an existing one, resetting sync state, and saving
+// them all at once. Returns the number imported.
+func (s *SourceConfigStore) Import(incoming []models.SourceDefinition) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sources, err := s.read()
@@ -177,21 +166,17 @@ func (s *SourceConfigStore) Import(data []byte) (int, error) {
 	}
 
 	imported := 0
-	for _, raw := range rawList {
-		var src models.SourceDefinition
-		if err := json.Unmarshal(normaliseKeys(raw), &src); err != nil {
-			return imported, err
-		}
+	for _, src := range incoming {
+		src.Config = maps.Clone(src.Config)
 		if src.Config == nil {
 			src.Config = map[string]string{}
 		}
-		migrateType(&src)
 		if src.ID == "" || existing[src.ID] {
 			src.ID = uuid.NewString()
 		}
 		existing[src.ID] = true
 		// Sync state describes the exporting machine's index, not this one:
-		// an imported source has never synced here. Older exports carry it.
+		// an imported source has never synced here.
 		src.SyncStatus = "idle"
 		src.SyncError = nil
 		src.SyncErrorPhase = nil

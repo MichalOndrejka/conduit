@@ -424,9 +424,9 @@ func (s *Server) handleExport(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, stripped)
 }
 
-// handleImport accepts an uploaded conduit-sources.json and merges it into the
-// store, re-rendering the Sources page with a result banner. Port of
-// import_sources in app/web/routes.py.
+// handleImport reads an uploaded export file strictly (sourcemgmt.ParseImport)
+// and adds its sources, re-rendering the Sources page with a result banner.
+// Any invalid source fails the whole file: nothing is imported.
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
@@ -440,7 +440,12 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		s.renderIndex(w, r, "", "Import failed: "+err.Error())
 		return
 	}
-	count, err := s.sources.Import(data)
+	parsed, err := sourcemgmt.ParseImport(data)
+	if err != nil {
+		s.renderIndex(w, r, "", "Import failed, nothing was imported: "+err.Error())
+		return
+	}
+	count, err := s.sources.Import(parsed)
 	if err != nil {
 		s.renderIndex(w, r, "", "Import failed: "+err.Error())
 		return
