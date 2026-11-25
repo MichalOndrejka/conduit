@@ -37,9 +37,11 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 		f.ServeMux.ServeHTTP(w, r)
 	}))
 	// Every branch and tag resolves to a commit "SHA" named like the ref
-	// itself, so tests address tarballs by ref name.
+	// itself, so tests address tarballs by ref name. Like GitHub, only the
+	// fully qualified refs/heads/ and refs/tags/ forms resolve every ref:
+	// tags/NAME fails for an annotated tag with 422 "No commit found".
 	for _, kind := range []string{"heads", "tags"} {
-		prefix := "/api/v3/repos/acme/app/commits/" + kind + "/"
+		prefix := "/api/v3/repos/acme/app/commits/refs/" + kind + "/"
 		f.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
 			if r.Header.Get("Accept") != "application/vnd.github.sha" {
 				http.Error(w, "want the sha media type", http.StatusBadRequest)
@@ -48,6 +50,10 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			_, _ = w.Write([]byte(strings.TrimPrefix(r.URL.Path, prefix)))
 		})
 	}
+	f.HandleFunc("/api/v3/repos/acme/app/commits/tags/", func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"No commit found for SHA: `+strings.TrimPrefix(r.URL.Path, "/api/v3/repos/acme/app/commits/")+`"}`,
+			http.StatusUnprocessableEntity)
+	})
 	// Workflow runs list their artifacts; tests that don't care get none.
 	f.HandleFunc("/api/v3/repos/acme/app/actions/runs/", func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/artifacts") {

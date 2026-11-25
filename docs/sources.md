@@ -111,7 +111,7 @@ Every embed happens before the first write. A cancelled or failed embed leaves t
 Some fetches are skipped too, but only where the input is **content-addressed**, never on a timestamp or revision number:
 
 - **Commit history**: a commit already indexed, listed from the same refs under the same settings and the same Conduit build, isn't diffed again: its message and diff can't change under its SHA. Ticking another branch or tag refetches only the commits whose refs it changes.
-- **Repository files**: each branch or tag is resolved to its commit first (`…/refs?filter=heads/{name}&peelTags=true` on Azure DevOps, `/commits/heads/{name}` on GitHub), and that exact commit's tree is downloaded. No archive is downloaded at all only when the last sync completed from the same commits, settings and build, and every document it left is still fully indexed.
+- **Repository files**: each branch or tag is resolved to its commit first (`…/refs?filter=heads/{name}` or `filter=tags/{name}` with `peelTags=true` on Azure DevOps, `/commits/refs/heads/{name}` or `/commits/refs/tags/{name}` on GitHub, so annotated tags resolve to the commit they point to), and that exact commit's tree is downloaded. No archive is downloaded at all only when the last sync completed from the same commits, settings and build, and every document it left is still fully indexed.
 - **Work items, issues and their comments** are always fetched in full, since it isn't guaranteed that every kind of edit (a comment edited or deleted, for one) moves an item's revision or update time. Unchanged ones still aren't embedded again.
 
 A new Conduit build refetches skipped inputs once, since it may render them differently. Documents that come out the same aren't embedded again.

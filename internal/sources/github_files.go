@@ -187,11 +187,14 @@ func (g *GitHubSource) fetchFiles(ctx context.Context, progress ProgressCallback
 	return docs, nil
 }
 
-// refCommit resolves ref to the SHA of the commit it points to now.
+// refCommit resolves ref to the SHA of the commit it points to now. The ref
+// is fully qualified: GitHub answers 422 "No commit found" for an annotated
+// tag given as tags/NAME, while refs/tags/NAME resolves lightweight and
+// annotated tags alike.
 func (g *GitHubSource) refCommit(ctx context.Context, ref gitRef) (string, error) {
-	full := "heads/" + ref.Name
+	full := "refs/heads/" + ref.Name
 	if ref.Tag {
-		full = "tags/" + ref.Name
+		full = "refs/tags/" + ref.Name
 	}
 	data, _, err := g.get(ctx, g.repoAPI()+"/commits/"+refPath(full), "application/vnd.github.sha")
 	if err != nil {

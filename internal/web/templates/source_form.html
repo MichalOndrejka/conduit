@@ -805,16 +805,16 @@ function savedRefs(picker, kind) {
   return refValue(picker, kind).value.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 }
 
-// syncRefValues writes the ticked tiles into the hidden inputs and the tab
-// counts, so a submit, a preview or another lookup always sends them.
-function syncRefValues(picker) {
-  ['branches', 'tags'].forEach(function (kind) {
-    var tiles = picker.querySelectorAll('.ref-grid[data-kind="' + kind + '"] .ref-tile');
-    var ticked = Array.prototype.slice.call(tiles).filter(function (el) { return el.checked; })
-      .map(function (el) { return el.value; });
-    refValue(picker, kind).value = ticked.join(',');
-    picker.querySelector('.ref-count[data-kind="' + kind + '"]').textContent = ticked.length ? ' (' + ticked.length + ')' : '';
-  });
+// syncRefValues writes one kind's ticked tiles into its hidden input and tab
+// count, so a submit, a preview or another lookup always sends them. Only
+// that kind: the other kind's tiles may not be drawn yet (the page draws
+// branches, then tags), and syncing it would wipe its saved selection.
+function syncRefValues(picker, kind) {
+  var tiles = picker.querySelectorAll('.ref-grid[data-kind="' + kind + '"] .ref-tile');
+  var ticked = Array.prototype.slice.call(tiles).filter(function (el) { return el.checked; })
+    .map(function (el) { return el.value; });
+  refValue(picker, kind).value = ticked.join(',');
+  picker.querySelector('.ref-count[data-kind="' + kind + '"]').textContent = ticked.length ? ' (' + ticked.length + ')' : '';
 }
 
 function addRefTile(picker, kind, name, checked, isDefault) {
@@ -825,7 +825,7 @@ function addRefTile(picker, kind, name, checked, isDefault) {
   input.className = 'ref-tile peer sr-only';
   input.value = name;
   input.checked = !!checked;
-  input.addEventListener('change', function () { syncRefValues(picker); });
+  input.addEventListener('change', function () { syncRefValues(picker, kind); });
   var div = document.createElement('div');
   div.className = 'flex items-center justify-between gap-2 text-sm font-medium font-mono text-white break-all group-hover:text-violet-300 peer-checked:text-violet-300';
   var span = document.createElement('span');
@@ -850,7 +850,7 @@ function renderRefs(picker, kind, names, defaultBranch) {
   picker.querySelector('.ref-grid[data-kind="' + kind + '"]').innerHTML = '';
   names.forEach(function (n) { addRefTile(picker, kind, n, selected.indexOf(n) >= 0, kind === 'branches' && n === defaultBranch); });
   selected.forEach(function (n) { if (names.indexOf(n) < 0) addRefTile(picker, kind, n, true, false); });
-  syncRefValues(picker);
+  syncRefValues(picker, kind);
   filterRefTiles(picker);
 }
 
